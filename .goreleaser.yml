@@ -1,0 +1,71 @@
+version: 2
+
+# xref: https://goreleaser.com/errors/multiple-tokens/
+force_token: github
+
+# xref: https://goreleaser.com/customization/hooks/
+before:
+  hooks:
+    - go mod download
+
+# xref: https://goreleaser.com/customization/env/
+env:
+  - CGO_ENABLED=0
+
+# xref: https://goreleaser.com/customization/build/
+builds:
+  - <<: &cmd_defaults
+      main: ./cmd/{{ .ProjectName }}
+      ldflags:
+        - -s -w -X main.VERSION={{ .Version }}
+    id: cli
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+  - <<: *cmd_defaults
+    id: cli-windows
+    goos:
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+# xref: https://goreleaser.com/customization/archive/
+archives:
+  - name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    id: unix-cli
+    ids:
+      - cli
+    formats: ['tar.gz']
+    files:
+      - LICENSE
+  - name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    id: windows-cli
+    ids:
+      - cli-windows
+    formats: ['zip']
+    files:
+      - LICENSE
+
+# xref: https://goreleaser.com/customization/checksum/
+checksum:
+  algorithm: sha256
+
+# xref: https://goreleaser.com/customization/source/
+source:
+  enabled: true
+  name_template: '{{ .ProjectName }}_{{ .Version }}_source_code'
+
+# xref: https://goreleaser.com/customization/sbom/
+sboms:
+  - id: source
+    artifacts: source
+    documents:
+      - "{{ .ProjectName }}_{{ .Version }}_sbom.spdx.json"
+
+# xref: https://goreleaser.com/customization/changelog/
+changelog:
+  use: github-native
