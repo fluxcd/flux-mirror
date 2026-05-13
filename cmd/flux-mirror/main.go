@@ -4,7 +4,11 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -41,11 +45,27 @@ func init() {
 	rootCmd.SetOut(os.Stdout)
 }
 
+// exitCoder lets a command return a non-default exit code (e.g. sync's
+// distinct 0/1/2 mapping for clean / failure / drift-only).
+type exitCoder interface{ ExitCode() int }
+
 func main() {
-	if err := rootCmd.Execute(); err != nil {
-		if err.Error() != "" {
-			rootCmd.PrintErrf("✗ %v\n", err)
-		}
-		os.Exit(1)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	err := rootCmd.ExecuteContext(ctx)
+	if err == nil {
+		return
 	}
+	var ec exitCoder
+	if errors.As(err, &ec) {
+		if msg := err.Error(); msg != "" {
+			rootCmd.PrintErrf("✗ %v\n", msg)
+		}
+		os.Exit(ec.ExitCode())
+	}
+	if err.Error() != "" {
+		rootCmd.PrintErrf("✗ %v\n", err)
+	}
+	os.Exit(1)
 }

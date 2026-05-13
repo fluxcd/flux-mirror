@@ -1,0 +1,254 @@
+// Copyright 2026 The Flux Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package config
+
+import (
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"regexp"
+	"strings"
+
+	"github.com/Masterminds/semver/v3"
+	"github.com/google/go-containerregistry/pkg/name"
+	"sigs.k8s.io/yaml"
+)
+
+const (
+	APIVersion = "mirror.fluxcd.io/v1alpha1"
+	Kind       = "Config"
+
+	SortBySemver       = "semver"
+	SortByAlphabetical = "alphabetical"
+	SortByNumerical    = "numerical"
+
+	defaultChartVersion = "*"
+	defaultLimit        = 1
+)
+
+// Config is the top-level flux-mirror declarative config.
+type Config struct {
+	APIVersion string          `json:"apiVersion"`
+	Kind       string          `json:"kind"`
+	Charts     []ChartEntry    `json:"charts,omitempty"`
+	Artifacts  []ArtifactEntry `json:"artifacts,omitempty"`
+}
+
+// ChartEntry mirrors a Helm chart from an HTTP/S or OCI source to an OCI destination.
+type ChartEntry struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+	Name        string `json:"name"`
+	Version     string `json:"version,omitempty"`
+	Limit       *int   `json:"limit,omitempty"`
+	Overwrite   bool   `json:"overwrite,omitempty"`
+}
+
+// EffectiveVersion returns the version constraint with the documented default applied.
+func (c ChartEntry) EffectiveVersion() string {
+	if strings.TrimSpace(c.Version) == "" {
+		return defaultChartVersion
+	}
+	return c.Version
+}
+
+// EffectiveLimit returns the limit with the documented default applied.
+func (c ChartEntry) EffectiveLimit() int {
+	if c.Limit == nil {
+		return defaultLimit
+	}
+	return *c.Limit
+}
+
+// ArtifactEntry mirrors an OCI artifact (image, OCI chart, signed manifest, etc.).
+type ArtifactEntry struct {
+	Source           string   `json:"source"`
+	Destination      string   `json:"destination"`
+	Selector         Selector `json:"selector"`
+	Overwrite        bool     `json:"overwrite,omitempty"`
+	IncludeReferrers bool     `json:"includeReferrers,omitempty"`
+}
+
+// Selector is the four-step tag selection pipeline:
+// regex → semver → sort → top-N.
+type Selector struct {
+	Regex  *RegexFilter `json:"regex,omitempty"`
+	Semver string       `json:"semver,omitempty"`
+	SortBy string       `json:"sortBy,omitempty"`
+	Limit  *int         `json:"limit,omitempty"`
+}
+
+// EffectiveSortBy returns the sort strategy with the documented default applied.
+func (s Selector) EffectiveSortBy() string {
+	if strings.TrimSpace(s.SortBy) == "" {
+		return SortBySemver
+	}
+	return s.SortBy
+}
+
+// EffectiveLimit returns the cap with the documented default applied.
+// Returns 0 to mean "no cap" (unlimited).
+func (s Selector) EffectiveLimit() int {
+	if s.Limit == nil {
+		return defaultLimit
+	}
+	return *s.Limit
+}
+
+// RegexFilter applies a Go regexp prefilter to tags, optionally extracting a
+// substring via a named capture group for use as the sort/semver value.
+type RegexFilter struct {
+	Pattern string `json:"pattern"`
+	Extract string `json:"extract,omitempty"`
+}
+
+// Decode reads YAML from r into a Config without validating it.
+func Decode(r io.Reader) (*Config, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	return &cfg, nil
+}
+
+// Load reads and validates a config file from disk.
+func Load(path string) (*Config, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open config: %w", err)
+	}
+	defer f.Close()
+	cfg, err := Decode(f)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// Validate checks the config for semantic correctness. It does not perform any
+// network operations; it only verifies that values parse and that required
+// fields are present.
+func (c *Config) Validate() error {
+	if c.APIVersion != APIVersion {
+		return fmt.Errorf("apiVersion must be %q, got %q", APIVersion, c.APIVersion)
+	}
+	if c.Kind != Kind {
+		return fmt.Errorf("kind must be %q, got %q", Kind, c.Kind)
+	}
+	if len(c.Charts) == 0 && len(c.Artifacts) == 0 {
+		return fmt.Errorf("config has no entries: at least one of 'charts' or 'artifacts' must be set")
+	}
+	for i, ch := range c.Charts {
+		if err := ch.validate(); err != nil {
+			return fmt.Errorf("charts[%d]: %w", i, err)
+		}
+	}
+	for i, a := range c.Artifacts {
+		if err := a.validate(); err != nil {
+			return fmt.Errorf("artifacts[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func (c ChartEntry) validate() error {
+	if strings.TrimSpace(c.Name) == "" {
+		return fmt.Errorf("name is required")
+	}
+	if err := validateChartSource(c.Source); err != nil {
+		return fmt.Errorf("source: %w", err)
+	}
+	if err := validateOCIURL(c.Destination); err != nil {
+		return fmt.Errorf("destination: %w", err)
+	}
+	if _, err := semver.NewConstraint(c.EffectiveVersion()); err != nil {
+		return fmt.Errorf("version %q is not a valid semver constraint: %w", c.EffectiveVersion(), err)
+	}
+	if c.Limit != nil && *c.Limit < 0 {
+		return fmt.Errorf("limit must be >= 0 (0 = unlimited)")
+	}
+	return nil
+}
+
+func (a ArtifactEntry) validate() error {
+	if _, err := name.NewRepository(a.Source); err != nil {
+		return fmt.Errorf("source %q is not a valid OCI repository: %w", a.Source, err)
+	}
+	if _, err := name.NewRepository(a.Destination); err != nil {
+		return fmt.Errorf("destination %q is not a valid OCI repository: %w", a.Destination, err)
+	}
+	if err := a.Selector.validate(); err != nil {
+		return fmt.Errorf("selector: %w", err)
+	}
+	return nil
+}
+
+func (s Selector) validate() error {
+	if s.Regex != nil {
+		if strings.TrimSpace(s.Regex.Pattern) == "" {
+			return fmt.Errorf("regex.pattern is required when regex is set")
+		}
+		if _, err := regexp.Compile(s.Regex.Pattern); err != nil {
+			return fmt.Errorf("regex.pattern %q does not compile: %w", s.Regex.Pattern, err)
+		}
+	}
+	if strings.TrimSpace(s.Semver) != "" {
+		if _, err := semver.NewConstraint(s.Semver); err != nil {
+			return fmt.Errorf("semver %q is not a valid constraint: %w", s.Semver, err)
+		}
+	}
+	switch s.EffectiveSortBy() {
+	case SortBySemver, SortByAlphabetical, SortByNumerical:
+	default:
+		return fmt.Errorf("sortBy %q must be one of: semver, alphabetical, numerical", s.SortBy)
+	}
+	if s.Limit != nil && *s.Limit < 0 {
+		return fmt.Errorf("limit must be >= 0 (0 = unlimited)")
+	}
+	return nil
+}
+
+func validateChartSource(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return fmt.Errorf("source is required")
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	switch u.Scheme {
+	case "http", "https", "oci":
+	default:
+		return fmt.Errorf("scheme %q must be one of: http, https, oci", u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("URL %q is missing a host", s)
+	}
+	return nil
+}
+
+func validateOCIURL(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return fmt.Errorf("destination is required")
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "oci" {
+		return fmt.Errorf("scheme must be oci://, got %q", u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("URL %q is missing a host", s)
+	}
+	return nil
+}

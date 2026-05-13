@@ -1,0 +1,24 @@
+apiVersion: mirror.fluxcd.io/v1alpha1
+kind: Config
+artifacts:
+  - source: ghcr.io/stefanprodan/charts/podinfo
+    destination: localhost:5050/charts/podinfo
+    selector:
+      semver: ">=6.9.0"
+      limit: 5
+    includeReferrers: true
+  - source: ghcr.io/stefanprodan/manifests/podinfo
+    destination: localhost:5050/manifests/podinfo
+    selector:
+      regex:
+        pattern: "^latest$"
+      sortBy: alphabetical
+      limit: 3
+    includeReferrers: true
+    overwrite: true
+  - source: docker.io/stefanprodan/podinfo
+    destination: localhost:5050/podinfo
+    selector:
+      semver: "6.x"
+      limit: 2
+    includeReferrers: true
