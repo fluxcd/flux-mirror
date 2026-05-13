@@ -54,6 +54,29 @@ build: tidy fmt vet ## Build CLI binary.
 docker-build: ## Build docker image with the CLI.
 	docker build -t $(DOCKER_IMAGE) --build-arg VERSION=$(VERSION_DEV) -f Dockerfile .
 
+# Local OCI registry for end-to-end smoke tests.
+REGISTRY_NAME ?= flux-mirror-registry
+REGISTRY_PORT ?= 5050
+
+.PHONY: registry-up
+registry-up: ## Start a local OCI registry (registry:3) on host port 5050.
+	@if docker ps -a --format '{{.Names}}' | grep -qx $(REGISTRY_NAME); then \
+		echo "Registry $(REGISTRY_NAME) already exists; restarting clean."; \
+		docker rm -f $(REGISTRY_NAME) >/dev/null; \
+	fi
+	docker run -d --rm --name $(REGISTRY_NAME) -p $(REGISTRY_PORT):5000 \
+		-e REGISTRY_STORAGE_DELETE_ENABLED=true registry:3
+	@echo "Registry up at localhost:$(REGISTRY_PORT)"
+
+.PHONY: registry-down
+registry-down: ## Stop the local OCI registry.
+	@if docker ps -a --format '{{.Names}}' | grep -qx $(REGISTRY_NAME); then \
+		docker rm -f $(REGISTRY_NAME) >/dev/null; \
+		echo "Registry $(REGISTRY_NAME) stopped."; \
+	else \
+		echo "Registry $(REGISTRY_NAME) is not running."; \
+	fi
+
 .PHONY: install
 install: test lint build ## Test, lint, build and copy the binary to GOBIN.
 	cp bin/flux-mirror $(GOBIN)
