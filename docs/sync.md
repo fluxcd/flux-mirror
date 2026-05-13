@@ -121,17 +121,60 @@ but drift detection still produces `2`.
 
 ## Examples
 
-### Mirror latest releases of an OCI artifact
+### Mirror a Flux artifact with its image
+
+A typical `Kustomization` workload pulls two artifacts: the manifests from an
+`OCIRepository`, and the container images those manifests reference (often
+rewritten via `spec.images` patches). A single config can mirror both so the
+destination registry is self-sufficient.
 
 ```yaml
 # config.yaml
 apiVersion: mirror.fluxcd.io/v1alpha1
 kind: Config
 artifacts:
+  - source: ghcr.io/stefanprodan/manifests/podinfo
+    destination: localhost:5050/manifests/podinfo
+    selector:
+      regex:
+        pattern: "^latest$"
+      sortBy: alphabetical
+      limit: 1
+    includeReferrers: true
+    overwrite: true
   - source: ghcr.io/stefanprodan/podinfo
     destination: localhost:5050/podinfo
     selector:
-      semver: ">=6.9.0"
+      semver: "*"
+      limit: 1
+    includeReferrers: true
+```
+
+```bash
+flux-mirror sync -c config.yaml
+```
+
+### Mirror a Helm chart with its image
+
+A typical `HelmRelease` workload pulls two artifacts: the chart from a Helm
+repository, and the container image referenced by the chart's `values.yaml`.
+A single config can mirror both so the destination registry is self-sufficient.
+
+```yaml
+# config.yaml
+apiVersion: mirror.fluxcd.io/v1alpha1
+kind: Config
+charts:
+  - source: https://kubernetes-sigs.github.io/external-dns/
+    destination: oci://localhost:5050/charts
+    name: external-dns
+    version: ">=1.15.0"
+    limit: 3
+artifacts:
+  - source: registry.k8s.io/external-dns/external-dns
+    destination: localhost:5050/external-dns
+    selector:
+      semver: ">=0.15.0"
       limit: 3
     includeReferrers: true
 ```
@@ -139,6 +182,11 @@ artifacts:
 ```bash
 flux-mirror sync -c config.yaml
 ```
+
+The chart lands at `localhost:5050/charts/external-dns:<version>` (the chart
+name is appended to the destination); the image lands at
+`localhost:5050/external-dns:<version>`. Override the image reference in the
+consuming `HelmRelease.spec.values` to point at the mirror.
 
 ### Preview without writing
 

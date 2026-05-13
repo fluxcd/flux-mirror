@@ -1,7 +1,8 @@
 # Flux Mirror Config Specification
 
-The Flux Mirror CLI is configured via a YAML file that declares which OCI artifacts
-to mirror, where from, and where to.
+`flux-mirror` is configured via a YAML file listing the OCI artifacts and Helm charts to
+mirror. Sources can be OCI registries or HTTP/S Helm repositories; destinations are OCI
+registries.
 
 ## File format
 
@@ -14,11 +15,14 @@ to `FLUX_MIRROR_CONFIG`. The flag wins when both are set.
 
 ## Top-level fields
 
-| Field        | Type   | Default | Description                                                     |
-|--------------|--------|---------|-----------------------------------------------------------------|
-| `apiVersion` | string |         | Must be `mirror.fluxcd.io/v1alpha1`.                            |
-| `kind`       | string |         | Must be `Config`.                                               |
-| `artifacts`  | list   | `[]`    | OCI artifacts (images, OCI Helm charts, Flux artifacts, etc.).  |
+| Field        | Type   | Default | Description                                                                                 |
+|--------------|--------|---------|---------------------------------------------------------------------------------------------|
+| `apiVersion` | string |         | Must be `mirror.fluxcd.io/v1alpha1`.                                                        |
+| `kind`       | string |         | Must be `Config`.                                                                           |
+| `artifacts`  | list   | `[]`    | OCI artifacts (images, OCI Helm charts, Flux artifacts, etc.). See [Artifacts](#artifacts). |
+| `charts`     | list   | `[]`    | Helm charts from HTTP/S or OCI Helm repositories. See [Charts](#charts).                    |
+
+At least one of `artifacts` or `charts` must be set.
 
 ## Artifacts
 
@@ -118,6 +122,81 @@ The regex matches tags like `main-a1b2c3d-1731420000` and uses `1731420000`
 as the sort key. The 5 most recent builds by timestamp are mirrored; tags
 that don't match the pattern are dropped.
 
+## Charts
+
+The `charts` section mirrors Helm charts from HTTP/S Helm repositories or OCI
+Helm registries to an OCI destination. For each selected version, the chart
+`.tgz` is downloaded from the source and re-published to the destination as
+a Helm OCI artifact (config blob with the chart metadata, layer with the
+tarball bytes).
+
+Charts use the same outcomes (`copied`, `skipped`, `overwritten`, `drifted`)
+and the same `--overwrite` / `--dry-run` semantics as artifacts. Drift is
+detected by comparing the source tarball's content digest against the
+destination chart-layer digest, so re-runs against an unchanged source are
+idempotent.
+
+### Fields
+
+| Field         | Type   | Default | Description                                                                                                                     |
+|---------------|--------|---------|---------------------------------------------------------------------------------------------------------------------------------|
+| `name`        | string |         | Chart name within the source repository.                                                                                        |
+| `source`      | string |         | Source repository URL. Scheme must be `http`, `https`, or `oci`.                                                                |
+| `destination` | string |         | Destination OCI base URL. Scheme must be `oci`. The chart `name` is appended automatically.                                     |
+| `version`     | string | `*`     | Semver constraint (e.g. `>=2.7.0 <3.0.0`). Versions outside the range are dropped.                                              |
+| `limit`       | int    | `1`     | Number of versions to mirror, taken from the highest matching versions. `0` disables the cap.                                   |
+| `overwrite`   | bool   | `false` | If true, replace the destination tag when its chart-layer digest differs from the source. See [Overwrite](#overwrite-behavior). |
+
+### Source scheme
+
+- `http` / `https`: classic Helm repository serving `index.yaml` plus chart
+  tarballs. Assumed public; no auth fields in the YAML.
+- `oci`: OCI Helm registry. Each chart name is its own OCI repository at
+  `<source>/<name>`. Tags whose OCI manifest is not a Helm chart (cosign
+  signatures, SBOMs, other artifacts in the same repository) are filtered
+  out before the semver constraint is applied. Authentication uses the
+  ambient Docker config.
+
+### Destination convention
+
+`destination` is the parent path; the chart `name` is appended automatically.
+For `destination: oci://quay.io/example/charts` and `name: nginx`, versions
+land at `quay.io/example/charts/nginx:<version>`.
+
+OCI tags do not accept `+`, so semver build metadata (e.g. `1.2.3+meta`) is
+encoded as `_` in the destination tag (`1.2.3_meta`). Listing and comparison
+treat both forms as the same version.
+
+### Examples
+
+#### HTTP Helm repository
+
+```yaml
+charts:
+  - name: nginx
+    source: https://charts.example.com
+    destination: oci://quay.io/example/charts
+    version: ">=15.0.0 <16.0.0"
+    limit: 5
+```
+
+The 5 highest `15.x` versions of the `nginx` chart are mirrored to
+`quay.io/example/charts/nginx:<version>`.
+
+#### OCI Helm registry
+
+```yaml
+charts:
+  - name: my-app
+    source: oci://ghcr.io/example/charts
+    destination: oci://quay.io/example/charts
+    version: ">=1.0.0"
+    limit: 3
+```
+
+The source repo is resolved to `ghcr.io/example/charts/my-app`; the
+destination is `quay.io/example/charts/my-app:<version>`.
+
 ## Overwrite behavior
 
 The Flux Mirror CLI does not overwrite existing destination tags by default. This
@@ -169,6 +248,13 @@ artifacts:
         extract: '$ts'
       sortBy: numerical
       limit: 5
+
+charts:
+  - name: nginx
+    source: https://charts.example.com
+    destination: oci://quay.io/example/charts
+    version: ">=15.0.0 <16.0.0"
+    limit: 5
 ```
 
 ## Defaults
@@ -179,6 +265,9 @@ artifacts:
 | `artifacts[].selector.limit`   | `1`      |
 | `artifacts[].overwrite`        | `false`  |
 | `artifacts[].includeReferrers` | `false`  |
+| `charts[].version`             | `*`      |
+| `charts[].limit`               | `1`      |
+| `charts[].overwrite`           | `false`  |
 
 `limit: 0` disables the cap and mirrors every matching tag. Use with care:
 unrestricted mirrors can consume significant bandwidth and storage, and may

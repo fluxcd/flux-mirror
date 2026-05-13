@@ -1,0 +1,25 @@
+apiVersion: mirror.fluxcd.io/v1alpha1
+kind: Config
+charts:
+  - name: metrics-server
+    source: https://kubernetes-sigs.github.io/metrics-server/
+    destination: oci://localhost:5050/charts
+    version: ">=3.12.0"
+    limit: 1
+  - name: external-dns
+    source: https://kubernetes-sigs.github.io/external-dns/
+    destination: oci://localhost:5050/charts
+    version: ">=1.15.0"
+    limit: 1
+artifacts:
+  - source: registry.k8s.io/metrics-server/metrics-server
+    destination: localhost:5050/metrics-server
+    selector:
+      semver: ">=0.7.0"
+      limit: 1
+    includeReferrers: true
+  - source: registry.k8s.io/external-dns/external-dns
+    destination: localhost:5050/external-dns
+    selector:
+      semver: ">=0.15.0"
+      limit: 1
