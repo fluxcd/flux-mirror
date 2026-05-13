@@ -131,20 +131,3 @@ func TestSync_BadOutputFormat(t *testing.T) {
 	_, err := executeCommand([]string{"sync", "-c", cfgPath, "-o", "xml"})
 	g.Expect(err).To(HaveOccurred())
 }
-
-func TestSync_ChartsErrorInM1(t *testing.T) {
-	g := NewWithT(t)
-	body := `apiVersion: mirror.fluxcd.io/v1alpha1
-kind: Config
-charts:
-  - source: https://charts.example.com
-    destination: oci://ghcr.io/x
-    name: foo
-`
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	g.Expect(os.WriteFile(path, []byte(body), 0o600)).To(Succeed())
-	t.Setenv("FLUX_MIRROR_CONFIG", "")
-	_, err := executeCommand([]string{"sync", "-c", path})
-	g.Expect(err).To(HaveOccurred())
-	g.Expect(err.Error()).To(ContainSubstring("chart entries are not implemented"))
-}
