@@ -6,10 +6,12 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"os"
 	"time"
 
+	craneLogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/spf13/cobra"
 
 	"github.com/fluxcd/flux-mirror/internal/artifacts"
@@ -108,14 +110,17 @@ func syncCmdRun(cmd *cobra.Command, _ []string) error {
 		rootArgs.timeout = syncDefaultTimeout
 	}
 
-	// Verbose enables our own progress logs (entry started, mirroring tag,
-	// entry summary, etc.). When off, the run is silent on stderr and the
-	// only stdout signal in text mode is the start/end markers below.
-	// Crane's package-global loggers are intentionally left at their default
-	// (discard) — its line shape is too low-level to surface to prettyPrints.
+	// Verbose enables our own structured logs (sync started, entry started,
+	// mirroring tag, tag done, entry summary, sync complete) AND wires
+	// crane's package-global Progress / Warn loggers to stderr in the same
+	// log.LstdFlags shape — that's where the per-blob digest lines, fallback
+	// tag updates, and registry rejections come from. Without verbose, both
+	// streams are silent and only the spinner + per-job lines show.
 	var logger *slog.Logger
 	if syncArgs.verbose {
 		logger = slog.New(newPlainHandler(cmd.ErrOrStderr(), slog.LevelDebug))
+		craneLogs.Progress = log.New(cmd.ErrOrStderr(), "", log.LstdFlags)
+		craneLogs.Warn = log.New(cmd.ErrOrStderr(), "", log.LstdFlags)
 	} else {
 		logger = slog.New(slog.DiscardHandler)
 	}
