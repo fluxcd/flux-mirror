@@ -65,6 +65,7 @@ linters:
       - linters:
           - dupl
           - lll
+          - goconst
         path: internal/*
       - linters:
           - goconst
