@@ -65,16 +65,12 @@ func TestDefaults(t *testing.T) {
 	g.Expect(s.EffectiveSortBy()).To(Equal(SortBySemver))
 	g.Expect(s.EffectiveLimit()).To(Equal(1))
 
-	zero := 0
-	s.Limit = &zero
+	s.Limit = new(0)
 	g.Expect(s.EffectiveLimit()).To(Equal(0)) // 0 = unlimited (selector enforces this)
 }
 
 func TestValidate_Table(t *testing.T) {
-	zero := 0
 	negOne := -1
-	five := 5
-
 	tests := []struct {
 		name   string
 		cfg    Config
@@ -86,7 +82,7 @@ func TestValidate_Table(t *testing.T) {
 				APIVersion: APIVersion, Kind: Kind,
 				Artifacts: []ArtifactEntry{{
 					Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
-					Selector: Selector{Semver: ">=1.0.0", Limit: &five},
+					Selector: Selector{Semver: ">=1.0.0", Limit: new(5)},
 				}},
 			},
 		},
@@ -96,7 +92,7 @@ func TestValidate_Table(t *testing.T) {
 				APIVersion: APIVersion, Kind: Kind,
 				Charts: []ChartEntry{{
 					Source: "https://charts.example.com", Destination: "oci://ghcr.io/x",
-					Name: "foo", Limit: &zero,
+					Name: "foo", Limit: new(0),
 				}},
 			},
 		},
