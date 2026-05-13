@@ -52,8 +52,6 @@ func newRunner() *sync.Runner {
 	}
 }
 
-func intp(i int) *int { return &i }
-
 func TestMirror_CopiesSelectedTags(t *testing.T) {
 	g := NewWithT(t)
 	src := repo("a-src")
@@ -67,7 +65,7 @@ func TestMirror_CopiesSelectedTags(t *testing.T) {
 	entry := config.ArtifactEntry{
 		Source:      src,
 		Destination: dst,
-		Selector:    config.Selector{Limit: intp(2)},
+		Selector:    config.Selector{Limit: new(2)},
 	}
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
 		New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
@@ -91,7 +89,7 @@ func TestMirror_SkipsEqual(t *testing.T) {
 	c := oci.NewClient(oci.Insecure())
 	entry := config.ArtifactEntry{
 		Source: src, Destination: dst,
-		Selector: config.Selector{Limit: intp(1)},
+		Selector: config.Selector{Limit: new(1)},
 	}
 	mirror := New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	runner := newRunner()
@@ -114,7 +112,7 @@ func TestMirror_DriftWithoutOverwrite(t *testing.T) {
 	c := oci.NewClient(oci.Insecure())
 	entry := config.ArtifactEntry{
 		Source: src, Destination: dst,
-		Selector: config.Selector{Limit: intp(1)},
+		Selector: config.Selector{Limit: new(1)},
 	}
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
 		New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
@@ -136,7 +134,7 @@ func TestMirror_DriftWithOverwrite(t *testing.T) {
 	c := oci.NewClient(oci.Insecure())
 	entry := config.ArtifactEntry{
 		Source: src, Destination: dst,
-		Selector: config.Selector{Limit: intp(1)},
+		Selector: config.Selector{Limit: new(1)},
 	}
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
 		New(c, entry, Options{Overwrite: true, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
@@ -171,7 +169,7 @@ func TestMirror_IncludeReferrers(t *testing.T) {
 	c := oci.NewClient(oci.Insecure())
 	entry := config.ArtifactEntry{
 		Source: src, Destination: dst,
-		Selector:         config.Selector{Limit: intp(1)},
+		Selector:         config.Selector{Limit: new(1)},
 		IncludeReferrers: true,
 	}
 	res, err := newRunner().Run(ctx, []sync.EntryMirror{
@@ -216,7 +214,7 @@ func TestMirror_DryRun(t *testing.T) {
 	c := oci.NewClient(oci.Insecure())
 	entry := config.ArtifactEntry{
 		Source: src, Destination: dst,
-		Selector: config.Selector{Limit: intp(1)},
+		Selector: config.Selector{Limit: new(1)},
 	}
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
 		New(c, entry, Options{DryRun: true, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),

@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fluxcd/flux-mirror/internal/artifacts"
+	"github.com/fluxcd/flux-mirror/internal/charts"
 	"github.com/fluxcd/flux-mirror/internal/config"
 	"github.com/fluxcd/flux-mirror/internal/flags"
 	"github.com/fluxcd/flux-mirror/internal/oci"
@@ -138,7 +139,7 @@ func syncCmdRun(cmd *cobra.Command, _ []string) error {
 		Logger:        logger,
 	}
 
-	mirrors := make([]sync.EntryMirror, 0, len(cfg.Artifacts))
+	mirrors := make([]sync.EntryMirror, 0, len(cfg.Artifacts)+len(cfg.Charts))
 	for _, e := range cfg.Artifacts {
 		mirrors = append(mirrors, artifacts.New(client, e, artifacts.Options{
 			Overwrite: syncArgs.overwrite,
@@ -148,8 +149,17 @@ func syncCmdRun(cmd *cobra.Command, _ []string) error {
 			Logger:    logger,
 		}))
 	}
-	if len(cfg.Charts) > 0 {
-		return fmt.Errorf("chart entries are not implemented yet")
+	for _, e := range cfg.Charts {
+		m, err := charts.New(client, e, charts.Options{
+			Overwrite: syncArgs.overwrite,
+			DryRun:    syncArgs.dryRun,
+			Verbose:   syncArgs.verbose,
+			Logger:    logger,
+		})
+		if err != nil {
+			return fmt.Errorf("build chart entry %s/%s: %w", e.Source, e.Name, err)
+		}
+		mirrors = append(mirrors, m)
 	}
 
 	// Pretty-print mode = text output AND no --verbose. In that case we
