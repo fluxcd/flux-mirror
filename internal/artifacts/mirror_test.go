@@ -73,7 +73,7 @@ func TestMirror_CopiesSelectedTags(t *testing.T) {
 		New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
 	})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeCopied]).To(Equal(2))
+	g.Expect(res.Entries[0].Outcomes[sync.OutcomeCopied]).To(HaveLen(2))
 	g.Expect(res.HasFailures()).To(BeFalse())
 
 	tags, err := c.ListTags(context.Background(), dst)
@@ -100,8 +100,8 @@ func TestMirror_SkipsEqual(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 	res2, err := runner.Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res2.Entries[0].Outcomes[sync.OutcomeSkipped]).To(Equal(1))
-	g.Expect(res2.Entries[0].Outcomes[sync.OutcomeCopied]).To(Equal(0))
+	g.Expect(res2.Entries[0].Outcomes[sync.OutcomeSkipped]).To(HaveLen(1))
+	g.Expect(res2.Entries[0].Outcomes[sync.OutcomeCopied]).To(BeEmpty())
 }
 
 func TestMirror_DriftWithoutOverwrite(t *testing.T) {
@@ -120,8 +120,7 @@ func TestMirror_DriftWithoutOverwrite(t *testing.T) {
 		New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
 	})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeDrifted]).To(Equal(1))
-	g.Expect(res.Entries[0].Drifted).To(Equal([]string{"1.0.0"}))
+	g.Expect(res.Entries[0].Outcomes[sync.OutcomeDrifted]).To(Equal([]string{"1.0.0"}))
 	g.Expect(res.HasDrift()).To(BeTrue())
 	g.Expect(res.HasFailures()).To(BeFalse())
 	g.Expect(res.ExitCode()).To(Equal(2))
@@ -143,7 +142,7 @@ func TestMirror_DriftWithOverwrite(t *testing.T) {
 		New(c, entry, Options{Overwrite: true, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
 	})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeOverwritten]).To(Equal(1))
+	g.Expect(res.Entries[0].Outcomes[sync.OutcomeOverwritten]).To(HaveLen(1))
 
 	dig, err := crane.Digest(dst+":1.0.0", crane.Insecure)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -180,7 +179,7 @@ func TestMirror_IncludeReferrers(t *testing.T) {
 	})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res.HasFailures()).To(BeFalse())
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeCopied]).To(Equal(1))
+	g.Expect(res.Entries[0].Outcomes[sync.OutcomeCopied]).To(HaveLen(1))
 
 	dstRepo, err := name.NewRepository(dst, name.Insecure)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -204,8 +203,8 @@ func TestMirror_IncludeReferrers(t *testing.T) {
 		New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
 	})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res2.Entries[0].Outcomes[sync.OutcomeSkipped]).To(Equal(1))
-	g.Expect(res2.Entries[0].Outcomes[sync.OutcomeCopied]).To(Equal(0))
+	g.Expect(res2.Entries[0].Outcomes[sync.OutcomeSkipped]).To(HaveLen(1))
+	g.Expect(res2.Entries[0].Outcomes[sync.OutcomeCopied]).To(BeEmpty())
 }
 
 func TestMirror_DryRun(t *testing.T) {
@@ -223,8 +222,8 @@ func TestMirror_DryRun(t *testing.T) {
 		New(c, entry, Options{DryRun: true, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
 	})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeWouldCopy]).To(Equal(1))
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeCopied]).To(Equal(0))
+	g.Expect(res.Entries[0].Outcomes[sync.OutcomeWouldCopy]).To(HaveLen(1))
+	g.Expect(res.Entries[0].Outcomes[sync.OutcomeCopied]).To(BeEmpty())
 
 	_, err = c.ListTags(context.Background(), dst)
 	g.Expect(err).To(HaveOccurred()) // 404 — repo was never created

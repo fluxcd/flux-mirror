@@ -109,6 +109,7 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 
 		plan.Jobs = append(plan.Jobs, sync.Job{
 			ID:  tag,
+			Dst: job.dst,
 			Run: func(jctx context.Context) (sync.Outcome, error) { return m.runTag(jctx, job) },
 		})
 	}

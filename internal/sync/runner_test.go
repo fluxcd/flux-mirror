@@ -63,10 +63,10 @@ func TestRunner_AggregatesOutcomes(t *testing.T) {
 	res, err := r.Run(context.Background(), mirrors)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res.Entries).To(HaveLen(2))
-	g.Expect(res.Entries[0].Outcomes[OutcomeCopied]).To(Equal(1))
-	g.Expect(res.Entries[0].Outcomes[OutcomeSkipped]).To(Equal(1))
-	g.Expect(res.Entries[1].Outcomes[OutcomeOverwritten]).To(Equal(1))
-	g.Expect(res.Entries[1].Drifted).To(Equal([]string{"v2"}))
+	g.Expect(res.Entries[0].Outcomes[OutcomeCopied]).To(HaveLen(1))
+	g.Expect(res.Entries[0].Outcomes[OutcomeSkipped]).To(HaveLen(1))
+	g.Expect(res.Entries[1].Outcomes[OutcomeOverwritten]).To(HaveLen(1))
+	g.Expect(res.Entries[1].Outcomes[OutcomeDrifted]).To(Equal([]string{"v2"}))
 	g.Expect(res.HasDrift()).To(BeTrue())
 	g.Expect(res.HasFailures()).To(BeFalse())
 	g.Expect(res.ExitCode()).To(Equal(2))
@@ -83,7 +83,7 @@ func TestRunner_FailureExitCode(t *testing.T) {
 	g.Expect(res.HasFailures()).To(BeTrue())
 	g.Expect(res.ExitCode()).To(Equal(1)) // failures take precedence over anything else
 	g.Expect(res.Entries[0].Failures).To(HaveLen(1))
-	g.Expect(res.Entries[0].Outcomes[OutcomeCopied]).To(Equal(1))
+	g.Expect(res.Entries[0].Outcomes[OutcomeCopied]).To(HaveLen(1))
 }
 
 func TestRunner_PlanError(t *testing.T) {
@@ -118,7 +118,7 @@ func TestRunner_RetriesUntilSuccess(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(attempts.Load()).To(Equal(int32(3)))
 	g.Expect(res.HasFailures()).To(BeFalse())
-	g.Expect(res.Entries[0].Outcomes[OutcomeCopied]).To(Equal(1))
+	g.Expect(res.Entries[0].Outcomes[OutcomeCopied]).To(HaveLen(1))
 }
 
 func TestRunner_RetriesExhausted(t *testing.T) {
@@ -192,7 +192,7 @@ func TestRunner_ConcurrencyBounded(t *testing.T) {
 		&stubMirror{name: "fan-out", jobs: jobs},
 	})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res.Entries[0].Outcomes[OutcomeCopied]).To(Equal(10))
+	g.Expect(res.Entries[0].Outcomes[OutcomeCopied]).To(HaveLen(10))
 	g.Expect(maxObserved.Load()).To(BeNumerically("<=", int32(2)),
 		"errgroup.SetLimit should cap concurrent jobs")
 }
@@ -226,13 +226,15 @@ func TestResult_Render(t *testing.T) {
 	res := Result{
 		Entries: []EntryResult{
 			{
-				Name:     "ghcr.io/foo/bar",
-				Outcomes: map[Outcome]int{OutcomeCopied: 2, OutcomeSkipped: 1},
-				Drifted:  []string{"v3"},
+				Name: "ghcr.io/foo/bar",
+				Outcomes: map[Outcome][]string{
+					OutcomeCopied:  {"v1", "v2"},
+					OutcomeSkipped: {"v4"},
+				},
 			},
 		},
 	}
-	res.Entries[0].Outcomes[OutcomeDrifted] = 1
+	res.Entries[0].Outcomes[OutcomeDrifted] = []string{"v3"}
 
 	for _, format := range []string{"yaml", "json"} {
 		t.Run(format, func(t *testing.T) {
@@ -254,13 +256,18 @@ func TestResult_LogSummary(t *testing.T) {
 	res := Result{
 		Entries: []EntryResult{
 			{
-				Name:     "ghcr.io/foo/bar",
-				Outcomes: map[Outcome]int{OutcomeCopied: 2, OutcomeSkipped: 1, OutcomeDrifted: 1},
-				Drifted:  []string{"v3"},
+				Name: "ghcr.io/foo/bar",
+				Outcomes: map[Outcome][]string{
+					OutcomeCopied:  {"v1", "v2"},
+					OutcomeSkipped: {"v4"},
+					OutcomeDrifted: {"v3"},
+				},
 			},
 			{
-				Name:     "ghcr.io/foo/baz",
-				Outcomes: map[Outcome]int{OutcomeWouldCopy: 4},
+				Name: "ghcr.io/foo/baz",
+				Outcomes: map[Outcome][]string{
+					OutcomeWouldCopy: {"v1", "v2", "v3", "v4"},
+				},
 				Failures: []TagFailure{{Tag: "v1", Err: "boom"}},
 			},
 		},

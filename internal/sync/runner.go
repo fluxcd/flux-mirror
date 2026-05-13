@@ -22,13 +22,33 @@ type Runner struct {
 	Retries       int
 	PerJobTimeout time.Duration
 	Logger        *slog.Logger
+
+	// OnJobFinished, if non-nil, is invoked once per job after Run returns.
+	// It runs from the worker goroutine (so concurrent invocations are
+	// possible — the callback must be safe to call from multiple goroutines)
+	// before the per-tag outcome is recorded, but after retries and outcome
+	// validation. Used by the cmd layer to drive a progress spinner.
+	OnJobFinished func(entry, id, dst string, oc Outcome, err error)
+
+	// OnEntryFinished, if non-nil, is invoked from the main goroutine once
+	// per entry, after all of that entry's jobs have completed (or its plan
+	// failed). Used by the cmd layer to tick the "N/M done" counter on the
+	// spinner suffix.
+	OnEntryFinished func(entry string)
+
+	// OnPlanError, if non-nil, is invoked when an entry fails at Plan time
+	// (e.g. ListTags rejected). It runs from the main goroutine so does not
+	// require external synchronization. Plan failures don't reach
+	// OnJobFinished — there are no jobs to report on — so this is the only
+	// path the cmd layer has to surface them in real time.
+	OnPlanError func(entry string, err error)
 }
 
 // Run executes all mirrors and returns a Result aggregating their outcomes.
 // It does not return an error for ordinary mirror failures — those are
 // recorded in the Result. An error is returned only for setup-time failures
 // or context cancellation.
-func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (Result, error) {
+func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (res Result, err error) {
 	if r.Concurrency <= 0 {
 		r.Concurrency = 4
 	}
@@ -48,7 +68,11 @@ func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (Result, error)
 		"retries", r.Retries,
 		"timeout", r.PerJobTimeout)
 
-	res := Result{}
+	start := time.Now()
+	defer func() {
+		res.Duration = time.Since(start).Round(time.Millisecond)
+	}()
+
 	for _, m := range mirrors {
 		if err := ctx.Err(); err != nil {
 			return res, err
@@ -62,8 +86,14 @@ func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (Result, error)
 			entryRes.Failures = append(entryRes.Failures, TagFailure{
 				Tag: "<plan>", Err: err.Error(),
 			})
+			if r.OnPlanError != nil {
+				r.OnPlanError(entryRes.Name, err)
+			}
 		}
 		res.Entries = append(res.Entries, entryRes)
+		if r.OnEntryFinished != nil {
+			r.OnEntryFinished(entryRes.Name)
+		}
 	}
 	return res, nil
 }
@@ -71,11 +101,11 @@ func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (Result, error)
 func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (EntryResult, error) {
 	plan, err := m.Plan(ctx)
 	if err != nil {
-		return EntryResult{Name: plan.Name, Outcomes: map[Outcome]int{}}, err
+		return EntryResult{Name: plan.Name, Outcomes: map[Outcome][]string{}}, err
 	}
 	out := EntryResult{
 		Name:     plan.Name,
-		Outcomes: map[Outcome]int{},
+		Outcomes: map[Outcome][]string{},
 	}
 	r.Logger.Info("entry started", "name", plan.Name, "jobs", len(plan.Jobs))
 	defer func(start time.Time) {
@@ -97,10 +127,7 @@ func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (EntryResult, erro
 			out.Failures = append(out.Failures, TagFailure{Tag: tag, Err: err.Error()})
 			return
 		}
-		out.Outcomes[oc]++
-		if oc == OutcomeDrifted {
-			out.Drifted = append(out.Drifted, tag)
-		}
+		out.Outcomes[oc] = append(out.Outcomes[oc], tag)
 	}
 
 	for _, job := range plan.Jobs {
@@ -111,6 +138,9 @@ func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (EntryResult, erro
 			oc, err := r.runJob(gctx, job)
 			if err == nil && !oc.Valid() {
 				err = fmt.Errorf("entry returned invalid outcome %q", string(oc))
+			}
+			if r.OnJobFinished != nil {
+				r.OnJobFinished(plan.Name, job.ID, job.Dst, oc, err)
 			}
 			record(job.ID, oc, err)
 			// Never propagate the error — failures are recorded per-tag and

@@ -33,6 +33,10 @@ type Job struct {
 	// ID is a short identifier for the work unit (tag name for artifacts,
 	// chart version for charts in M2). Used in summary output and log lines.
 	ID string
+	// Dst is the fully-qualified destination reference (`repo:tag`) for
+	// this unit of work. Surfaced verbatim to OnJobFinished so the cmd
+	// layer can display the "-> dst" line without re-deriving it.
+	Dst string
 	// Run performs the work. Must be safe to invoke multiple times — the
 	// runner may retry on transient errors. crane.Copy is content-addressed
 	// and idempotent at the blob level, so retrying a partially-copied tag

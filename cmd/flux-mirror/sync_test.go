@@ -69,7 +69,8 @@ func TestSync_ConfigViaEnv(t *testing.T) {
 
 	out, err := executeCommand([]string{"sync", "--insecure", "-o", "json"})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(out).To(ContainSubstring(`"copied": 1`))
+	g.Expect(out).To(ContainSubstring(`"copied": [`))
+	g.Expect(out).To(ContainSubstring(`"1.0.0"`))
 }
 
 func TestSync_FlagOverridesEnv(t *testing.T) {
@@ -84,7 +85,7 @@ func TestSync_FlagOverridesEnv(t *testing.T) {
 	// Env points at a bogus path — the flag must win.
 	t.Setenv("FLUX_MIRROR_CONFIG", "/nonexistent/path.yaml")
 
-	out, err := executeCommand([]string{"sync", "-c", cfgPath, "--insecure"})
+	out, err := executeCommand([]string{"sync", "-c", cfgPath, "--insecure", "--verbose"})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(out).To(ContainSubstring(src))
 }
@@ -121,7 +122,7 @@ func TestSync_DryRun(t *testing.T) {
 
 	out, err := executeCommand([]string{"sync", "-c", cfgPath, "--insecure", "--dry-run", "-o", "yaml"})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(out).To(ContainSubstring("would-copy: 1"))
+	g.Expect(out).To(MatchRegexp(`would-copy:\s*\n\s*- 1\.0\.0`))
 }
 
 func TestSync_BadOutputFormat(t *testing.T) {

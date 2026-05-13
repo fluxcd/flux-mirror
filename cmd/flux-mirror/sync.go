@@ -5,12 +5,11 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"io"
 	"log/slog"
 	"os"
 	"time"
 
-	craneLogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/spf13/cobra"
 
 	"github.com/fluxcd/flux-mirror/internal/artifacts"
@@ -61,6 +60,7 @@ type syncFlags struct {
 	dryRun      bool
 	verbose     bool
 	insecure    bool
+	noProgress  bool
 }
 
 var syncArgs = syncFlags{
@@ -74,18 +74,19 @@ func init() {
 		"Path to the YAML config file (or set "+envConfig+").")
 	syncCmd.Flags().VarP(&syncArgs.output, "output", "o", syncArgs.output.Description())
 	syncCmd.Flags().IntVar(&syncArgs.concurrency, "concurrency", syncArgs.concurrency,
-		"Maximum number of tag jobs to run in parallel within an entry "+
-			"(per-entry, not global; entries are processed sequentially).")
+		"Maximum number of copy operations to run in parallel per job")
 	syncCmd.Flags().IntVar(&syncArgs.retries, "retries", syncArgs.retries,
-		"Maximum number of retry attempts per tag job (within --timeout budget).")
+		"Maximum number of retry attempts per job within timeout budget.")
 	syncCmd.Flags().BoolVar(&syncArgs.overwrite, "overwrite", false,
-		"Force overwrite=true on every entry, regardless of per-entry config.")
+		"Force overwrite when the destination artifact digest has drifted")
 	syncCmd.Flags().BoolVar(&syncArgs.dryRun, "dry-run", false,
 		"Run the plan and comparison pipeline without performing any writes.")
 	syncCmd.Flags().BoolVar(&syncArgs.verbose, "verbose", false,
-		"Log selector debug output (excluded tags with reasons).")
+		"Log all operations and the involved digests as they are performed.")
 	syncCmd.Flags().BoolVar(&syncArgs.insecure, "insecure", false,
 		"Allow plaintext HTTP and skip TLS verification (test/dev only).")
+	syncCmd.Flags().BoolVar(&syncArgs.noProgress, "no-progress", false,
+		"Disable the live progress spinner.")
 
 	rootCmd.AddCommand(syncCmd)
 }
@@ -107,20 +108,16 @@ func syncCmdRun(cmd *cobra.Command, _ []string) error {
 		rootArgs.timeout = syncDefaultTimeout
 	}
 
-	level := slog.LevelInfo
+	// Verbose enables our own progress logs (entry started, mirroring tag,
+	// entry summary, etc.). When off, the run is silent on stderr and the
+	// only stdout signal in text mode is the start/end markers below.
+	// Crane's package-global loggers are intentionally left at their default
+	// (discard) — its line shape is too low-level to surface to prettyPrints.
+	var logger *slog.Logger
 	if syncArgs.verbose {
-		level = slog.LevelDebug
-	}
-	stderr := cmd.ErrOrStderr()
-	logger := slog.New(newPlainHandler(stderr, level))
-
-	// Wire crane's package-global loggers to the same stderr writer with
-	// the matching log.LstdFlags format and no prefix — runner, artifacts,
-	// and crane all share one uniform line shape.
-	craneLogs.Progress = log.New(stderr, "", log.LstdFlags)
-	craneLogs.Warn = log.New(stderr, "", log.LstdFlags)
-	if syncArgs.verbose {
-		craneLogs.Debug = log.New(stderr, "", log.LstdFlags)
+		logger = slog.New(newPlainHandler(cmd.ErrOrStderr(), slog.LevelDebug))
+	} else {
+		logger = slog.New(slog.DiscardHandler)
 	}
 
 	var clientOpts []oci.ClientOption
@@ -150,13 +147,42 @@ func syncCmdRun(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("chart entries are not implemented yet")
 	}
 
+	// Pretty-print mode = text output AND no --verbose. In that case we
+	// drive a spinner on stderr and print one completion line per tag on
+	// stdout, followed by a one-line totals summary. The spinner is stopped
+	// before the summary so it can't overwrite it. Verbose mode skips the
+	// spinner entirely — the structured log stream already conveys progress,
+	// and a spinner would compete with it.
+	isText := syncArgs.output.String() == "text" || syncArgs.output.String() == ""
+	prettyPrint := isText && !syncArgs.verbose
+
+	var prog *progress
+	if prettyPrint {
+		var spinnerOut io.Writer
+		if !syncArgs.noProgress {
+			spinnerOut = cmd.ErrOrStderr()
+		}
+		prog = newProgress(cmd.OutOrStdout(), spinnerOut, len(mirrors))
+		runner.OnJobFinished = prog.JobFinished
+		runner.OnEntryFinished = prog.EntryFinished
+		runner.OnPlanError = prog.PlanFailed
+	}
+
 	res, err := runner.Run(cmd.Context(), mirrors)
+	if prog != nil {
+		prog.Close()
+	}
 	if err != nil {
 		return err
 	}
 	switch syncArgs.output.String() {
 	case "text", "":
 		res.LogSummary(logger)
+		if prettyPrint {
+			if err := res.PrettyPrint(cmd.OutOrStdout()); err != nil {
+				return err
+			}
+		}
 	default:
 		if err := res.Render(cmd.OutOrStdout(), syncArgs.output.String()); err != nil {
 			return err
@@ -176,15 +202,12 @@ func (e *syncExitError) Error() string { return e.msg }
 func (e *syncExitError) ExitCode() int { return e.code }
 
 func classifyExit(r sync.Result) error {
+	// Non-zero exit codes carry an empty message — failures and drift are
+	// already surfaced inline (per-failure ✗ lines) and in the Summary
+	// totals; printing a third "N failed" footer just adds noise.
 	switch r.ExitCode() {
 	case 0:
 		return nil
-	case 1:
-		return &syncExitError{code: 1, msg: fmt.Sprintf("%d tag job(s) failed", r.TotalFailures())}
-	case 2:
-		// Empty message — main skips the "✗ ..." print since drift isn't a
-		// failure to surface twice; the structured summary already shows it.
-		return &syncExitError{code: 2, msg: ""}
 	default:
 		return &syncExitError{code: r.ExitCode(), msg: ""}
 	}
