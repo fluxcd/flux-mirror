@@ -12,6 +12,10 @@ inputs:
   bindir:
     description: Alternative location for the CLI binary, defaults to path relative to $RUNNER_TOOL_CACHE.
     required: false
+  verify-attestation:
+    description: Verify the release attestation with gh attestation verify.
+    default: "true"
+    required: false
 outputs:
   version:
     description: Flux Mirror version
@@ -26,6 +30,8 @@ runs:
         FLUX_MIRROR_VERSION: ${{ inputs.version }}
         FLUX_MIRROR_URL: "https://github.com/fluxcd/flux-mirror/releases/latest"
         BIN_DIR: ${{ inputs.bindir }}
+        VERIFY_ATTESTATION: ${{ inputs.verify-attestation }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         if [[ -z "$FLUX_MIRROR_VERSION" ]] || [[ "$FLUX_MIRROR_VERSION" = "latest" ]]; then
           FLUX_MIRROR_VERSION=$(curl -fsSL -I -w '%{url_effective}' -o /dev/null ${FLUX_MIRROR_URL} | grep -o 'v[0-9].*')
@@ -93,6 +99,11 @@ runs:
           if [ "$sum" != "$expected_sum" ]; then
             echo "SHA sum of ${FLUX_MIRROR_TARGET_FILE} does not match. Aborting."
             exit 1
+          fi
+
+          if [[ "$VERIFY_ATTESTATION" != "false" ]]; then
+            echo "Verifying release attestation"
+            gh attestation verify "$DL_DIR/$FLUX_MIRROR_TARGET_FILE" -R fluxcd/flux-mirror
           fi
 
           echo "Installing flux-mirror to ${FLUX_MIRROR_TOOL_DIR}"

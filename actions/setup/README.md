@@ -43,10 +43,11 @@ Use `--overwrite` if mirroring mutable tags such as `latest`.
 
 ## Action Inputs
 
-| Name      | Description                      | Default                   |
-|-----------|----------------------------------|---------------------------|
-| `version` | Flux Mirror version              | The latest stable release |
-| `bindir`  | Alternative location for the CLI | `$RUNNER_TOOL_CACHE`      |
+| Name                 | Description                              | Default                   |
+|----------------------|------------------------------------------|---------------------------|
+| `version`            | Flux Mirror version                      | The latest stable release |
+| `bindir`             | Alternative location for the CLI         | `$RUNNER_TOOL_CACHE`      |
+| `verify-attestation` | Verify the release attestation with `gh` | `true`                    |
 
 ## Action Outputs
 
