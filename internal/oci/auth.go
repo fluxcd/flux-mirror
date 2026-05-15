@@ -5,6 +5,7 @@ package oci
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/crane"
@@ -17,8 +18,9 @@ import (
 // across every Copy/Compare/List call to avoid re-resolving auth or
 // reallocating transports per tag.
 type Client struct {
-	keychain authn.Keychain
-	insecure bool
+	keychain  authn.Keychain
+	insecure  bool
+	transport http.RoundTripper
 
 	// Pre-built static option slices. The only thing varying per call is
 	// the context, which is prepended at call time. The auth keychain and
@@ -42,6 +44,13 @@ func Insecure() ClientOption {
 	return func(c *Client) { c.insecure = true }
 }
 
+// WithTransport sets the HTTP RoundTripper used for every registry call.
+// Wrap http.DefaultTransport with ChunkingTransport / JWTBearerTransport
+// (or any other RoundTripper) and pass the outermost wrapper here.
+func WithTransport(t http.RoundTripper) ClientOption {
+	return func(c *Client) { c.transport = t }
+}
+
 // NewClient returns a Client. By default it uses authn.DefaultKeychain, which
 // reads ~/.docker/config.json (or $DOCKER_CONFIG) and any configured
 // credential helpers — exactly what `docker login` and `helm registry login`
@@ -53,6 +62,10 @@ func NewClient(opts ...ClientOption) *Client {
 	}
 	c.staticCraneOpts = []crane.Option{crane.WithAuthFromKeychain(c.keychain)}
 	c.staticRemoteOpts = []remote.Option{remote.WithAuthFromKeychain(c.keychain)}
+	if c.transport != nil {
+		c.staticCraneOpts = append(c.staticCraneOpts, crane.WithTransport(c.transport))
+		c.staticRemoteOpts = append(c.staticRemoteOpts, remote.WithTransport(c.transport))
+	}
 	if c.insecure {
 		c.staticCraneOpts = append(c.staticCraneOpts, crane.Insecure)
 		c.staticNameOpts = []name.Option{name.Insecure}

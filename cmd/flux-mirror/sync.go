@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -55,15 +56,20 @@ Exit codes:
 }
 
 type syncFlags struct {
-	config      string
-	output      flags.Output
-	concurrency int
-	retries     int
-	overwrite   bool
-	dryRun      bool
-	verbose     bool
-	insecure    bool
-	noProgress  bool
+	config          string
+	output          flags.Output
+	concurrency     int
+	retries         int
+	overwrite       bool
+	dryRun          bool
+	verbose         bool
+	insecure        bool
+	noProgress      bool
+	maxChunkSize    int
+	jwtRequestURL   string
+	jwtRequestToken string
+	jwtAudience     string
+	jwtHosts        []string
 }
 
 var syncArgs = syncFlags{
@@ -90,6 +96,29 @@ func init() {
 		"Allow plaintext HTTP and skip TLS verification (test/dev only).")
 	syncCmd.Flags().BoolVar(&syncArgs.noProgress, "no-progress", false,
 		"Disable the live progress spinner.")
+	syncCmd.Flags().IntVar(&syncArgs.maxChunkSize, "oci-max-chunk-size", 0,
+		"Maximum size in KiB (1024 bytes) for an OCI blob upload PATCH; "+
+			"larger blobs are split into chunked PATCH uploads. 0 disables "+
+			"chunking (single monolithic PATCH per blob).")
+	syncCmd.Flags().StringVar(&syncArgs.jwtRequestURL, "jwt-bearer-request-url", "",
+		"Endpoint that returns a JWT given an audience query parameter. "+
+			"Must be set together with --jwt-bearer-request-token and "+
+			"--jwt-bearer-audience. When set, every registry request "+
+			"carries Authorization: Bearer <jwt>; the JWT is cached for "+
+			"the first 50%% of its remaining lifetime (read from the "+
+			"`exp` claim) and reminted on demand.")
+	syncCmd.Flags().StringVar(&syncArgs.jwtRequestToken, "jwt-bearer-request-token", "",
+		"Bearer token sent to --jwt-bearer-request-url when minting the "+
+			"registry JWT.")
+	syncCmd.Flags().StringVar(&syncArgs.jwtAudience, "jwt-bearer-audience", "",
+		"Audience claim requested from --jwt-bearer-request-url. Typically "+
+			"the destination registry hostname.")
+	syncCmd.Flags().StringSliceVar(&syncArgs.jwtHosts, "jwt-bearer-host", nil,
+		"Hostnames the JWT bearer is sent to (repeatable, also accepts a "+
+			"comma-separated list). Requests to other hosts pass through "+
+			"with their keychain auth intact, so a sync can use the bearer "+
+			"on the destination while still authenticating to the source. "+
+			"Defaults to --jwt-bearer-audience when unset.")
 
 	rootCmd.AddCommand(syncCmd)
 }
@@ -129,6 +158,11 @@ func syncCmdRun(cmd *cobra.Command, _ []string) error {
 	var clientOpts []oci.ClientOption
 	if syncArgs.insecure {
 		clientOpts = append(clientOpts, oci.Insecure())
+	}
+	if t, err := buildClientTransport(); err != nil {
+		return err
+	} else if t != nil {
+		clientOpts = append(clientOpts, oci.WithTransport(t))
 	}
 	client := oci.NewClient(clientOpts...)
 
@@ -226,6 +260,53 @@ func classifyExit(r sync.Result) error {
 	default:
 		return &syncExitError{code: r.ExitCode(), msg: ""}
 	}
+}
+
+// buildClientTransport composes the optional transport stack from
+// --oci-max-chunk-size and the --jwt-bearer-* flags. Returns (nil, nil)
+// if neither feature is requested. Stack order, outer first:
+//
+//	ChunkingTransport (split big PATCH bodies)
+//	  → JWTBearerTransport (stamp Authorization on each chunk request)
+//	    → http.DefaultTransport
+//
+// JWT is the inner wrapper so that mid-upload token refresh works
+// per chunk; chunking is the outer wrapper so split chunks each get
+// freshly stamped auth from the JWT layer.
+func buildClientTransport() (http.RoundTripper, error) {
+	var (
+		jwtSet   = syncArgs.jwtRequestURL != "" || syncArgs.jwtRequestToken != "" || syncArgs.jwtAudience != ""
+		jwtAll   = syncArgs.jwtRequestURL != "" && syncArgs.jwtRequestToken != "" && syncArgs.jwtAudience != ""
+		chunkSet = syncArgs.maxChunkSize > 0
+	)
+	if jwtSet && !jwtAll {
+		return nil, fmt.Errorf("--jwt-bearer-request-url, --jwt-bearer-request-token and --jwt-bearer-audience must all be set together (or none)")
+	}
+	if !jwtSet && !chunkSet {
+		return nil, nil
+	}
+	var t http.RoundTripper
+	t = http.DefaultTransport
+	if jwtAll {
+		hosts := syncArgs.jwtHosts
+		if len(hosts) == 0 {
+			hosts = []string{syncArgs.jwtAudience}
+		}
+		t = &oci.JWTBearerTransport{
+			Inner:        t,
+			RequestURL:   syncArgs.jwtRequestURL,
+			RequestToken: syncArgs.jwtRequestToken,
+			Audience:     syncArgs.jwtAudience,
+			Hosts:        hosts,
+		}
+	}
+	if chunkSet {
+		t = &oci.ChunkingTransport{
+			Inner:     t,
+			ChunkSize: int64(syncArgs.maxChunkSize) * 1024,
+		}
+	}
+	return t, nil
 }
 
 func resolveConfigPath() (string, error) {
