@@ -42,6 +42,7 @@ Log in once with `docker login`, `oras login`, etc. and `flux-mirror` picks up t
 | `--concurrency N`               | `4`     | Maximum number of copy operations to run in parallel within a single config entry. Entries themselves are processed sequentially.                  |
 | `--retries N`                   | `3`     | Maximum number of retry attempts per job, bounded by `--timeout`.                                                                                  |
 | `--overwrite`                   | `false` | Force `overwrite: true` on every entry, regardless of per-entry config. See [Overwrite Behavior](./config.md#overwrite-behavior).                  |
+| `--drift-exit-code N`           | `2`     | Exit code to use when drift is detected without failures. Set to `0` for immutable destination registries that should not fail CI on drift.        |
 | `--dry-run`                     | `false` | Run the plan and comparison pipeline without performing any writes. Reported as `would-copy` / `would-overwrite` in the output.                    |
 | `--verbose`                     | `false` | Emit a structured log line per operation (entry started, mirroring tag, tag done, entry summary, sync complete) on stderr. Suppresses the spinner. |
 | `--no-progress`                 | `false` | Disable the live progress spinner. Per-job lines and the Summary still print.                                                                      |
@@ -117,7 +118,8 @@ single `✗ <entry> — plan failed: <err>` line and counted toward `failed`.
 | `2`  | No failures, but at least one tag drifted with `overwrite: false`. The destination is out of date relative to source. |
 
 Failures take precedence over drift. `--dry-run` does not bump the exit code for `would-copy` / `would-overwrite`,
-but drift detection still produces `2`.
+but drift detection still produces `2` by default. Use `--drift-exit-code=0` when the destination registry is known to be
+immutable and drift should be logged without failing CI.
 
 ## Examples
 
@@ -204,6 +206,12 @@ flux-mirror sync config.yaml --overwrite
 
 ```bash
 flux-mirror sync config.yaml --no-progress
+```
+
+For immutable destination registries, keep CI green while still logging drift:
+
+```bash
+flux-mirror sync config.yaml --no-progress --drift-exit-code=0
 ```
 
 ### Read config from stdin

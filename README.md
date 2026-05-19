@@ -121,16 +121,23 @@ See [`examples/`](examples) for more configurations and
 `flux-mirror sync` is designed for unattended runs. The exit code separates
 real failures from drift, so a CI gate can react to each independently:
 
-| Code | Meaning                                                                        |
-|------|--------------------------------------------------------------------------------|
-| `0`  | Clean run, every tag was copied or skipped as expected.                        |
-| `1`  | At least one tag job failed (network error, push rejected, retries exhausted). |
-| `2`  | No failures, but at least one tag drifted with `overwrite: false`.             |
+| Code | Meaning                                                                                                    |
+|------|------------------------------------------------------------------------------------------------------------|
+| `0`  | Clean run, every tag was copied or skipped as expected.                                                    |
+| `1`  | At least one tag job failed (network error, push rejected, retries exhausted).                             |
+| `2`  | No failures, but at least one tag drifted with `overwrite: false` (configurable with `--drift-exit-code`). |
 
 The `--no-progress` flag suppresses the live spinner so log output stays clean in CI:
 
 ```shell
 flux-mirror sync flux-mirror.yaml --no-progress
+```
+
+When the destination registry is known to be immutable, drift can be reported
+without failing the CI job:
+
+```shell
+flux-mirror sync flux-mirror.yaml --no-progress --drift-exit-code=0
 ```
 
 For downstream tooling, emit a structured report:
