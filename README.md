@@ -2,7 +2,9 @@
 
 [![release](https://img.shields.io/github/release/fluxcd/flux-mirror/all.svg)](https://github.com/fluxcd/flux-mirror/releases)
 [![test](https://github.com/fluxcd/flux-mirror/actions/workflows/test.yaml/badge.svg)](https://github.com/fluxcd/flux-mirror/actions/workflows/test.yaml)
+[![cve-scan](https://github.com/fluxcd/flux-mirror/workflows/cve-scan/badge.svg)](https://github.com/fluxcd/flux-mirror/actions/workflows/cve-scan.yml)
 [![license](https://img.shields.io/github/license/fluxcd/flux-mirror.svg)](https://github.com/fluxcd/flux-mirror/blob/main/LICENSE)
+[![slsa](https://slsa.dev/images/gh-badge-level2.svg)](https://github.com/fluxcd/flux-mirror/attestations)
 
 **Flux Mirror** is a CLI for mirroring Helm charts, OCI artifacts and
 container images between registries using a declarative approach.
@@ -195,10 +197,10 @@ destination registry credentials from a `Secret` created via
 
 ## Commands
 
-| Command                       | Description                                                       |
-|-------------------------------|-------------------------------------------------------------------|
-| `flux-mirror sync CONFIG|-`   | Mirror Helm charts and OCI artifacts described by a YAML config.  |
-| `flux-mirror version`         | Print the CLI version.                                            |
+| Command                     | Description                                                      |
+|-----------------------------|------------------------------------------------------------------|
+| `flux-mirror sync [CONFIG]` | Mirror Helm charts and OCI artifacts described by a YAML config. |
+| `flux-mirror version`       | Print the CLI version.                                           |
 
 Run `flux-mirror <command> --help` for the full flag list.
 
