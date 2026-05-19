@@ -5,9 +5,12 @@ package helmrepo
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -38,6 +41,7 @@ const (
 type HTTPSource struct {
 	repoURL string
 	client  *http.Client
+	auth    *repo.Entry
 
 	once  sync.Once
 	index *repo.IndexFile
@@ -53,6 +57,23 @@ func NewHTTPSource(repoURL string) *HTTPSource {
 		repoURL: repoURL,
 		client:  &http.Client{Timeout: httpTimeout},
 	}
+}
+
+// NewHTTPSourceWithEntry constructs an HTTPSource authenticated with the
+// matching Helm repositories.yaml entry, when one exists.
+func NewHTTPSourceWithEntry(repoURL string, entry *repo.Entry) (*HTTPSource, error) {
+	src := NewHTTPSource(repoURL)
+	if entry == nil {
+		return src, nil
+	}
+	client, err := httpClientForEntry(entry)
+	if err != nil {
+		return nil, err
+	}
+	entryCopy := *entry
+	src.client = client
+	src.auth = &entryCopy
+	return src, nil
 }
 
 // ListVersions returns every version of chartName present in the repo's index.
@@ -145,6 +166,9 @@ func (s *HTTPSource) fetch(ctx context.Context, target string, maxBytes int64) (
 		return nil, fmt.Errorf("build request for %s: %w", target, err)
 	}
 	req.Header.Set("User-Agent", "flux-mirror")
+	if err := s.setAuth(req); err != nil {
+		return nil, err
+	}
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", target, err)
@@ -161,4 +185,70 @@ func (s *HTTPSource) fetch(ctx context.Context, target string, maxBytes int64) (
 		return nil, fmt.Errorf("response from %s exceeds %d bytes", target, maxBytes)
 	}
 	return data, nil
+}
+
+func (s *HTTPSource) setAuth(req *http.Request) error {
+	if s.auth == nil || s.auth.Username == "" || s.auth.Password == "" {
+		return nil
+	}
+	repoURL, err := url.Parse(s.repoURL)
+	if err != nil {
+		return fmt.Errorf("parse repository URL %q for auth: %w", s.repoURL, err)
+	}
+	if s.auth.PassCredentialsAll || (repoURL.Scheme == req.URL.Scheme && repoURL.Host == req.URL.Host) {
+		req.SetBasicAuth(s.auth.Username, s.auth.Password)
+	}
+	return nil
+}
+
+func httpClientForEntry(entry *repo.Entry) (*http.Client, error) {
+	if entry == nil || (entry.CertFile == "" && entry.KeyFile == "" && entry.CAFile == "" && !entry.InsecureSkipTLSVerify) {
+		return &http.Client{Timeout: httpTimeout}, nil
+	}
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("default HTTP transport is %T, want *http.Transport", http.DefaultTransport)
+	}
+	transport := defaultTransport.Clone()
+	tlsConfig, err := tlsConfigForEntry(entry)
+	if err != nil {
+		return nil, err
+	}
+	transport.TLSClientConfig = tlsConfig
+	return &http.Client{Timeout: httpTimeout, Transport: transport}, nil
+}
+
+func tlsConfigForEntry(entry *repo.Entry) (*tls.Config, error) {
+	cfg := &tls.Config{}
+	if entry.CertFile != "" || entry.KeyFile != "" {
+		if entry.CertFile == "" || entry.KeyFile == "" {
+			return nil, fmt.Errorf("helm repository %q must set both certFile and keyFile for client TLS", entry.Name)
+		}
+		cert, err := tls.LoadX509KeyPair(entry.CertFile, entry.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load client TLS cert/key for Helm repository %q: %w", entry.Name, err)
+		}
+		cfg.Certificates = []tls.Certificate{cert}
+	}
+	if entry.CAFile != "" {
+		pem, err := os.ReadFile(entry.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read CA file for Helm repository %q: %w", entry.Name, err)
+		}
+		roots, err := x509.SystemCertPool()
+		if err != nil {
+			return nil, fmt.Errorf("load system cert pool for Helm repository %q: %w", entry.Name, err)
+		}
+		if roots == nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("ca file for helm repository %q contains no PEM certificates", entry.Name)
+		}
+		cfg.RootCAs = roots
+	}
+	if entry.InsecureSkipTLSVerify {
+		cfg.InsecureSkipVerify = true //nolint:gosec // Mirrors Helm's explicit repository setting.
+	}
+	return cfg, nil
 }
