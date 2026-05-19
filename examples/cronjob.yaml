@@ -1,0 +1,104 @@
+# Create the destination registry pull secret with:
+#   flux -n flux-system create secret oci ghcr-auth \
+#     --url=ghcr.io \
+#     --username=<github-user> \
+#     --password=<github-token-with-write:packages>
+#
+# Edit the ConfigMap below to set your own source and destination registries,
+# then apply the manifest with:
+#   kubectl apply -f cronjob.yaml
+#
+# To trigger an out-of-band run instead of waiting for the schedule:
+#   kubectl -n flux-system create job --from=cronjob/flux-mirror-podinfo flux-mirror-now
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flux-mirror-config
+  namespace: flux-system
+data:
+  mirror.yaml: |
+    apiVersion: mirror.fluxcd.io/v1alpha1
+    kind: Config
+    charts:
+      - name: podinfo
+        source: https://stefanprodan.github.io/podinfo
+        destination: oci://ghcr.io/my-org/charts
+        version: "*"
+        limit: 1
+    artifacts:
+      - source: ghcr.io/stefanprodan/podinfo
+        destination: ghcr.io/my-org/podinfo
+        selector:
+          semver: "*"
+          limit: 1
+        includeReferrers: true
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: flux-mirror-podinfo
+  namespace: flux-system
+spec:
+  schedule: "0 */6 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: flux-mirror
+              image: ghcr.io/fluxcd/flux-mirror:latest
+              imagePullPolicy: IfNotPresent
+              args:
+                - sync
+                - --config=/config/flux/mirror.yaml
+                - --no-progress
+                - --output=text
+              env:
+                - name: DOCKER_CONFIG
+                  value: /config/docker
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 64Mi
+                limits:
+                  cpu: 2000m
+                  memory: 256Mi
+              volumeMounts:
+                - name: config
+                  mountPath: /config/flux
+                  readOnly: true
+                - name: docker-config
+                  mountPath: /config/docker
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: config
+              configMap:
+                name: flux-mirror-config
+            - name: docker-config
+              secret:
+                secretName: ghcr-auth
+                items:
+                  - key: .dockerconfigjson
+                    path: config.json
+            - name: tmp
+              emptyDir: {}

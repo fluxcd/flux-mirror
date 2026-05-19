@@ -32,8 +32,8 @@ on upstream chart repositories.
 - **Helm charts** — mirror charts from HTTP/S Helm repositories to an OCI registries.
   Chart bytes are re-published as a deterministic Helm-OCI artifact, so
   drift detection on re-runs is content-based and stable.
-- **OCI 1.1 referrers** — opt-in `includeReferrers: true` mirrors cosign
-  signatures, SBOMs, and attestations attached to each artifact.
+- **OCI 1.1 referrers** — opt-in mirror of cosign
+  signatures, SBOMs, and attestations attached to artifacts.
 - **Selector pipeline** — for OCI artifacts, a four-step
   `regex → semver → sort → top-N` filter. For charts, a semver constraint
   plus top-N. Sort by `semver`, `alphabetical`, or `numerical`.
@@ -43,9 +43,9 @@ on upstream chart repositories.
   tag) is reported as a distinct outcome and exit code, so audit pipelines
   can differentiate "out of date" from "mutated tags".
 - **Ambient auth** — credentials come from `~/.docker/config.json` and the
-  configured credential helpers (ACRm ECR, GAR, etc.). One `docker login` covers
+  configured credential helpers (ACR, ECR, GAR, etc.). One `docker login` covers
   source and destination.
-- **Structured output** — `text`, `yaml` and `json` for downstream
+- **Structured output** — `text` and `yaml`/`json` for downstream
   tooling, plus a verbose mode that streams every blob and manifest digest
   for diagnosing TLS, auth, or push failures.
 
@@ -173,10 +173,19 @@ The `ghcr.io/fluxcd/flux-mirror` image can be used in container-based CI pipelin
 
 ```shell
 docker run --rm \
+  -e DOCKER_CONFIG=/.docker \
   -v "$PWD/flux-mirror.yaml:/config.yaml:ro" \
-  -v "$HOME/.docker/config.json:/home/nonroot/.docker/config.json:ro" \
+  -v "$HOME/.docker/config.json:/.docker/config.json:ro" \
   ghcr.io/fluxcd/flux-mirror:latest sync -c /config.yaml --no-progress
 ```
+
+### Kubernetes
+
+To run `flux-mirror sync` from inside a cluster on a schedule, see the
+[`examples/cronjob.yaml`](examples/cronjob.yaml) manifest. It bundles a
+`ConfigMap` with the sync config and a `CronJob` that mounts the
+destination registry credentials from a `Secret` created via
+`flux create secret oci`.
 
 ## Commands
 
