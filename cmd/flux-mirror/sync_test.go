@@ -127,6 +127,19 @@ func TestSync_DriftExitCode(t *testing.T) {
 	var ec interface{ ExitCode() int }
 	g.Expect(errors.As(err, &ec)).To(BeTrue())
 	g.Expect(ec.ExitCode()).To(Equal(2))
+
+	out, err := executeCommand([]string{"sync", cfgPath, "--insecure", "--drift-exit-code", "0"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(out).To(ContainSubstring("drifted"))
+}
+
+func TestSync_DriftExitCodeValidation(t *testing.T) {
+	g := NewWithT(t)
+	cfgPath := writeConfig(t, "ghcr.io/a/b", "ghcr.io/c/d")
+
+	_, err := executeCommand([]string{"sync", cfgPath, "--drift-exit-code", "-1"})
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("--drift-exit-code must be between 0 and 255"))
 }
 
 func TestSync_DryRun(t *testing.T) {

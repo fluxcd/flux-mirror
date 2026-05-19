@@ -24,8 +24,10 @@ import (
 )
 
 const (
-	envConfig          = "FLUX_MIRROR_CONFIG"
-	syncDefaultTimeout = 5 * time.Minute
+	envConfig                  = "FLUX_MIRROR_CONFIG"
+	syncDefaultTimeout         = 5 * time.Minute
+	syncDefaultDriftExitCode   = 2
+	syncMaxCustomDriftExitCode = 255
 )
 
 var syncCmd = &cobra.Command{
@@ -39,7 +41,10 @@ $DOCKER_CONFIG, and configured credential helpers).
 Exit codes:
   0  clean run (everything copied/skipped as expected)
   1  at least one tag job failed
-  2  no failures, but at least one tag drifted (overwrite=false)`,
+  2  no failures, but at least one tag drifted (overwrite=false)
+
+Use --drift-exit-code=0 to keep drift-only runs green in CI when the
+destination registry is known to be immutable.`,
 	Example: `  # Run a sync against a config file
   flux-mirror sync flux-mirror.yaml
 
@@ -63,6 +68,7 @@ type syncFlags struct {
 	concurrency     int
 	retries         int
 	overwrite       bool
+	driftExitCode   int
 	dryRun          bool
 	verbose         bool
 	insecure        bool
@@ -75,9 +81,10 @@ type syncFlags struct {
 }
 
 var syncArgs = syncFlags{
-	output:      "text",
-	concurrency: 4,
-	retries:     3,
+	output:        "text",
+	concurrency:   4,
+	retries:       3,
+	driftExitCode: syncDefaultDriftExitCode,
 }
 
 func init() {
@@ -88,6 +95,8 @@ func init() {
 		"Maximum number of retry attempts per job within timeout budget.")
 	syncCmd.Flags().BoolVar(&syncArgs.overwrite, "overwrite", false,
 		"Force overwrite when the destination artifact digest has drifted")
+	syncCmd.Flags().IntVar(&syncArgs.driftExitCode, "drift-exit-code", syncArgs.driftExitCode,
+		"Exit code to use when drift is detected without failures")
 	syncCmd.Flags().BoolVar(&syncArgs.dryRun, "dry-run", false,
 		"Run the plan and comparison pipeline without performing any writes.")
 	syncCmd.Flags().BoolVar(&syncArgs.verbose, "verbose", false,
@@ -124,6 +133,10 @@ func init() {
 }
 
 func syncCmdRun(cmd *cobra.Command, args []string) error {
+	if syncArgs.driftExitCode < 0 || syncArgs.driftExitCode > syncMaxCustomDriftExitCode {
+		return fmt.Errorf("--drift-exit-code must be between 0 and %d", syncMaxCustomDriftExitCode)
+	}
+
 	cfgPath, err := resolveConfigPath(args)
 	if err != nil {
 		return err
@@ -237,7 +250,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	return classifyExit(res)
+	return classifyExit(res, syncArgs.driftExitCode)
 }
 
 // syncExitError is returned to make `main` exit with a code other than 1
@@ -250,15 +263,19 @@ type syncExitError struct {
 func (e *syncExitError) Error() string { return e.msg }
 func (e *syncExitError) ExitCode() int { return e.code }
 
-func classifyExit(r sync.Result) error {
+func classifyExit(r sync.Result, driftExitCode int) error {
 	// Non-zero exit codes carry an empty message — failures and drift are
 	// already surfaced inline (per-failure ✗ lines) and in the Summary
 	// totals; printing a third "N failed" footer just adds noise.
-	switch r.ExitCode() {
+	code := r.ExitCode()
+	if code == syncDefaultDriftExitCode && r.HasDrift() && !r.HasFailures() {
+		code = driftExitCode
+	}
+	switch code {
 	case 0:
 		return nil
 	default:
-		return &syncExitError{code: r.ExitCode(), msg: ""}
+		return &syncExitError{code: code, msg: ""}
 	}
 }
 
