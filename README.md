@@ -44,9 +44,10 @@ on upstream chart repositories.
 - **Drift gating** — destination drift (different content under the same
   tag) is reported as a distinct outcome and exit code, so audit pipelines
   can differentiate "out of date" from "mutated tags".
-- **Ambient auth** — credentials come from `~/.docker/config.json` and the
-  configured credential helpers (ACR, ECR, GAR, etc.). One `docker login` covers
-  source and destination.
+- **Ambient auth** — OCI credentials come from `~/.docker/config.json` and the
+  configured credential helpers (ACR, ECR, GAR, etc.); Helm HTTP/S repository
+  credentials come from Helm's `repositories.yaml`. One `docker login` plus
+  `helm repo add` covers source and destination auth.
 - **Structured output** — `text` and `yaml`/`json` for downstream
   tooling, plus a verbose mode that streams every blob and manifest digest
   for diagnosing TLS, auth, or push failures.
@@ -66,6 +67,13 @@ Authenticate once against the destination and optionally source registries:
 
 ```shell
 docker login ghcr.io
+```
+
+For private HTTP/S Helm repositories, add or log in to the repository with Helm
+so credentials are stored in `repositories.yaml`:
+
+```shell
+helm repo add private https://charts.example.com --username "$USER" --password "$TOKEN"
 ```
 
 Write a config file describing what to mirror:

@@ -151,7 +151,9 @@ idempotent.
 ### Source scheme
 
 - `http` / `https`: classic Helm repository serving `index.yaml` plus chart
-  tarballs. Assumed public; no auth fields in the YAML.
+  tarballs. Auth is loaded automatically from the ambient Helm repositories
+  config (`repositories.yaml`, or `HELM_REPOSITORY_CONFIG` when set); no auth
+  fields are needed in the flux-mirror YAML.
 - `oci`: OCI Helm registry. Each chart name is its own OCI repository at
   `<source>/<name>`. Tags whose OCI manifest is not a Helm chart (cosign
   signatures, SBOMs, other artifacts in the same repository) are filtered

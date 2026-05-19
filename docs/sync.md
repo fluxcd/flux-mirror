@@ -27,12 +27,21 @@ FLUX_MIRROR_CONFIG=examples/podinfo.yaml flux-mirror sync
 
 ## Authentication
 
-Auth is read from the ambient Docker config:
+OCI registry auth is read from the ambient Docker config:
 
-- `~/.docker/config.json` (or the `DOCKER_CONFIG` env var if set).
+- `~/.docker/config.json`, or the `DOCKER_CONFIG` env var if set.
 - Any configured credential helpers (e.g., `docker-credential-osxkeychain`, `docker-credential-ecr-login`, `docker-credential-gcloud`).
 
 Log in once with `docker login`, `oras login`, etc. and `flux-mirror` picks up the credentials.
+
+Helm HTTP/S repository auth is read from the ambient Helm repositories config:
+
+- Helm's default `repositories.yaml` path, or the `HELM_REPOSITORY_CONFIG` env var if set.
+- `username` / `password`, `certFile`, `keyFile`, `caFile`, `insecure_skip_tls_verify`, and
+  `pass_credentials_all` are honored.
+
+Log in or add repositories with `helm repo add` and `flux-mirror` picks up matching HTTP/S
+repository credentials automatically.
 
 ## Flags
 
