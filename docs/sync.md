@@ -9,18 +9,19 @@ See the [config specification](./config.md) for the YAML schema.
 ## Synopsis
 
 ```
-flux-mirror sync [-c|--config PATH] [flags]
+flux-mirror sync CONFIG|- [flags]
 ```
 
 ## Configuration source
 
 The config file path is resolved in the following order:
 
-1. `--config` / `-c PATH` flag.
+1. First positional argument (`-` reads YAML from stdin).
 2. `FLUX_MIRROR_CONFIG` environment variable.
 
 ```bash
-flux-mirror sync -c examples/podinfo.yaml
+flux-mirror sync examples/podinfo.yaml
+flux-mirror sync - < examples/podinfo.yaml
 FLUX_MIRROR_CONFIG=examples/podinfo.yaml flux-mirror sync
 ```
 
@@ -37,7 +38,6 @@ Log in once with `docker login`, `oras login`, etc. and `flux-mirror` picks up t
 
 | Flag                            | Default | Description                                                                                                                                        |
 |---------------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| `-c, --config PATH`             | —       | Path to the YAML config file. Falls back to `FLUX_MIRROR_CONFIG`.                                                                                  |
 | `-o, --output text\|yaml\|json` | `text`  | Output format. `text` is human-friendly; `yaml` and `json` print the structured `Result` to stdout.                                                |
 | `--concurrency N`               | `4`     | Maximum number of copy operations to run in parallel within a single config entry. Entries themselves are processed sequentially.                  |
 | `--retries N`                   | `3`     | Maximum number of retry attempts per job, bounded by `--timeout`.                                                                                  |
@@ -89,7 +89,7 @@ and registry-side warning is logged. Reach for this when diagnosing TLS, auth, m
 Suitable for piping into another tool.
 
 ```bash
-flux-mirror sync -c config.yaml -o json | jq '.entries[].outcomes.copied'
+flux-mirror sync config.yaml -o json | jq '.entries[].outcomes.copied'
 ```
 
 ## Outcomes
@@ -151,7 +151,7 @@ artifacts:
 ```
 
 ```bash
-flux-mirror sync -c config.yaml
+flux-mirror sync config.yaml
 ```
 
 ### Mirror a Helm chart with its image
@@ -180,7 +180,7 @@ artifacts:
 ```
 
 ```bash
-flux-mirror sync -c config.yaml
+flux-mirror sync config.yaml
 ```
 
 The chart lands at `localhost:5050/charts/external-dns:<version>` (the chart
@@ -191,17 +191,23 @@ consuming `HelmRelease.spec.values` to point at the mirror.
 ### Preview without writing
 
 ```bash
-flux-mirror sync -c config.yaml --dry-run -o yaml
+flux-mirror sync config.yaml --dry-run -o yaml
 ```
 
 ### Force-resync drifted tags
 
 ```bash
-flux-mirror sync -c config.yaml --overwrite
+flux-mirror sync config.yaml --overwrite
 ```
 
 ### CI-friendly invocation
 
 ```bash
-flux-mirror sync -c config.yaml --no-progress
+flux-mirror sync config.yaml --no-progress
+```
+
+### Read config from stdin
+
+```bash
+cat config.yaml | flux-mirror sync -
 ```

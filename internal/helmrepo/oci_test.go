@@ -34,6 +34,7 @@ func TestMain(m *testing.M) {
 // at chartRepo. The OCI tag is derived from version (`+` → `_`).
 func pushHelmFixture(t *testing.T, client *oci.Client, chartRepo, version string) {
 	t.Helper()
+	testregistry.UseEmptyDockerConfig(t)
 	tgz := testregistry.PackageChart(t, "testdata/podinfo", version)
 	cfg := testregistry.ChartConfigJSON(t, tgz)
 	ref := chartRepo + ":" + VersionToTag(version)

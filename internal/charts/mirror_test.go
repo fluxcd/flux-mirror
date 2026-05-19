@@ -52,6 +52,7 @@ func discardLogger() *slog.Logger {
 
 func newHTTPHelmRepo(t *testing.T, versions ...string) string {
 	t.Helper()
+	testregistry.UseEmptyDockerConfig(t)
 	srv, err := helmtestserver.NewTempHelmServer()
 	if err != nil {
 		t.Fatalf("new helm server: %s", err)
@@ -74,6 +75,7 @@ func newHTTPHelmRepo(t *testing.T, versions ...string) string {
 // pre-populate the destination get byte-equivalent state.
 func pushHelmFixture(t *testing.T, client *oci.Client, ref, version string) {
 	t.Helper()
+	testregistry.UseEmptyDockerConfig(t)
 	tgz := testregistry.PackageChart(t, fixtureChart, version)
 	cfg := testregistry.ChartConfigJSON(t, tgz)
 	if _, err := client.PushHelmChart(context.Background(), ref, cfg, tgz); err != nil {

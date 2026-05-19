@@ -13,6 +13,8 @@ import (
 	"io"
 	"math/rand"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -72,6 +74,17 @@ func Start(ctx context.Context) (string, error) {
 	return host, nil
 }
 
+// UseEmptyDockerConfig points Docker-aware clients at an empty config for the
+// duration of a test, so local credential helpers do not affect registry tests.
+func UseEmptyDockerConfig(t testing.TB) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatalf("write temp Docker config: %s", err)
+	}
+	t.Setenv("DOCKER_CONFIG", dir)
+}
+
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyz1234567890")
 
 // RandSuffix returns a 6-rune lowercase-alnum string. Use to give each test
@@ -93,6 +106,7 @@ func Repo(addr, stem string) string {
 // returns the resulting digest.
 func PushImage(t testing.TB, ref string) string {
 	t.Helper()
+	UseEmptyDockerConfig(t)
 	img, err := random.Image(128, 1)
 	if err != nil {
 		t.Fatalf("random.Image: %s", err)
@@ -111,6 +125,7 @@ func PushImage(t testing.TB, ref string) string {
 // the manifest-list digest.
 func PushIndex(t testing.TB, ref string) string {
 	t.Helper()
+	UseEmptyDockerConfig(t)
 	idx, err := random.Index(256, 1, 3)
 	if err != nil {
 		t.Fatalf("random.Index: %s", err)
@@ -134,6 +149,7 @@ func PushIndex(t testing.TB, ref string) string {
 // distribution/v3 indexes the result via the OCI 1.1 referrers API.
 func PushReferrer(t testing.TB, repoAddr string, subject v1.Descriptor, artifactType string) v1.Hash {
 	t.Helper()
+	UseEmptyDockerConfig(t)
 	img, err := random.Image(64, 1)
 	if err != nil {
 		t.Fatalf("random.Image: %s", err)

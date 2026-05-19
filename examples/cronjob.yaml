@@ -63,7 +63,7 @@ spec:
               imagePullPolicy: IfNotPresent
               args:
                 - sync
-                - --config=/config/flux/mirror.yaml
+                - /config/flux/mirror.yaml
                 - --no-progress
                 - --output=text
               env:

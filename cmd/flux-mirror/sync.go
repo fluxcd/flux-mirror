@@ -29,7 +29,7 @@ const (
 )
 
 var syncCmd = &cobra.Command{
-	Use:   "sync",
+	Use:   "sync [CONFIG|-]",
 	Short: "Mirror Helm charts and OCI artifacts to a destination registry",
 	Long: `Mirror Helm charts and OCI artifacts between registries based on a
 declarative YAML config (apiVersion: mirror.fluxcd.io/v1alpha1, kind: Config).
@@ -41,22 +41,24 @@ Exit codes:
   1  at least one tag job failed
   2  no failures, but at least one tag drifted (overwrite=false)`,
 	Example: `  # Run a sync against a config file
-  flux-mirror sync -c flux-mirror.yaml
+  flux-mirror sync flux-mirror.yaml
 
   # Pass the config via env var
   FLUX_MIRROR_CONFIG=flux-mirror.yaml flux-mirror sync
 
+  # Pass the config via stdin
+  flux-mirror sync - < flux-mirror.yaml
+
   # Preview without writing to the destination
-  flux-mirror sync -c flux-mirror.yaml --dry-run -o yaml
+  flux-mirror sync flux-mirror.yaml --dry-run -o yaml
 
   # Force overwrite of every drifted tag
-  flux-mirror sync -c flux-mirror.yaml --overwrite`,
-	Args: cobra.NoArgs,
+  flux-mirror sync flux-mirror.yaml --overwrite`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: syncCmdRun,
 }
 
 type syncFlags struct {
-	config          string
 	output          flags.Output
 	concurrency     int
 	retries         int
@@ -79,8 +81,6 @@ var syncArgs = syncFlags{
 }
 
 func init() {
-	syncCmd.Flags().StringVarP(&syncArgs.config, "config", "c", "",
-		"Path to the YAML config file (or set "+envConfig+").")
 	syncCmd.Flags().VarP(&syncArgs.output, "output", "o", syncArgs.output.Description())
 	syncCmd.Flags().IntVar(&syncArgs.concurrency, "concurrency", syncArgs.concurrency,
 		"Maximum number of copy operations to run in parallel per job")
@@ -123,12 +123,12 @@ func init() {
 	rootCmd.AddCommand(syncCmd)
 }
 
-func syncCmdRun(cmd *cobra.Command, _ []string) error {
-	cfgPath, err := resolveConfigPath()
+func syncCmdRun(cmd *cobra.Command, args []string) error {
+	cfgPath, err := resolveConfigPath(args)
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(cfgPath)
+	cfg, err := loadConfig(cmd, cfgPath)
 	if err != nil {
 		return err
 	}
@@ -309,12 +309,26 @@ func buildClientTransport() (http.RoundTripper, error) {
 	return t, nil
 }
 
-func resolveConfigPath() (string, error) {
-	if syncArgs.config != "" {
-		return syncArgs.config, nil
+func resolveConfigPath(args []string) (string, error) {
+	if len(args) > 0 {
+		return args[0], nil
 	}
 	if env := os.Getenv(envConfig); env != "" {
 		return env, nil
 	}
-	return "", fmt.Errorf("config required: pass --config/-c or set %s", envConfig)
+	return "", fmt.Errorf("config required: pass the config path as the first argument, pass '-' for stdin, or set %s", envConfig)
+}
+
+func loadConfig(cmd *cobra.Command, path string) (*config.Config, error) {
+	if path != "-" {
+		return config.Load(path)
+	}
+	cfg, err := config.Decode(cmd.InOrStdin())
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }

@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,11 +28,16 @@ func TestMain(m *testing.M) {
 // arguments to their default values after execution to
 // ensure test isolation.
 func executeCommand(args []string) (string, error) {
+	return executeCommandWithInput(args, "")
+}
+
+func executeCommandWithInput(args []string, input string) (string, error) {
 	defer resetCmdArgs()
 
 	buf := new(bytes.Buffer)
 	cmd := rootCmd
 	cmd.SetArgs(args)
+	cmd.SetIn(strings.NewReader(input))
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
 
@@ -41,6 +47,7 @@ func executeCommand(args []string) (string, error) {
 
 func resetCmdArgs() {
 	rootArgs.timeout = timeout
+	rootCmd.SetIn(os.Stdin)
 
 	versionArgs = versionFlags{output: "text"}
 	syncArgs = syncFlags{output: "text", concurrency: 4, retries: 3}

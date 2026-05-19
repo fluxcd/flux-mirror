@@ -20,6 +20,7 @@ var dockerReg string
 
 func ensureRegistry(t *testing.T) {
 	t.Helper()
+	testregistry.UseEmptyDockerConfig(t)
 	if dockerReg != "" {
 		return
 	}
@@ -33,7 +34,14 @@ func ensureRegistry(t *testing.T) {
 func writeConfig(t *testing.T, src, dst string) string {
 	t.Helper()
 	g := NewWithT(t)
-	body := fmt.Sprintf(`apiVersion: mirror.fluxcd.io/v1alpha1
+	body := configBody(src, dst)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	g.Expect(os.WriteFile(path, []byte(body), 0o600)).To(Succeed())
+	return path
+}
+
+func configBody(src, dst string) string {
+	return fmt.Sprintf(`apiVersion: mirror.fluxcd.io/v1alpha1
 kind: Config
 artifacts:
   - source: %s
@@ -42,9 +50,6 @@ artifacts:
       semver: ">=0.0.0"
       limit: 5
 `, src, dst)
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	g.Expect(os.WriteFile(path, []byte(body), 0o600)).To(Succeed())
-	return path
 }
 
 func TestSync_NoConfigError(t *testing.T) {
@@ -73,7 +78,22 @@ func TestSync_ConfigViaEnv(t *testing.T) {
 	g.Expect(out).To(ContainSubstring(`"1.0.0"`))
 }
 
-func TestSync_FlagOverridesEnv(t *testing.T) {
+func TestSync_ConfigViaStdin(t *testing.T) {
+	g := NewWithT(t)
+	ensureRegistry(t)
+
+	src := dockerReg + "/stdin-src-" + testregistry.RandSuffix()
+	dst := dockerReg + "/stdin-dst-" + testregistry.RandSuffix()
+	testregistry.PushImage(t, src+":1.0.0")
+	t.Setenv("FLUX_MIRROR_CONFIG", "")
+
+	out, err := executeCommandWithInput([]string{"sync", "-", "--insecure", "-o", "json"}, configBody(src, dst))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(out).To(ContainSubstring(`"copied": [`))
+	g.Expect(out).To(ContainSubstring(`"1.0.0"`))
+}
+
+func TestSync_ArgOverridesEnv(t *testing.T) {
 	g := NewWithT(t)
 	ensureRegistry(t)
 
@@ -82,10 +102,10 @@ func TestSync_FlagOverridesEnv(t *testing.T) {
 	testregistry.PushImage(t, src+":1.0.0")
 
 	cfgPath := writeConfig(t, src, dst)
-	// Env points at a bogus path — the flag must win.
+	// Env points at a bogus path — the positional argument must win.
 	t.Setenv("FLUX_MIRROR_CONFIG", "/nonexistent/path.yaml")
 
-	out, err := executeCommand([]string{"sync", "-c", cfgPath, "--insecure", "--verbose"})
+	out, err := executeCommand([]string{"sync", cfgPath, "--insecure", "--verbose"})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(out).To(ContainSubstring(src))
 }
@@ -102,7 +122,7 @@ func TestSync_DriftExitCode(t *testing.T) {
 	cfgPath := writeConfig(t, src, dst)
 	t.Setenv("FLUX_MIRROR_CONFIG", "")
 
-	_, err := executeCommand([]string{"sync", "-c", cfgPath, "--insecure"})
+	_, err := executeCommand([]string{"sync", cfgPath, "--insecure"})
 	g.Expect(err).To(HaveOccurred())
 	var ec interface{ ExitCode() int }
 	g.Expect(errors.As(err, &ec)).To(BeTrue())
@@ -120,7 +140,7 @@ func TestSync_DryRun(t *testing.T) {
 	cfgPath := writeConfig(t, src, dst)
 	t.Setenv("FLUX_MIRROR_CONFIG", "")
 
-	out, err := executeCommand([]string{"sync", "-c", cfgPath, "--insecure", "--dry-run", "-o", "yaml"})
+	out, err := executeCommand([]string{"sync", cfgPath, "--insecure", "--dry-run", "-o", "yaml"})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(out).To(MatchRegexp(`would-copy:\s*\n\s*- 1\.0\.0`))
 }
@@ -128,6 +148,6 @@ func TestSync_DryRun(t *testing.T) {
 func TestSync_BadOutputFormat(t *testing.T) {
 	g := NewWithT(t)
 	cfgPath := writeConfig(t, "ghcr.io/a/b", "ghcr.io/c/d")
-	_, err := executeCommand([]string{"sync", "-c", cfgPath, "-o", "xml"})
+	_, err := executeCommand([]string{"sync", cfgPath, "-o", "xml"})
 	g.Expect(err).To(HaveOccurred())
 }
