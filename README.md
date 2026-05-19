@@ -90,19 +90,25 @@ artifacts:
 Run the sync:
 
 ```shell
-flux-mirror sync -c flux-mirror.yaml
+flux-mirror sync flux-mirror.yaml
+```
+
+You can also read the config from stdin:
+
+```shell
+flux-mirror sync - < flux-mirror.yaml
 ```
 
 Preview without writing:
 
 ```shell
-flux-mirror sync -c flux-mirror.yaml --dry-run
+flux-mirror sync flux-mirror.yaml --dry-run
 ```
 
 Force a resync of drifted tags e.g. `latest`:
 
 ```shell
-flux-mirror sync -c flux-mirror.yaml --overwrite
+flux-mirror sync flux-mirror.yaml --overwrite
 ```
 
 See [`examples/`](examples) for more configurations and
@@ -122,13 +128,13 @@ real failures from drift, so a CI gate can react to each independently:
 The `--no-progress` flag suppresses the live spinner so log output stays clean in CI:
 
 ```shell
-flux-mirror sync -c flux-mirror.yaml --no-progress
+flux-mirror sync flux-mirror.yaml --no-progress
 ```
 
 For downstream tooling, emit a structured report:
 
 ```shell
-flux-mirror sync -c flux-mirror.yaml -o json | jq '.entries[].outcomes'
+flux-mirror sync flux-mirror.yaml -o json | jq '.entries[].outcomes'
 ```
 
 ### GitHub Actions
@@ -164,7 +170,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Sync Kubernetes SIGs Charts
-        run: flux-mirror sync -c kubernetes-sigs.yaml --no-progress
+        run: flux-mirror sync kubernetes-sigs.yaml --no-progress
 ```
 
 ### Docker
@@ -176,7 +182,7 @@ docker run --rm \
   -e DOCKER_CONFIG=/.docker \
   -v "$PWD/flux-mirror.yaml:/config.yaml:ro" \
   -v "$HOME/.docker/config.json:/.docker/config.json:ro" \
-  ghcr.io/fluxcd/flux-mirror:latest sync -c /config.yaml --no-progress
+  ghcr.io/fluxcd/flux-mirror:latest sync /config.yaml --no-progress
 ```
 
 ### Kubernetes
@@ -191,7 +197,7 @@ destination registry credentials from a `Secret` created via
 
 | Command                       | Description                                                       |
 |-------------------------------|-------------------------------------------------------------------|
-| `flux-mirror sync [-c PATH]`  | Mirror Helm charts and OCI artifacts described by a YAML config.  |
+| `flux-mirror sync CONFIG|-`   | Mirror Helm charts and OCI artifacts described by a YAML config.  |
 | `flux-mirror version`         | Print the CLI version.                                            |
 
 Run `flux-mirror <command> --help` for the full flag list.

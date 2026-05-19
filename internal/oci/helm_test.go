@@ -18,6 +18,7 @@ const helmFixture = "../helmrepo/testdata/podinfo"
 
 func helmChartBytes(t *testing.T, version string) (cfg, tgz []byte) {
 	t.Helper()
+	testregistry.UseEmptyDockerConfig(t)
 	tgz = testregistry.PackageChart(t, helmFixture, version)
 	cfg = testregistry.ChartConfigJSON(t, tgz)
 	return cfg, tgz
@@ -80,6 +81,7 @@ func TestHelmChartLayerDigest(t *testing.T) {
 
 func TestHelmChartLayerDigest_Missing(t *testing.T) {
 	g := NewWithT(t)
+	testregistry.UseEmptyDockerConfig(t)
 	c := NewClient(Insecure())
 	missing := repo("helm-missing") + ":1.0.0"
 
@@ -110,6 +112,7 @@ func TestIsHelmChart(t *testing.T) {
 
 func TestIsHelmChart_MissingTag(t *testing.T) {
 	g := NewWithT(t)
+	testregistry.UseEmptyDockerConfig(t)
 	c := NewClient(Insecure())
 	missing := repo("ishelm-missing") + ":nope"
 

@@ -10,8 +10,9 @@ The config uses a Kubernetes-style `apiVersion`/`kind` fields. It is not a
 Kubernetes resource; it is a CLI config consumed by `flux-mirror`, the same
 way `kustomization.yaml` is consumed by `kustomize`.
 
-`flux-mirror sync` reads the file path from `--config` / `-c`, falling back
-to `FLUX_MIRROR_CONFIG`. The flag wins when both are set.
+`flux-mirror sync` reads the file path from the first positional argument,
+falling back to `FLUX_MIRROR_CONFIG`. Use `-` as the argument to read YAML
+from stdin. The argument wins when both are set.
 
 ## Top-level fields
 

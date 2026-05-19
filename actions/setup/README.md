@@ -35,7 +35,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Sync
-        run: flux-mirror sync -c .flux-mirror.yaml --no-progress
+        run: flux-mirror sync .flux-mirror.yaml --no-progress
 ```
 
 `flux-mirror sync` exits with `1` on a pull/push failure and `2` when drift is detected.
