@@ -5,7 +5,7 @@ artifacts:
     destination: localhost:5050/charts/podinfo
     selector:
       semver: ">=6.9.0"
-      limit: 5
+      limit: 3
     includeReferrers: true
   - source: ghcr.io/stefanprodan/manifests/podinfo
     destination: localhost:5050/manifests/podinfo
@@ -13,7 +13,7 @@ artifacts:
       regex:
         pattern: "^latest$"
       sortBy: alphabetical
-      limit: 3
+      limit: 1
     includeReferrers: true
     overwrite: true
   - source: docker.io/stefanprodan/podinfo
@@ -22,3 +22,8 @@ artifacts:
       semver: "6.x"
       limit: 2
     includeReferrers: true
+    verify:
+      provider: cosign
+      matchOIDCIdentity:
+        - issuer: https://token.actions.githubusercontent.com
+          subject: ^https://github\.com/stefanprodan/.*$

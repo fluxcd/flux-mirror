@@ -34,20 +34,20 @@ on upstream chart repositories.
 - **Helm charts** — mirror charts from HTTP/S Helm repositories to an OCI registries.
   Chart bytes are re-published as a deterministic Helm-OCI artifact, so
   drift detection on re-runs is content-based and stable.
-- **OCI 1.1 referrers** — opt-in mirror of cosign
-  signatures, SBOMs, and attestations attached to artifacts.
+- **OCI 1.1 referrers** — opt-in mirror of signatures, SBOMs, and attestations attached to artifacts.
+- **Cosign verification** — opt-in keyless signature verification for selected
+  source artifacts before they are mirrored.
 - **Selector pipeline** — for OCI artifacts, a four-step
   `regex → semver → sort → top-N` filter. For charts, a semver constraint
   plus top-N. Sort by `semver`, `alphabetical`, or `numerical`.
 - **Idempotent** — destination digests are compared per tag/version. Re-runs
   copy only what's missing or drifted.
-- **Drift gating** — destination drift (different content under the same
-  tag) is reported as a distinct outcome and exit code, so audit pipelines
-  can differentiate "out of date" from "mutated tags".
+- **Drift gating** — destination drift (different content under the same tag) is reported
+  as a distinct outcome and exit code, so audit pipelines can differentiate "out of date" from "mutated tags".
 - **Ambient auth** — OCI credentials come from `~/.docker/config.json` and the
   configured credential helpers (ACR, ECR, GAR, etc.); Helm HTTP/S repository
-  credentials come from Helm's `repositories.yaml`. One `docker login` plus
-  `helm repo add` covers source and destination auth.
+  credentials come from Helm's `repositories.yaml`. Running `helm repo add` and
+  `docker login` covers source and destination auth.
 - **Structured output** — `text` and `yaml`/`json` for downstream
   tooling, plus a verbose mode that streams every blob and manifest digest
   for diagnosing TLS, auth, or push failures.
@@ -69,8 +69,7 @@ Authenticate once against the destination and optionally source registries:
 docker login ghcr.io
 ```
 
-For private HTTP/S Helm repositories, add or log in to the repository with Helm
-so credentials are stored in `repositories.yaml`:
+For private HTTP/S Helm repositories, login with Helm:
 
 ```shell
 helm repo add private https://charts.example.com --username "$USER" --password "$TOKEN"
@@ -86,7 +85,7 @@ charts:
   - name: external-dns
     source: https://kubernetes-sigs.github.io/external-dns/
     destination: oci://ghcr.io/my-org/charts
-    version: ">=1.15.0"
+    version: "*"
     limit: 3
 artifacts:
   - source: registry.k8s.io/external-dns/external-dns

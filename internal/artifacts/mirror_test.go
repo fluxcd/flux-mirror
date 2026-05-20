@@ -5,6 +5,7 @@ package artifacts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -52,6 +53,16 @@ func newRunner() *sync.Runner {
 	}
 }
 
+type recordingVerifier struct {
+	refs []string
+	err  error
+}
+
+func (v *recordingVerifier) Verify(_ context.Context, ref string, _ config.ArtifactVerification) error {
+	v.refs = append(v.refs, ref)
+	return v.err
+}
+
 func TestMirror_CopiesSelectedTags(t *testing.T) {
 	g := NewWithT(t)
 	src := repo("a-src")
@@ -78,6 +89,68 @@ func TestMirror_CopiesSelectedTags(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 	// Top-2 of {1.0.0, 1.1.0, 1.2.0} by semver = 1.1.0 and 1.2.0.
 	g.Expect(tags).To(ConsistOf("1.1.0", "1.2.0"))
+}
+
+func TestMirror_VerifiesSelectedTags(t *testing.T) {
+	g := NewWithT(t)
+	src := repo("verify-src")
+	dst := repo("verify-dst")
+
+	testregistry.PushImage(t, src+":1.0.0")
+	testregistry.PushImage(t, src+":1.1.0")
+
+	c := oci.NewClient(oci.Insecure())
+	entry := config.ArtifactEntry{
+		Source:      src,
+		Destination: dst,
+		Selector:    config.Selector{Limit: new(1)},
+		Verify: &config.ArtifactVerification{
+			Provider: config.VerifyProviderCosign,
+			MatchOIDCIdentity: []config.OIDCIdentity{{
+				Issuer:  "https://token.actions.githubusercontent.com",
+				Subject: `^https://github\.com/example/.*$`,
+			}},
+		},
+	}
+	verifier := &recordingVerifier{}
+	plan, err := New(c, entry, Options{
+		Verifier: verifier,
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}).Plan(context.Background())
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(plan.Jobs).To(HaveLen(1))
+	g.Expect(verifier.refs).To(Equal([]string{src + ":1.1.0"}))
+}
+
+func TestMirror_VerificationFailureStopsPlanning(t *testing.T) {
+	g := NewWithT(t)
+	src := repo("verify-fail-src")
+	dst := repo("verify-fail-dst")
+
+	testregistry.PushImage(t, src+":1.0.0")
+
+	c := oci.NewClient(oci.Insecure())
+	entry := config.ArtifactEntry{
+		Source:      src,
+		Destination: dst,
+		Selector:    config.Selector{Limit: new(1)},
+		Verify: &config.ArtifactVerification{
+			Provider: config.VerifyProviderCosign,
+			MatchOIDCIdentity: []config.OIDCIdentity{{
+				Issuer:  "https://token.actions.githubusercontent.com",
+				Subject: `^https://github\.com/example/.*$`,
+			}},
+		},
+	}
+	verifier := &recordingVerifier{err: errors.New("denied")}
+	plan, err := New(c, entry, Options{
+		Verifier: verifier,
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}).Plan(context.Background())
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("verify " + src + ":1.0.0"))
+	g.Expect(err.Error()).To(ContainSubstring("denied"))
+	g.Expect(plan.Jobs).To(BeEmpty())
 }
 
 func TestMirror_SkipsEqual(t *testing.T) {

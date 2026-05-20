@@ -24,6 +24,8 @@ const (
 	SortByAlphabetical = "alphabetical"
 	SortByNumerical    = "numerical"
 
+	VerifyProviderCosign = "cosign"
+
 	defaultChartVersion = "*"
 	defaultLimit        = 1
 )
@@ -64,11 +66,24 @@ func (c ChartEntry) EffectiveLimit() int {
 
 // ArtifactEntry mirrors an OCI artifact (image, OCI chart, signed manifest, etc.).
 type ArtifactEntry struct {
-	Source           string   `json:"source"`
-	Destination      string   `json:"destination"`
-	Selector         Selector `json:"selector"`
-	Overwrite        bool     `json:"overwrite,omitempty"`
-	IncludeReferrers bool     `json:"includeReferrers,omitempty"`
+	Source           string                `json:"source"`
+	Destination      string                `json:"destination"`
+	Selector         Selector              `json:"selector"`
+	Overwrite        bool                  `json:"overwrite,omitempty"`
+	IncludeReferrers bool                  `json:"includeReferrers,omitempty"`
+	Verify           *ArtifactVerification `json:"verify,omitempty"`
+}
+
+// ArtifactVerification configures signature verification for source artifacts.
+type ArtifactVerification struct {
+	Provider          string         `json:"provider"`
+	MatchOIDCIdentity []OIDCIdentity `json:"matchOIDCIdentity,omitempty"`
+}
+
+// OIDCIdentity matches a Fulcio certificate identity.
+type OIDCIdentity struct {
+	Issuer  string `json:"issuer"`
+	Subject string `json:"subject"`
 }
 
 // Selector is the four-step tag selection pipeline:
@@ -188,6 +203,34 @@ func (a ArtifactEntry) validate() error {
 	}
 	if err := a.Selector.validate(); err != nil {
 		return fmt.Errorf("selector: %w", err)
+	}
+	if a.Verify != nil {
+		if err := a.Verify.validate(); err != nil {
+			return fmt.Errorf("verify: %w", err)
+		}
+	}
+	return nil
+}
+
+func (v ArtifactVerification) validate() error {
+	switch strings.TrimSpace(v.Provider) {
+	case VerifyProviderCosign:
+	default:
+		return fmt.Errorf("provider %q must be %q", v.Provider, VerifyProviderCosign)
+	}
+	if len(v.MatchOIDCIdentity) == 0 {
+		return fmt.Errorf("matchOIDCIdentity must contain at least one identity")
+	}
+	for i, id := range v.MatchOIDCIdentity {
+		if strings.TrimSpace(id.Issuer) == "" {
+			return fmt.Errorf("matchOIDCIdentity[%d].issuer is required", i)
+		}
+		if strings.TrimSpace(id.Subject) == "" {
+			return fmt.Errorf("matchOIDCIdentity[%d].subject is required", i)
+		}
+		if _, err := regexp.Compile(id.Subject); err != nil {
+			return fmt.Errorf("matchOIDCIdentity[%d].subject %q does not compile: %w", i, id.Subject, err)
+		}
 	}
 	return nil
 }
