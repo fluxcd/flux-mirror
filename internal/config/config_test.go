@@ -29,6 +29,11 @@ artifacts:
       semver: ">=2.40.0 <3.0.0"
       limit: 10
     includeReferrers: true
+    verify:
+      provider: cosign
+      matchOIDCIdentity:
+        - issuer: https://token.actions.githubusercontent.com
+          subject: ^https://github\.com/dexidp/.*$
   - source: ghcr.io/example/nightly-build
     destination: ghcr.io/example/mirror/nightly-build
     selector:
@@ -48,6 +53,11 @@ artifacts:
 
 	g.Expect(cfg.Artifacts).To(HaveLen(2))
 	g.Expect(cfg.Artifacts[0].IncludeReferrers).To(BeTrue())
+	g.Expect(cfg.Artifacts[0].Verify.Provider).To(Equal(VerifyProviderCosign))
+	g.Expect(cfg.Artifacts[0].Verify.MatchOIDCIdentity).To(Equal([]OIDCIdentity{{
+		Issuer:  "https://token.actions.githubusercontent.com",
+		Subject: `^https://github\.com/dexidp/.*$`,
+	}}))
 	g.Expect(cfg.Artifacts[0].Selector.EffectiveLimit()).To(Equal(10))
 	g.Expect(cfg.Artifacts[0].Selector.EffectiveSortBy()).To(Equal(SortBySemver))
 	g.Expect(cfg.Artifacts[1].Selector.Regex.Extract).To(Equal("$ts"))
@@ -179,6 +189,49 @@ func TestValidate_Table(t *testing.T) {
 				Selector: Selector{Limit: &negOne},
 			}}},
 			errMsg: "limit must be >= 0",
+		},
+		{
+			name: "verify unknown provider",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Verify: &ArtifactVerification{Provider: "unknown"},
+			}}},
+			errMsg: "provider",
+		},
+		{
+			name: "verify missing identities",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Verify: &ArtifactVerification{Provider: VerifyProviderCosign},
+			}}},
+			errMsg: "matchOIDCIdentity",
+		},
+		{
+			name: "verify missing issuer",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Verify: &ArtifactVerification{
+					Provider: VerifyProviderCosign,
+					MatchOIDCIdentity: []OIDCIdentity{{
+						Subject: `^https://github\.com/a/.*$`,
+					}},
+				},
+			}}},
+			errMsg: "issuer is required",
+		},
+		{
+			name: "verify bad subject regex",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Verify: &ArtifactVerification{
+					Provider: VerifyProviderCosign,
+					MatchOIDCIdentity: []OIDCIdentity{{
+						Issuer:  "https://token.actions.githubusercontent.com",
+						Subject: "(unclosed",
+					}},
+				},
+			}}},
+			errMsg: "does not compile",
 		},
 	}
 

@@ -115,8 +115,9 @@ Each tag job lands in exactly one of these buckets:
 | `would-copy`      | Dry-run forecast: would have been copied.                                                     |
 | `would-overwrite` | Dry-run forecast: would have been overwritten.                                                |
 
-Plan-time failures (e.g., source registry rejected a `ListTags`) are reported as a
-single `✗ <entry> — plan failed: <err>` line and counted toward `failed`.
+Plan-time failures (e.g., source registry rejected a `ListTags`, or cosign
+verification failed for a selected source tag) are reported as a single
+`✗ <entry> — plan failed: <err>` line and counted toward `failed`.
 
 ## Exit codes
 
@@ -152,6 +153,11 @@ artifacts:
       sortBy: alphabetical
       limit: 1
     includeReferrers: true
+    verify:
+      provider: cosign
+      matchOIDCIdentity:
+        - issuer: https://token.actions.githubusercontent.com
+          subject: ^https://github\.com/stefanprodan/.*$
     overwrite: true
   - source: ghcr.io/stefanprodan/podinfo
     destination: localhost:5050/podinfo

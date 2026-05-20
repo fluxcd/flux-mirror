@@ -31,6 +31,13 @@ type Options struct {
 	CopyJobs int
 	// Logger is used for warnings (drift, dry-run preview, excluded tags).
 	Logger *slog.Logger
+	// Verifier verifies source artifact signatures when entry.verify is set.
+	Verifier Verifier
+}
+
+// Verifier checks a selected source reference before it is mirrored.
+type Verifier interface {
+	Verify(ctx context.Context, ref string, cfg config.ArtifactVerification) error
 }
 
 // New builds an EntryMirror for the given artifact entry.
@@ -40,6 +47,9 @@ func New(client *oci.Client, entry config.ArtifactEntry, opts Options) sync.Entr
 	}
 	if opts.CopyJobs <= 0 {
 		opts.CopyJobs = 1
+	}
+	if opts.Verifier == nil {
+		opts.Verifier = oci.NewVerifier(client)
 	}
 	return &mirror{client: client, entry: entry, opts: opts}
 }
@@ -88,6 +98,12 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 			src:       m.entry.Source + ":" + tag,
 			dst:       m.entry.Destination + ":" + tag,
 			overwrite: overwrite,
+		}
+
+		if m.entry.Verify != nil {
+			if err := m.opts.Verifier.Verify(ctx, job.src, *m.entry.Verify); err != nil {
+				return plan, fmt.Errorf("verify %s: %w", job.src, err)
+			}
 		}
 
 		// Snapshot referrers at plan time, not inside the retry closure —

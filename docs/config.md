@@ -4,15 +4,30 @@
 mirror. Sources can be OCI registries or HTTP/S Helm repositories; destinations are OCI
 registries.
 
-## File format
+## Example
 
-The config uses a Kubernetes-style `apiVersion`/`kind` fields. It is not a
-Kubernetes resource; it is a CLI config consumed by `flux-mirror`, the same
-way `kustomization.yaml` is consumed by `kustomize`.
-
-`flux-mirror sync` reads the file path from the first positional argument,
-falling back to `FLUX_MIRROR_CONFIG`. Use `-` as the argument to read YAML
-from stdin. The argument wins when both are set.
+```yaml
+apiVersion: mirror.fluxcd.io/v1alpha1
+kind: Config
+artifacts:
+  - source: docker.io/stefanprodan/podinfo
+    destination: quay.io/my-org/podinfo
+    selector:
+      semver: "6.x"
+      limit: 2
+    includeReferrers: true
+    verify:
+      provider: cosign
+      matchOIDCIdentity:
+        - issuer: https://token.actions.githubusercontent.com
+          subject: ^https://github\.com/stefanprodan/.*$
+charts:
+  - name: podinfo
+    source: https://stefanprodan.github.io/podinfo
+    destination: oci://quay.io/my-org/charts
+    version: "6.x"
+    limit: 2
+```
 
 ## Top-level fields
 
@@ -37,13 +52,14 @@ charts, Flux OCI artifacts, or anything else stored in an OCI registry.
 
 ### Fields
 
-| Field              | Type   | Default | Description                                                                                               |
-|--------------------|--------|---------|-----------------------------------------------------------------------------------------------------------|
-| `source`           | string |         | Source OCI reference, without scheme (e.g. `ghcr.io/fluxcd/flux-cli`).                                    |
-| `destination`      | string |         | Destination OCI reference, without scheme.                                                                |
-| `selector`         | object |         | Tag selection policy. See [Selector](#selector).                                                          |
-| `overwrite`        | bool   | `false` | If true, replace tags whose destination digest differs from source. See [Overwrite](#overwrite-behavior). |
-| `includeReferrers` | bool   | `false` | If true, also mirror referrers of each tag (cosign signatures, SBOMs, attestations) via the OCI 1.1 API.  |
+| Field              | Type   | Default | Description                                                                                                                                                                    |
+|--------------------|--------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `source`           | string |         | Source OCI reference, without scheme (e.g. `ghcr.io/fluxcd/flux-cli`).                                                                                                         |
+| `destination`      | string |         | Destination OCI reference, without scheme.                                                                                                                                     |
+| `selector`         | object |         | Tag selection policy. See [Selector](#selector).                                                                                                                               |
+| `overwrite`        | bool   | `false` | If true, replace tags whose destination digest differs from source. See [Overwrite](#overwrite-behavior).                                                                      |
+| `includeReferrers` | bool   | `false` | If true, also mirror referrers of each tag (cosign signatures, SBOMs, attestations) via the OCI 1.1 API.                                                                       |
+| `verify`           | object |         | Optional source artifact signature verification. When set, selected tags are verified before any copy job is scheduled. See [Signature verification](#signature-verification). |
 
 ### Selector
 
@@ -80,8 +96,6 @@ prefixes or suffixes can still feed into semver or numerical sort.
 |-----------|--------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `pattern` | string | Go regular expression. Tags not matching the pattern are dropped.                                                                                      |
 | `extract` | string | Replacement string referencing named capture groups (e.g. `$version`). The extracted value is used for sort and the `semver` filter, not the raw tag.  |
-
-### Examples
 
 #### Image with Semver tags
 
@@ -122,6 +136,38 @@ artifacts:
 The regex matches tags like `main-a1b2c3d-1731420000` and uses `1731420000`
 as the sort key. The 5 most recent builds by timestamp are mirrored; tags
 that don't match the pattern are dropped.
+
+### Signature verification
+
+Set `verify.provider: cosign` to verify selected source tags before they are
+mirrored. Verification uses Cosign v3 bundles attached to the source
+artifact as OCI referrers. If any selected tag has no matching valid signature,
+planning fails for that artifact entry and no copy job is scheduled for it.
+
+| Field               | Type   | Description                                                                 |
+|---------------------|--------|-----------------------------------------------------------------------------|
+| `provider`          | string | Must be `cosign`.                                                           |
+| `matchOIDCIdentity` | list   | One or more OIDC identity matchers accepted for the signing certificate.    |
+| `issuer`            | string | OIDC issuer URL, e.g. `https://token.actions.githubusercontent.com`.        |
+| `subject`           | string | Go regexp matched against the signing certificate subject alternative name. |
+
+Multiple `matchOIDCIdentity` entries are treated as alternatives; a signature
+is accepted when any identity matches.
+
+```yaml
+artifacts:
+  - source: ghcr.io/stefanprodan/podinfo
+    destination: quay.io/my-org/podinfo
+    selector:
+      semver: "*"
+      limit: 1
+    includeReferrers: true
+    verify:
+      provider: cosign
+      matchOIDCIdentity:
+        - issuer: https://token.actions.githubusercontent.com
+          subject: ^https://github\.com/stefanprodan/.*$
+```
 
 ## Charts
 
@@ -169,8 +215,6 @@ land at `quay.io/example/charts/nginx:<version>`.
 OCI tags do not accept `+`, so semver build metadata (e.g. `1.2.3+meta`) is
 encoded as `_` in the destination tag (`1.2.3_meta`). Listing and comparison
 treat both forms as the same version.
-
-### Examples
 
 #### HTTP Helm repository
 
@@ -230,36 +274,6 @@ signature is published after the artifact was first mirrored. Referrers
 that exist with a different digest are skipped (default) or replaced
 (`overwrite: true`).
 
-## Full example
-
-```yaml
-apiVersion: mirror.fluxcd.io/v1alpha1
-kind: Config
-
-artifacts:
-  - source: ghcr.io/fluxcd/flux-cli
-    destination: quay.io/example/flux-cli
-    selector:
-      semver: "2.x"
-      limit: 10
-    includeReferrers: true
-  - source: ghcr.io/example/nightly-build
-    destination: quay.io/example/nightly-build
-    selector:
-      regex:
-        pattern: '^.+-[0-9a-f]+-(?P<ts>\d+)$'
-        extract: '$ts'
-      sortBy: numerical
-      limit: 5
-
-charts:
-  - name: nginx
-    source: https://charts.example.com
-    destination: oci://quay.io/example/charts
-    version: ">=15.0.0 <16.0.0"
-    limit: 5
-```
-
 ## Defaults
 
 | Field                          | Default  |
@@ -268,6 +282,7 @@ charts:
 | `artifacts[].selector.limit`   | `1`      |
 | `artifacts[].overwrite`        | `false`  |
 | `artifacts[].includeReferrers` | `false`  |
+| `artifacts[].verify`           | unset    |
 | `charts[].version`             | `*`      |
 | `charts[].limit`               | `1`      |
 | `charts[].overwrite`           | `false`  |
