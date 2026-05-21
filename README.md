@@ -215,6 +215,7 @@ destination registry credentials from a `Secret` created via
 |-----------------------------|------------------------------------------------------------------|
 | `flux-mirror sync [CONFIG]` | Mirror Helm charts and OCI artifacts described by a YAML config. |
 | `flux-mirror version`       | Print the CLI version.                                           |
+| `flux-mirror completion`    | Generate shell completion for bash, fish, powershell and zsh.    |
 
 Run `flux-mirror <command> --help` for the full flag list.
 
