@@ -47,7 +47,9 @@ on upstream chart repositories.
 - **Ambient auth** — OCI credentials come from `~/.docker/config.json` and the
   configured credential helpers (ACR, ECR, GAR, etc.); Helm HTTP/S repository
   credentials come from Helm's `repositories.yaml`. Running `helm repo add` and
-  `docker login` covers source and destination auth.
+  `docker login` covers source and destination auth. Per-host JWT auth
+  (GitHub/Forgejo OIDC or signed JWKs) is also available via the config's `auth`
+  section — see [config docs](docs/config.md#auth).
 - **Structured output** — `text` and `yaml`/`json` for downstream
   tooling, plus a verbose mode that streams every blob and manifest digest
   for diagnosing TLS, auth, or push failures.
@@ -214,6 +216,7 @@ destination registry credentials from a `Secret` created via
 | Command                     | Description                                                      |
 |-----------------------------|------------------------------------------------------------------|
 | `flux-mirror sync [CONFIG]` | Mirror Helm charts and OCI artifacts described by a YAML config. |
+| `flux-mirror generate`      | Generate JWK pairs and registry credentials for JWK-based auth.   |
 | `flux-mirror version`       | Print the CLI version.                                           |
 | `flux-mirror completion`    | Generate shell completion for bash, fish, powershell and zsh.    |
 
@@ -225,6 +228,8 @@ Run `flux-mirror <command> --help` for the full flag list.
   exit codes, and example invocations.
 - [Config specification](docs/config.md) — YAML schema for `artifacts` and
   `charts` entries, selector pipeline, overwrite semantics, defaults.
+- [Generate command reference](docs/generate.md) — JWK pairs and Docker config /
+  pull-secret files for JWK-based registry auth.
 - [Examples](examples/) — runnable configs for common mirror scenarios.
 
 ## License

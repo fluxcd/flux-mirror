@@ -233,6 +233,110 @@ func TestValidate_Table(t *testing.T) {
 			}}},
 			errMsg: "does not compile",
 		},
+		{
+			name: "auth valid provider",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "mint.example", JWT: &AuthJWT{Provider: JWTProviderGitHub, Aud: "custom"},
+				}}}},
+		},
+		{
+			name: "auth valid fromEnv",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "static.example", JWT: &AuthJWT{FromEnv: "TOKEN"},
+				}}}},
+		},
+		{
+			name: "auth valid jwkPath",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "registry.example", JWT: &AuthJWT{
+						JWKPath: "/path/jwk.json", Iss: "https://issuer", Sub: "client", Aud: "registry.example",
+					},
+				}}}},
+		},
+		{
+			name: "auth empty hosts",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{}},
+			errMsg: "hosts must contain at least one host",
+		},
+		{
+			name: "auth missing host",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{JWT: &AuthJWT{FromEnv: "TOKEN"}}}}},
+			errMsg: "host is required",
+		},
+		{
+			name: "auth missing jwt",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example"}}}},
+			errMsg: "jwt is required",
+		},
+		{
+			name: "auth duplicate host",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{
+					{Host: "dup.example", JWT: &AuthJWT{FromEnv: "A"}},
+					{Host: "dup.example", JWT: &AuthJWT{FromEnv: "B"}},
+				}}},
+			errMsg: "configured more than once",
+		},
+		{
+			name: "auth no source set",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{}}}}},
+			errMsg: "exactly one of provider, fromEnv, or jwkPath",
+		},
+		{
+			name: "auth two sources set",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+					Provider: JWTProviderGitHub, FromEnv: "TOKEN",
+				}}}}},
+			errMsg: "exactly one of provider, fromEnv, or jwkPath",
+		},
+		{
+			name: "auth invalid provider",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+					Provider: "gitlab",
+				}}}}},
+			errMsg: "must be one of: github, forgejo",
+		},
+		{
+			name: "auth jwkPath missing iss",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+					JWKPath: "/k.json", Sub: "client",
+				}}}}},
+			errMsg: "iss is required with jwkPath",
+		},
+		{
+			name: "auth jwkPath missing sub",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+					JWKPath: "/k.json", Iss: "https://issuer",
+				}}}}},
+			errMsg: "sub is required with jwkPath",
+		},
+		{
+			name: "auth iss set without jwkPath",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+					Provider: JWTProviderGitHub, Iss: "https://issuer",
+				}}}}},
+			errMsg: "iss and sub can only be set with jwkPath",
+		},
+		{
+			name: "auth aud set with fromEnv",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+					FromEnv: "TOKEN", Aud: "nope",
+				}}}}},
+			errMsg: "aud can only be set with jwkPath or provider",
+		},
 	}
 
 	for _, tt := range tests {

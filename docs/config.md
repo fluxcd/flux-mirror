@@ -35,10 +35,68 @@ charts:
 |--------------|--------|---------|---------------------------------------------------------------------------------------------|
 | `apiVersion` | string |         | Must be `mirror.fluxcd.io/v1alpha1`.                                                        |
 | `kind`       | string |         | Must be `Config`.                                                                           |
+| `auth`       | object | `null`  | Per-host JWT authentication for outbound OCI registry requests. See [Auth](#auth).         |
 | `artifacts`  | list   | `[]`    | OCI artifacts (images, OCI Helm charts, Flux artifacts, etc.). See [Artifacts](#artifacts). |
 | `charts`     | list   | `[]`    | Helm charts from HTTP/S or OCI Helm repositories. See [Charts](#charts).                    |
 
 At least one of `artifacts` or `charts` must be set.
+
+## Auth
+
+The optional `auth` section attaches a JWT credential to specific OCI registry
+hosts. On each request to a listed host, the JWT is sent as the
+`Authorization: Bearer <jwt>` credential. Requests to hosts that are **not**
+listed use the ambient keychain auth (Docker config `~/.docker/config.json` /
+`$DOCKER_CONFIG` and any configured credential helpers) instead.
+
+`auth` and the ambient credential files work together fine — **as long as each
+registry host is served by one or the other, not both.** Listing a host in
+`auth` *and* relying on ambient credentials for that same host is unsupported:
+the JWT and the keychain layer on top of each other in a registry-dependent way,
+and the result is undefined. Pick one mechanism per host.
+
+> This applies only to OCI registry requests — the `artifacts` section and
+> `oci://` Helm sources. HTTP/S Helm repositories are never affected by `auth`;
+> their credentials always come from the Helm repositories config
+> (`repositories.yaml` / `$HELM_REPOSITORY_CONFIG`). See [Source scheme](#source-scheme).
+
+```yaml
+auth:
+  hosts:
+    - host: registry.example.com
+      jwt:
+        # Exactly one of the following three selects how the token is obtained.
+        provider: github           # mint an OIDC ID token (github or forgejo)
+        fromEnv: SOME_ENV_VAR      # send a static JWT read from this env var
+        jwkPath: /path/to/jwk.json # sign a fresh JWT per request with this key
+
+        # Required for, and allowed only with, jwkPath.
+        iss: https://example.com/issuer
+        sub: client-id
+
+        # Optional; allowed only with jwkPath or provider. Defaults to host.
+        aud: registry.example.com
+```
+
+### Token sources
+
+| Source     | Behavior                                                                                                                                                                                                  |
+|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `provider` | Mints an OIDC ID token for `aud` from the GitHub/Forgejo Actions endpoint (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`). Cached for the first 50% of its lifetime, then reminted. One of: `github`, `forgejo`. |
+| `fromEnv`  | Sends the JWT read from the named environment variable as-is (e.g. a GitLab CI `id_token`). Errors at runtime if the variable is unset or empty.                                                          |
+| `jwkPath`  | Signs a fresh, 60-second JWT on **every** request with the private Ed25519/ECDSA key in the JWK file at this path. The key id is set in the `kid` header.                                                  |
+
+### Fields
+
+| Field      | Type   | Default | Description                                                                                  |
+|------------|--------|---------|---------------------------------------------------------------------------------------------|
+| `host`     | string |         | Registry host to authenticate. Required and unique across `hosts`.                           |
+| `provider` | string |         | OIDC provider, one of `github`, `forgejo`. Mutually exclusive with `fromEnv` and `jwkPath`.  |
+| `fromEnv`  | string |         | Environment variable holding a static JWT. Mutually exclusive with `provider` and `jwkPath`. |
+| `jwkPath`  | string |         | Path to a private JSON Web Key. Mutually exclusive with `provider` and `fromEnv`.            |
+| `iss`      | string |         | Token issuer. Required with `jwkPath`; not allowed otherwise.                                |
+| `sub`      | string |         | Token subject. Required with `jwkPath`; not allowed otherwise.                               |
+| `aud`      | string | `host`  | Token audience. Allowed only with `jwkPath` or `provider`; defaults to `host`.               |
 
 ## Artifacts
 

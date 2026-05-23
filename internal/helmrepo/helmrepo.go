@@ -33,7 +33,7 @@ type Source interface {
 
 // New picks the Source implementation by URL scheme:
 //   - http, https → HTTPSource (auth via Helm repositories.yaml when present)
-//   - oci         → OCISource (auth via ociClient's ambient Docker config)
+//   - oci         → OCISource (auth via the OCI client: ambient Docker config, or a per-host JWT from the config's auth section)
 func New(sourceURL string, ociClient *oci.Client) (Source, error) {
 	u, err := url.Parse(sourceURL)
 	if err != nil {

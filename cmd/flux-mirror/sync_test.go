@@ -5,6 +5,9 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,119 +15,112 @@ import (
 	"path/filepath"
 	"testing"
 
+	jose "github.com/go-jose/go-jose/v4"
 	. "github.com/onsi/gomega"
 
-	"github.com/fluxcd/pkg/auth/utils/cioidc"
+	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
+	"github.com/fluxcd/flux-mirror/internal/config"
 	"github.com/fluxcd/flux-mirror/internal/testregistry"
 )
 
+// writeJWK writes a fresh private Ed25519 JWK to a temp file and returns its path.
+func writeJWK(t *testing.T) string {
+	t.Helper()
+	g := NewWithT(t)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	g.Expect(err).ToNot(HaveOccurred())
+	b, err := json.Marshal(jose.JSONWebKey{Key: priv, KeyID: "k", Algorithm: "EdDSA"})
+	g.Expect(err).ToNot(HaveOccurred())
+	path := filepath.Join(t.TempDir(), "jwk.json")
+	g.Expect(os.WriteFile(path, b, 0o600)).To(Succeed())
+	return path
+}
+
 func TestJWTTransportOptions(t *testing.T) {
-	saved := syncArgs
-	t.Cleanup(func() { syncArgs = saved })
-
-	reset := func() {
-		syncArgs.jwtProvider = ""
-		syncArgs.jwtTokens = nil
-		syncArgs.jwtAudiences = nil
-	}
-
-	t.Run("token requires host", func(t *testing.T) {
+	t.Run("provider audience builds a transport with host as default aud", func(t *testing.T) {
 		g := NewWithT(t)
-		reset()
-		syncArgs.jwtTokens = []string{"just-a-token"}
-		_, err := jwtTransportOptions(http.DefaultTransport)
-		g.Expect(err).To(MatchError(ContainSubstring("<token>@<host>")))
-	})
-
-	t.Run("token with empty host", func(t *testing.T) {
-		g := NewWithT(t)
-		reset()
-		syncArgs.jwtTokens = []string{"tok@"}
-		_, err := jwtTransportOptions(http.DefaultTransport)
-		g.Expect(err).To(MatchError(ContainSubstring("<token>@<host>")))
-	})
-
-	t.Run("empty token reads from env var", func(t *testing.T) {
-		g := NewWithT(t)
-		reset()
-		t.Setenv(defaultJWTTokenEnvVar, "env-token")
-		syncArgs.jwtTokens = []string{"@static.example"}
-		opts, err := jwtTransportOptions(http.DefaultTransport)
+		auth := &config.Auth{Hosts: []config.AuthHost{{
+			Host: "mint.example",
+			JWT:  &config.AuthJWT{Provider: config.JWTProviderForgejo},
+		}}}
+		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
-		_, err = cioidc.NewTransport(opts...)
+		g.Expect(opts).To(HaveLen(2)) // WithInner + 1 audience.
+		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
 	})
 
-	t.Run("empty token with unset env var", func(t *testing.T) {
+	t.Run("fromEnv reads the named env var", func(t *testing.T) {
 		g := NewWithT(t)
-		reset()
-		t.Setenv(defaultJWTTokenEnvVar, "")
-		syncArgs.jwtTokens = []string{"@static.example"}
-		_, err := jwtTransportOptions(http.DefaultTransport)
-		g.Expect(err).To(MatchError(ContainSubstring("environment variable is not set")))
-	})
-
-	t.Run("audience requires provider", func(t *testing.T) {
-		g := NewWithT(t)
-		reset()
-		syncArgs.jwtAudiences = []string{"aud@mint.example"}
-		_, err := jwtTransportOptions(http.DefaultTransport)
-		g.Expect(err).To(MatchError(ContainSubstring("--jwt-provider is required")))
-	})
-
-	t.Run("provider requires audience", func(t *testing.T) {
-		g := NewWithT(t)
-		reset()
-		syncArgs.jwtProvider = jwtProviderGitHub
-		syncArgs.jwtTokens = []string{"tok@static.example"}
-		_, err := jwtTransportOptions(http.DefaultTransport)
-		g.Expect(err).To(MatchError(ContainSubstring("--jwt-audience is required")))
-	})
-
-	t.Run("invalid provider", func(t *testing.T) {
-		g := NewWithT(t)
-		reset()
-		syncArgs.jwtProvider = "gitlab"
-		syncArgs.jwtAudiences = []string{"aud@mint.example"}
-		_, err := jwtTransportOptions(http.DefaultTransport)
-		g.Expect(err).To(MatchError(ContainSubstring("invalid --jwt-provider")))
-	})
-
-	t.Run("audience with empty value", func(t *testing.T) {
-		g := NewWithT(t)
-		reset()
-		syncArgs.jwtProvider = jwtProviderGitHub
-		syncArgs.jwtAudiences = []string{"@host.example"}
-		_, err := jwtTransportOptions(http.DefaultTransport)
-		g.Expect(err).To(MatchError(ContainSubstring("<audience>[@<host>]")))
-	})
-
-	t.Run("valid token and audience build a transport", func(t *testing.T) {
-		g := NewWithT(t)
-		reset()
-		syncArgs.jwtProvider = jwtProviderForgejo
-		syncArgs.jwtTokens = []string{"tok@static.example"}
-		syncArgs.jwtAudiences = []string{"aud@mint.example", "self.example"}
-		opts, err := jwtTransportOptions(http.DefaultTransport)
+		t.Setenv("MY_CI_TOKEN", "env-token")
+		auth := &config.Auth{Hosts: []config.AuthHost{{
+			Host: "static.example",
+			JWT:  &config.AuthJWT{FromEnv: "MY_CI_TOKEN"},
+		}}}
+		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
-		// WithInner + 1 token + 2 audiences.
-		g.Expect(opts).To(HaveLen(4))
-		// The options are valid input to cioidc.NewTransport (distinct hosts).
-		_, err = cioidc.NewTransport(opts...)
+		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
 	})
 
-	t.Run("duplicate host across flags is rejected by the lib", func(t *testing.T) {
+	t.Run("fromEnv with unset env var errors", func(t *testing.T) {
 		g := NewWithT(t)
-		reset()
-		syncArgs.jwtProvider = jwtProviderGitHub
-		syncArgs.jwtTokens = []string{"tok@dup.example"}
-		syncArgs.jwtAudiences = []string{"aud@dup.example"}
-		opts, err := jwtTransportOptions(http.DefaultTransport)
+		t.Setenv("MY_CI_TOKEN", "")
+		auth := &config.Auth{Hosts: []config.AuthHost{{
+			Host: "static.example",
+			JWT:  &config.AuthJWT{FromEnv: "MY_CI_TOKEN"},
+		}}}
+		_, err := jwtTransportOptions(http.DefaultTransport, auth)
+		g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
+	})
+
+	t.Run("jwkPath signs from the key file", func(t *testing.T) {
+		g := NewWithT(t)
+		auth := &config.Auth{Hosts: []config.AuthHost{{
+			Host: "registry.example",
+			JWT: &config.AuthJWT{
+				JWKPath: writeJWK(t),
+				Iss:     "https://issuer.example",
+				Sub:     "client-id",
+				Aud:     "registry.example",
+			},
+		}}}
+		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
-		_, err = cioidc.NewTransport(opts...)
-		g.Expect(err).To(MatchError(ContainSubstring("configured more than once")))
+		_, err = cijwt.NewTransport(opts...)
+		g.Expect(err).ToNot(HaveOccurred())
+	})
+
+	t.Run("jwkPath with unreadable file errors", func(t *testing.T) {
+		g := NewWithT(t)
+		auth := &config.Auth{Hosts: []config.AuthHost{{
+			Host: "registry.example",
+			JWT: &config.AuthJWT{
+				JWKPath: filepath.Join(t.TempDir(), "missing.json"),
+				Iss:     "https://issuer.example",
+				Sub:     "client-id",
+			},
+		}}}
+		_, err := jwtTransportOptions(http.DefaultTransport, auth)
+		g.Expect(err).To(MatchError(ContainSubstring("read jwkPath")))
+	})
+
+	t.Run("multiple hosts of mixed kinds build one transport", func(t *testing.T) {
+		g := NewWithT(t)
+		t.Setenv("MY_CI_TOKEN", "env-token")
+		auth := &config.Auth{Hosts: []config.AuthHost{
+			{Host: "static.example", JWT: &config.AuthJWT{FromEnv: "MY_CI_TOKEN"}},
+			{Host: "mint.example", JWT: &config.AuthJWT{Provider: config.JWTProviderGitHub}},
+			{Host: "registry.example", JWT: &config.AuthJWT{
+				JWKPath: writeJWK(t), Iss: "https://issuer.example", Sub: "client-id",
+			}},
+		}}
+		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
+		g.Expect(err).ToNot(HaveOccurred())
+		g.Expect(opts).To(HaveLen(4)) // WithInner + 3 hosts.
+		_, err = cijwt.NewTransport(opts...)
+		g.Expect(err).ToNot(HaveOccurred())
 	})
 }
 

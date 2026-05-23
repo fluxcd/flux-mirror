@@ -45,7 +45,7 @@ func Insecure() ClientOption {
 }
 
 // WithTransport sets the HTTP RoundTripper used for every registry call.
-// Wrap http.DefaultTransport with ChunkingTransport / JWTBearerTransport
+// Wrap http.DefaultTransport with ChunkingTransport / cijwt.Transport
 // (or any other RoundTripper) and pass the outermost wrapper here.
 func WithTransport(t http.RoundTripper) ClientOption {
 	return func(c *Client) { c.transport = t }

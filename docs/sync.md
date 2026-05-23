@@ -34,6 +34,9 @@ OCI registry auth is read from the ambient Docker config:
 
 Log in once with `docker login`, `oras login`, etc. and `flux-mirror` picks up the credentials.
 
+Hosts listed in the config's [`auth`](./config.md#auth) section authenticate with a
+per-host JWT instead; use `auth` or ambient credentials for a given host, not both.
+
 Helm HTTP/S repository auth is read from the ambient Helm repositories config:
 
 - Helm's default `repositories.yaml` path, or the `HELM_REPOSITORY_CONFIG` env var if set.

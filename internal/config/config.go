@@ -26,6 +26,13 @@ const (
 
 	VerifyProviderCosign = "cosign"
 
+	// JWTProviderGitHub and JWTProviderForgejo are the OIDC providers that can
+	// mint ID tokens for an auth host. Both currently mint tokens the same way
+	// (the GitHub/Forgejo Actions endpoint), but they are kept as distinct values
+	// so the config can adapt to each platform's breaking changes.
+	JWTProviderGitHub  = "github"
+	JWTProviderForgejo = "forgejo"
+
 	defaultChartVersion = "*"
 	defaultLimit        = 1
 )
@@ -34,8 +41,54 @@ const (
 type Config struct {
 	APIVersion string          `json:"apiVersion"`
 	Kind       string          `json:"kind"`
+	Auth       *Auth           `json:"auth,omitempty"`
 	Charts     []ChartEntry    `json:"charts,omitempty"`
 	Artifacts  []ArtifactEntry `json:"artifacts,omitempty"`
+}
+
+// Auth configures per-host JWT authentication for outbound OCI registry
+// requests. Hosts that are not listed keep their ambient keychain
+// authentication; a given host should use either auth or ambient credentials,
+// not both. See docs/config.md#auth.
+type Auth struct {
+	Hosts []AuthHost `json:"hosts,omitempty"`
+}
+
+// AuthHost binds an authentication method to a registry host.
+type AuthHost struct {
+	Host string   `json:"host"`
+	JWT  *AuthJWT `json:"jwt,omitempty"`
+}
+
+// AuthJWT configures a per-host JWT credential. Exactly one of Provider,
+// FromEnv, or JWKPath selects how the token is obtained:
+//
+//   - Provider mints an OIDC ID token for Aud from a CI platform's Actions
+//     endpoint (see JWTProviderGitHub, JWTProviderForgejo).
+//   - FromEnv sends a static JWT read as-is from the named environment variable
+//     (e.g. a GitLab CI id_token).
+//   - JWKPath signs a fresh JWT on every request with the private JSON Web Key
+//     at the path.
+//
+// Iss and Sub are required for, and may only be set with, JWKPath. Aud is
+// optional and may only be set with JWKPath or Provider; it defaults to Host.
+type AuthJWT struct {
+	Provider string `json:"provider,omitempty"`
+	FromEnv  string `json:"fromEnv,omitempty"`
+	JWKPath  string `json:"jwkPath,omitempty"`
+
+	Iss string `json:"iss,omitempty"`
+	Sub string `json:"sub,omitempty"`
+
+	Aud string `json:"aud,omitempty"`
+}
+
+// EffectiveAud returns the audience with the documented default (the host) applied.
+func (h AuthHost) EffectiveAud() string {
+	if h.JWT == nil || strings.TrimSpace(h.JWT.Aud) == "" {
+		return h.Host
+	}
+	return h.JWT.Aud
 }
 
 // ChartEntry mirrors a Helm chart from an HTTP/S or OCI source to an OCI destination.
@@ -162,6 +215,11 @@ func (c *Config) Validate() error {
 	if len(c.Charts) == 0 && len(c.Artifacts) == 0 {
 		return fmt.Errorf("config has no entries: at least one of 'charts' or 'artifacts' must be set")
 	}
+	if c.Auth != nil {
+		if err := c.Auth.validate(); err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
+	}
 	for i, ch := range c.Charts {
 		if err := ch.validate(); err != nil {
 			return fmt.Errorf("charts[%d]: %w", i, err)
@@ -170,6 +228,84 @@ func (c *Config) Validate() error {
 	for i, a := range c.Artifacts {
 		if err := a.validate(); err != nil {
 			return fmt.Errorf("artifacts[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func (a Auth) validate() error {
+	if len(a.Hosts) == 0 {
+		return fmt.Errorf("hosts must contain at least one host")
+	}
+	seen := make(map[string]bool, len(a.Hosts))
+	for i, h := range a.Hosts {
+		if err := h.validate(); err != nil {
+			return fmt.Errorf("hosts[%d]: %w", i, err)
+		}
+		if seen[h.Host] {
+			return fmt.Errorf("hosts[%d]: host %q is configured more than once", i, h.Host)
+		}
+		seen[h.Host] = true
+	}
+	return nil
+}
+
+func (h AuthHost) validate() error {
+	if strings.TrimSpace(h.Host) == "" {
+		return fmt.Errorf("host is required")
+	}
+	if h.JWT == nil {
+		return fmt.Errorf("jwt is required")
+	}
+	if err := h.JWT.validate(); err != nil {
+		return fmt.Errorf("jwt: %w", err)
+	}
+	return nil
+}
+
+func (j AuthJWT) validate() error {
+	provider := strings.TrimSpace(j.Provider)
+	fromEnv := strings.TrimSpace(j.FromEnv)
+	jwkPath := strings.TrimSpace(j.JWKPath)
+
+	n := 0
+	for _, set := range []bool{provider != "", fromEnv != "", jwkPath != ""} {
+		if set {
+			n++
+		}
+	}
+	if n != 1 {
+		return fmt.Errorf("exactly one of provider, fromEnv, or jwkPath must be set")
+	}
+
+	hasIss := strings.TrimSpace(j.Iss) != ""
+	hasSub := strings.TrimSpace(j.Sub) != ""
+	hasAud := strings.TrimSpace(j.Aud) != ""
+
+	switch {
+	case jwkPath != "":
+		if !hasIss {
+			return fmt.Errorf("iss is required with jwkPath")
+		}
+		if !hasSub {
+			return fmt.Errorf("sub is required with jwkPath")
+		}
+	case provider != "":
+		switch provider {
+		case JWTProviderGitHub, JWTProviderForgejo:
+		default:
+			return fmt.Errorf("provider %q must be one of: %s, %s",
+				provider, JWTProviderGitHub, JWTProviderForgejo)
+		}
+		if hasIss || hasSub {
+			return fmt.Errorf("iss and sub can only be set with jwkPath")
+		}
+	case fromEnv != "":
+		if hasIss || hasSub {
+			return fmt.Errorf("iss and sub can only be set with jwkPath")
+		}
+		if hasAud {
+			return fmt.Errorf("aud can only be set with jwkPath or provider")
 		}
 	}
 	return nil
