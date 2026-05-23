@@ -38,9 +38,9 @@ var syncCmd = &cobra.Command{
 	Long: `Mirror Helm charts and OCI artifacts between registries based on a
 declarative YAML config (apiVersion: mirror.fluxcd.io/v1alpha1, kind: Config).
 OCI registry auth is read from the ambient Docker config (~/.docker/config.json,
-$DOCKER_CONFIG, and configured credential helpers). Helm HTTP/S repository auth
-is read from Helm's default repositories.yaml path, or $HELM_REPOSITORY_CONFIG
-when set.
+$DOCKER_CONFIG, and configured credential helpers), or, for hosts listed in the
+config's 'auth' section, from a per-host JWT. Helm HTTP/S repository auth is read
+from Helm's default repositories.yaml path, or $HELM_REPOSITORY_CONFIG when set.
 
 Exit codes:
   0  clean run (everything copied/skipped as expected)
@@ -279,7 +279,7 @@ func buildClientTransport(auth *config.Auth) (http.RoundTripper, error) {
 	if !jwtSet && !chunkSet {
 		return nil, nil
 	}
-	var t http.RoundTripper = http.DefaultTransport
+	t := http.DefaultTransport
 	if jwtSet {
 		opts, err := jwtTransportOptions(t, auth)
 		if err != nil {

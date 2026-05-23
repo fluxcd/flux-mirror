@@ -46,8 +46,10 @@ type Config struct {
 	Artifacts  []ArtifactEntry `json:"artifacts,omitempty"`
 }
 
-// Auth configures per-host authentication for outbound registry requests.
-// Hosts that are not listed keep their ambient keychain authentication.
+// Auth configures per-host JWT authentication for outbound OCI registry
+// requests. Hosts that are not listed keep their ambient keychain
+// authentication; a given host should use either auth or ambient credentials,
+// not both. See docs/config.md#auth.
 type Auth struct {
 	Hosts []AuthHost `json:"hosts,omitempty"`
 }

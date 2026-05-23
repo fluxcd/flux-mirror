@@ -35,7 +35,7 @@ charts:
 |--------------|--------|---------|---------------------------------------------------------------------------------------------|
 | `apiVersion` | string |         | Must be `mirror.fluxcd.io/v1alpha1`.                                                        |
 | `kind`       | string |         | Must be `Config`.                                                                           |
-| `auth`       | object | `null`  | Per-host JWT authentication for outbound registry requests. See [Auth](#auth).             |
+| `auth`       | object | `null`  | Per-host JWT authentication for outbound OCI registry requests. See [Auth](#auth).         |
 | `artifacts`  | list   | `[]`    | OCI artifacts (images, OCI Helm charts, Flux artifacts, etc.). See [Artifacts](#artifacts). |
 | `charts`     | list   | `[]`    | Helm charts from HTTP/S or OCI Helm repositories. See [Charts](#charts).                    |
 
@@ -43,11 +43,22 @@ At least one of `artifacts` or `charts` must be set.
 
 ## Auth
 
-The optional `auth` section attaches a JWT credential to specific registry
-hosts. On each request to a listed host, the JWT is stamped as an
-`Authorization: Bearer <jwt>` header, overwriting any existing one. Requests to
-hosts that are **not** listed pass through with their ambient keychain auth
-(Docker config / Helm config) untouched.
+The optional `auth` section attaches a JWT credential to specific OCI registry
+hosts. On each request to a listed host, the JWT is sent as the
+`Authorization: Bearer <jwt>` credential. Requests to hosts that are **not**
+listed use the ambient keychain auth (Docker config `~/.docker/config.json` /
+`$DOCKER_CONFIG` and any configured credential helpers) instead.
+
+`auth` and the ambient credential files work together fine — **as long as each
+registry host is served by one or the other, not both.** Listing a host in
+`auth` *and* relying on ambient credentials for that same host is unsupported:
+the JWT and the keychain layer on top of each other in a registry-dependent way,
+and the result is undefined. Pick one mechanism per host.
+
+> This applies only to OCI registry requests — the `artifacts` section and
+> `oci://` Helm sources. HTTP/S Helm repositories are never affected by `auth`;
+> their credentials always come from the Helm repositories config
+> (`repositories.yaml` / `$HELM_REPOSITORY_CONFIG`). See [Source scheme](#source-scheme).
 
 ```yaml
 auth:
