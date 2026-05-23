@@ -10,13 +10,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	craneLogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/spf13/cobra"
 
-	"github.com/fluxcd/pkg/auth/utils/cioidc"
+	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
 	"github.com/fluxcd/flux-mirror/internal/artifacts"
 	"github.com/fluxcd/flux-mirror/internal/charts"
@@ -31,18 +30,6 @@ const (
 	syncDefaultTimeout         = 5 * time.Minute
 	syncDefaultDriftExitCode   = 2
 	syncMaxCustomDriftExitCode = 255
-
-	// defaultJWTTokenEnvVar is the environment variable a --jwt-token value
-	// reads its token from when its token part is empty (i.e. "@<host>").
-	defaultJWTTokenEnvVar = "FLUX_MIRROR_SYNC_JWT_TOKEN"
-)
-
-// Supported --jwt-provider values. GitHub and Forgejo currently mint tokens the
-// same way, but they are kept as distinct flag values so the CLI can adapt to
-// each platform's breaking changes without changing its surface.
-const (
-	jwtProviderGitHub  = "github"
-	jwtProviderForgejo = "forgejo"
 )
 
 var syncCmd = &cobra.Command{
@@ -91,9 +78,6 @@ type syncFlags struct {
 	insecure      bool
 	noProgress    bool
 	maxChunkSize  int
-	jwtProvider   string
-	jwtTokens     []string
-	jwtAudiences  []string
 }
 
 var syncArgs = syncFlags{
@@ -125,24 +109,6 @@ func init() {
 		"Maximum size in KiB (1024 bytes) for an OCI blob upload PATCH; "+
 			"larger blobs are split into chunked PATCH uploads. 0 disables "+
 			"chunking (single monolithic PATCH per blob).")
-	syncCmd.Flags().StringVar(&syncArgs.jwtProvider, "jwt-provider", "",
-		fmt.Sprintf("OIDC provider that mints the tokens for --jwt-audience, one "+
-			"of: %s, %s. Required when --jwt-audience is set.",
-			jwtProviderGitHub, jwtProviderForgejo))
-	syncCmd.Flags().StringArrayVar(&syncArgs.jwtTokens, "jwt-token", nil,
-		fmt.Sprintf("Static JWT to send to a registry, in the format "+
-			"<token>@<host>, used as-is (e.g. a GitLab CI id_token). When the "+
-			"token part is empty (@<host>), it is read from the %s environment "+
-			"variable, keeping the token off the command line. Requests to other "+
-			"hosts pass through with their keychain auth intact. Repeatable.",
-			defaultJWTTokenEnvVar))
-	syncCmd.Flags().StringArrayVar(&syncArgs.jwtAudiences, "jwt-audience", nil,
-		"Audience of an OIDC ID token minted from the GitHub/Forgejo Actions "+
-			"endpoint (ACTIONS_ID_TOKEN_REQUEST_URL and "+
-			"ACTIONS_ID_TOKEN_REQUEST_TOKEN) and sent to a registry, in the "+
-			"format <audience>[@<host>]; the host defaults to the audience. The "+
-			"token is cached for the first 50% of its lifetime and reminted on "+
-			"demand. Repeatable.")
 
 	rootCmd.AddCommand(syncCmd)
 }
@@ -187,7 +153,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 	if syncArgs.insecure {
 		clientOpts = append(clientOpts, oci.Insecure())
 	}
-	if t, err := buildClientTransport(); err != nil {
+	if t, err := buildClientTransport(cfg.Auth); err != nil {
 		return err
 	} else if t != nil {
 		clientOpts = append(clientOpts, oci.WithTransport(t))
@@ -294,34 +260,32 @@ func classifyExit(r sync.Result, driftExitCode int) error {
 	}
 }
 
-// buildClientTransport composes the optional transport stack from
-// --oci-max-chunk-size and the --jwt-* flags. Returns (nil, nil)
-// if neither feature is requested. Stack order, outer first:
+// buildClientTransport composes the optional transport stack from the config's
+// auth hosts and --oci-max-chunk-size. Returns (nil, nil) if neither is
+// requested. Stack order, outer first:
 //
 //	ChunkingTransport (split big PATCH bodies)
-//	  → cioidc.Transport (stamp Authorization on each chunk request)
+//	  → cijwt.Transport (stamp Authorization on each chunk request)
 //	    → http.DefaultTransport
 //
-// JWT is the inner wrapper so that mid-upload token refresh works
-// per chunk; chunking is the outer wrapper so split chunks each get
-// freshly stamped auth from the JWT layer.
-func buildClientTransport() (http.RoundTripper, error) {
+// JWT is the inner wrapper so that per-request token minting works per chunk;
+// chunking is the outer wrapper so split chunks each get freshly stamped auth
+// from the JWT layer.
+func buildClientTransport(auth *config.Auth) (http.RoundTripper, error) {
 	var (
-		jwtSet = syncArgs.jwtProvider != "" ||
-			len(syncArgs.jwtTokens) > 0 || len(syncArgs.jwtAudiences) > 0
+		jwtSet   = auth != nil && len(auth.Hosts) > 0
 		chunkSet = syncArgs.maxChunkSize > 0
 	)
 	if !jwtSet && !chunkSet {
 		return nil, nil
 	}
-	var t http.RoundTripper
-	t = http.DefaultTransport
+	var t http.RoundTripper = http.DefaultTransport
 	if jwtSet {
-		opts, err := jwtTransportOptions(t)
+		opts, err := jwtTransportOptions(t, auth)
 		if err != nil {
 			return nil, err
 		}
-		jwt, err := cioidc.NewTransport(opts...)
+		jwt, err := cijwt.NewTransport(opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -336,66 +300,36 @@ func buildClientTransport() (http.RoundTripper, error) {
 	return t, nil
 }
 
-// jwtTransportOptions parses the --jwt-provider, --jwt-token and --jwt-audience
-// flags into cioidc options. --jwt-token is <token>@<host>; --jwt-audience is
-// <audience>[@<host>], where the host defaults to the audience. --jwt-provider
-// is required when any --jwt-audience is set.
-func jwtTransportOptions(inner http.RoundTripper) ([]cioidc.Option, error) {
-	opts := []cioidc.Option{cioidc.WithInner(inner)}
+// jwtTransportOptions turns the validated auth.hosts config into cijwt options,
+// reading FromEnv environment variables and JWKPath files at this point. It
+// assumes the config has passed config validation (exactly one source per host
+// and the required fields present), so it only reports errors that need runtime
+// state: an unset env var or an unreadable key file.
+func jwtTransportOptions(inner http.RoundTripper, auth *config.Auth) ([]cijwt.Option, error) {
+	opts := []cijwt.Option{cijwt.WithInner(inner)}
 
-	for _, v := range syncArgs.jwtTokens {
-		token, host, ok := cutLast(v, "@")
-		if !ok || host == "" {
-			return nil, fmt.Errorf("invalid --jwt-token %q, must be in the format <token>@<host>", v)
-		}
-		if token == "" {
-			token = os.Getenv(defaultJWTTokenEnvVar)
+	for _, h := range auth.Hosts {
+		j := h.JWT
+		aud := h.EffectiveAud()
+		switch {
+		case j.Provider != "":
+			opts = append(opts, cijwt.WithHostAudience(h.Host, aud))
+		case j.FromEnv != "":
+			token := os.Getenv(j.FromEnv)
 			if token == "" {
-				return nil, fmt.Errorf("--jwt-token %q has an empty token but the %s environment variable is not set", v, defaultJWTTokenEnvVar)
+				return nil, fmt.Errorf("auth host %q: environment variable %q is not set or empty", h.Host, j.FromEnv)
 			}
+			opts = append(opts, cijwt.WithHostToken(h.Host, token))
+		case j.JWKPath != "":
+			jwk, err := os.ReadFile(j.JWKPath)
+			if err != nil {
+				return nil, fmt.Errorf("auth host %q: read jwkPath: %w", h.Host, err)
+			}
+			opts = append(opts, cijwt.WithHostJWK(h.Host, string(jwk), j.Iss, aud, j.Sub))
 		}
-		opts = append(opts, cioidc.WithHostToken(host, token))
-	}
-
-	if syncArgs.jwtProvider != "" && len(syncArgs.jwtAudiences) == 0 {
-		return nil, fmt.Errorf("--jwt-audience is required when --jwt-provider is set")
-	}
-	if len(syncArgs.jwtAudiences) > 0 {
-		switch syncArgs.jwtProvider {
-		case jwtProviderGitHub, jwtProviderForgejo:
-		case "":
-			return nil, fmt.Errorf("--jwt-provider is required when --jwt-audience is set")
-		default:
-			return nil, fmt.Errorf("invalid --jwt-provider %q, must be one of: %s, %s",
-				syncArgs.jwtProvider, jwtProviderGitHub, jwtProviderForgejo)
-		}
-	}
-
-	for _, v := range syncArgs.jwtAudiences {
-		audience, host, ok := cutLast(v, "@")
-		if audience == "" {
-			return nil, fmt.Errorf("invalid --jwt-audience %q, must be in the format <audience>[@<host>]", v)
-		}
-		if !ok {
-			host = audience
-		}
-		if host == "" {
-			return nil, fmt.Errorf("invalid --jwt-audience %q, the host after '@' must not be empty", v)
-		}
-		opts = append(opts, cioidc.WithHostAudience(host, audience))
 	}
 
 	return opts, nil
-}
-
-// cutLast slices s around the last instance of sep, like strings.Cut but from
-// the end, so the host (which contains no '@') is split off correctly even when
-// the token or audience itself contains '@'.
-func cutLast(s, sep string) (before, after string, found bool) {
-	if i := strings.LastIndex(s, sep); i >= 0 {
-		return s[:i], s[i+len(sep):], true
-	}
-	return s, "", false
 }
 
 func resolveConfigPath(args []string) (string, error) {

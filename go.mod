@@ -8,6 +8,7 @@ require (
 	github.com/distribution/distribution/v3 v3.1.1
 	github.com/fluxcd/pkg/auth v0.46.0
 	github.com/fluxcd/pkg/helmtestserver v0.39.0
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/google/go-containerregistry v0.21.6
 	github.com/onsi/gomega v1.41.0
 	github.com/sigstore/sigstore-go v1.1.4
@@ -216,3 +217,5 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.2 // indirect
 )
+
+replace github.com/fluxcd/pkg/auth => github.com/fluxcd/pkg/auth v0.46.1-0.20260523030232-55b3741c9938

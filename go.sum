@@ -177,8 +177,8 @@ github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2
 github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
 github.com/fluxcd/cli-utils v1.2.0 h1:1o07pXTMxJ/XJ1GpAbLtjdXwfCUMq4Ku1OcnvJHLohI=
 github.com/fluxcd/cli-utils v1.2.0/go.mod h1:d5HdTDdR5sCbsIbgtOQ7x7srKYwYeZORU6CD2yn4j/M=
-github.com/fluxcd/pkg/auth v0.46.0 h1:mbpfMpuEop9/OkLaAhQwG7epizT5H2z8SNcfIb4t+Y8=
-github.com/fluxcd/pkg/auth v0.46.0/go.mod h1:/ijjR9G/l6URmEo/zWzpJ3XIMIXWP1Ad7AXTCqmWioY=
+github.com/fluxcd/pkg/auth v0.46.1-0.20260523030232-55b3741c9938 h1:b0ZMKiHkff5oKH6q4y0rFVRmUIMizwmBKGcjpax4jNI=
+github.com/fluxcd/pkg/auth v0.46.1-0.20260523030232-55b3741c9938/go.mod h1:Xva1EkbaMR0d6xAo4N9dEvSxNsfCf5m+UOU2pNoKQgw=
 github.com/fluxcd/pkg/helmtestserver v0.39.0 h1:ijmSe54BGWp6kRKt0WqtT8fBfTOYhV67hKaaHWg0kvs=
 github.com/fluxcd/pkg/helmtestserver v0.39.0/go.mod h1:z4beyhZLAMmGkk0vdY6VWX+C++Jp1gnGhVj2NcXOqN8=
 github.com/fluxcd/pkg/testserver v0.14.0 h1:wVv/JPY3i4OEJ8xakfriuN2oHiUyZZ+BfhC/6RCD2nI=
