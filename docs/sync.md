@@ -109,14 +109,14 @@ flux-mirror sync config.yaml -o json | jq '.entries[].outcomes.copied'
 
 Each tag job lands in exactly one of these buckets:
 
-| Outcome           | Meaning                                                                                       |
-|-------------------|-----------------------------------------------------------------------------------------------|
-| `copied`          | Destination did not have the tag; mirrored from source.                                       |
-| `overwritten`     | Destination had a different digest; replaced (only with `overwrite: true`).                   |
-| `skipped`         | Destination already had the same digest; nothing to do.                                       |
-| `drifted`         | Destination has a different digest, `overwrite: false` — left alone, surfaced in the summary. |
-| `would-copy`      | Dry-run forecast: would have been copied.                                                     |
-| `would-overwrite` | Dry-run forecast: would have been overwritten.                                                |
+| Outcome           | Meaning                                                                                           |
+|-------------------|---------------------------------------------------------------------------------------------------|
+| `copied`          | Destination did not have the tag; mirrored from source.                                           |
+| `overwritten`     | Destination had a different digest; replaced (only with `overwrite: true`).                       |
+| `skipped`         | Nothing was copied: destination already matched, or `verify.minAge` deferred a too-new signature. |
+| `drifted`         | Destination has a different digest, `overwrite: false` — left alone, surfaced in the summary.     |
+| `would-copy`      | Dry-run forecast: would have been copied.                                                         |
+| `would-overwrite` | Dry-run forecast: would have been overwritten.                                                    |
 
 Plan-time failures (e.g., source registry rejected a `ListTags`, or cosign
 verification failed for a selected source tag) are reported as a single
@@ -158,6 +158,7 @@ artifacts:
     includeReferrers: true
     verify:
       provider: cosign
+      minAge: 48h
       matchOIDCIdentity:
         - issuer: https://token.actions.githubusercontent.com
           subject: ^https://github\.com/stefanprodan/.*$

@@ -20,6 +20,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/fluxcd/flux-mirror/internal/config"
 	"github.com/fluxcd/flux-mirror/internal/oci"
@@ -151,6 +152,48 @@ func TestMirror_VerificationFailureStopsPlanning(t *testing.T) {
 	g.Expect(err.Error()).To(ContainSubstring("verify " + src + ":1.0.0"))
 	g.Expect(err.Error()).To(ContainSubstring("denied"))
 	g.Expect(plan.Jobs).To(BeEmpty())
+}
+
+func TestMirror_SkipsSignatureTooNew(t *testing.T) {
+	g := NewWithT(t)
+	src := repo("verify-young-src")
+	dst := repo("verify-young-dst")
+
+	testregistry.PushImage(t, src+":1.0.0")
+
+	c := oci.NewClient(oci.Insecure())
+	entry := config.ArtifactEntry{
+		Source:      src,
+		Destination: dst,
+		Selector:    config.Selector{Limit: new(1)},
+		Verify: &config.ArtifactVerification{
+			Provider: config.VerifyProviderCosign,
+			MinAge:   &metav1.Duration{Duration: time.Hour},
+			MatchOIDCIdentity: []config.OIDCIdentity{{
+				Issuer:  "https://token.actions.githubusercontent.com",
+				Subject: `^https://github\.com/example/.*$`,
+			}},
+		},
+		IncludeReferrers: true,
+	}
+	verifier := &recordingVerifier{err: &oci.SignatureTooNewError{
+		IntegratedTime: time.Now().Add(-30 * time.Minute),
+		Age:            30 * time.Minute,
+		MinAge:         time.Hour,
+	}}
+	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
+		New(c, entry, Options{
+			Verifier: verifier,
+			Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		}),
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(res.HasFailures()).To(BeFalse())
+	g.Expect(res.Entries[0].Outcomes[sync.OutcomeSkipped]).To(Equal([]string{"1.0.0"}))
+	g.Expect(verifier.refs).To(Equal([]string{src + ":1.0.0"}))
+
+	_, err = crane.Digest(dst+":1.0.0", crane.Insecure)
+	g.Expect(err).To(HaveOccurred())
 }
 
 func TestMirror_SkipsEqual(t *testing.T) {

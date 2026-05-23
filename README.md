@@ -36,7 +36,7 @@ on upstream chart repositories.
   drift detection on re-runs is content-based and stable.
 - **OCI 1.1 referrers** — opt-in mirror of signatures, SBOMs, and attestations attached to artifacts.
 - **Cosign verification** — opt-in keyless signature verification for selected
-  source artifacts before they are mirrored.
+  source artifacts before they are mirrored, with optional minimum signature age.
 - **Selector pipeline** — for OCI artifacts, a four-step
   `regex → semver → sort → top-N` filter. For charts, a semver constraint
   plus top-N. Sort by `semver`, `alphabetical`, or `numerical`.

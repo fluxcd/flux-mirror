@@ -6,8 +6,10 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestDecode_FullExample(t *testing.T) {
@@ -31,6 +33,7 @@ artifacts:
     includeReferrers: true
     verify:
       provider: cosign
+      minAge: 12h
       matchOIDCIdentity:
         - issuer: https://token.actions.githubusercontent.com
           subject: ^https://github\.com/dexidp/.*$
@@ -54,6 +57,8 @@ artifacts:
 	g.Expect(cfg.Artifacts).To(HaveLen(2))
 	g.Expect(cfg.Artifacts[0].IncludeReferrers).To(BeTrue())
 	g.Expect(cfg.Artifacts[0].Verify.Provider).To(Equal(VerifyProviderCosign))
+	g.Expect(cfg.Artifacts[0].Verify.MinAge).ToNot(BeNil())
+	g.Expect(cfg.Artifacts[0].Verify.MinAge.Duration).To(Equal(12 * time.Hour))
 	g.Expect(cfg.Artifacts[0].Verify.MatchOIDCIdentity).To(Equal([]OIDCIdentity{{
 		Issuer:  "https://token.actions.githubusercontent.com",
 		Subject: `^https://github\.com/dexidp/.*$`,
@@ -337,6 +342,21 @@ func TestValidate_Table(t *testing.T) {
 				}}}}},
 			errMsg: "aud can only be set with jwkPath or provider",
 		},
+		{
+			name: "verify negative minAge",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Verify: &ArtifactVerification{
+					Provider: VerifyProviderCosign,
+					MinAge:   &metav1.Duration{Duration: -time.Second},
+					MatchOIDCIdentity: []OIDCIdentity{{
+						Issuer:  "https://token.actions.githubusercontent.com",
+						Subject: `^https://github\.com/a/.*$`,
+					}},
+				},
+			}}},
+			errMsg: "minAge must be >= 0",
+		},
 	}
 
 	for _, tt := range tests {
@@ -364,4 +384,23 @@ func TestDecode_BadYAML(t *testing.T) {
 	_, err := Decode(strings.NewReader("apiVersion: [oops"))
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("parse config"))
+}
+
+func TestDecode_BadDuration(t *testing.T) {
+	g := NewWithT(t)
+	_, err := Decode(strings.NewReader(`
+apiVersion: mirror.fluxcd.io/v1alpha1
+kind: Config
+artifacts:
+  - source: ghcr.io/a/b
+    destination: ghcr.io/c/d
+    verify:
+      provider: cosign
+      minAge: soon
+      matchOIDCIdentity:
+        - issuer: https://token.actions.githubusercontent.com
+          subject: ^https://github\.com/a/.*$
+`))
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(err.Error()).To(ContainSubstring("invalid duration"))
 }
