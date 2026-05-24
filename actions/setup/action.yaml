@@ -103,7 +103,11 @@ runs:
 
           if [[ "$VERIFY_ATTESTATION" != "false" ]]; then
             echo "Verifying release attestation"
-            gh attestation verify "$DL_DIR/$FLUX_MIRROR_TARGET_FILE" -R fluxcd/flux-mirror
+            # Releases are built + signed by the shared reusable workflow in
+            # fluxcd/gha-workflows, so verifying against the fluxcd org (as
+            # GitHub recommends on the attestation page) rather than the
+            # flux-mirror repo alone.
+            gh attestation verify "$DL_DIR/$FLUX_MIRROR_TARGET_FILE" --owner fluxcd
           fi
 
           echo "Installing flux-mirror to ${FLUX_MIRROR_TOOL_DIR}"
