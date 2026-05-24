@@ -1,0 +1,38 @@
+apiVersion: mirror.fluxcd.io/v1alpha1
+kind: Config
+charts:
+  - name: podinfo
+    source: https://stefanprodan.github.io/podinfo
+    destination: oci://localhost:5050/charts
+    version: "6.11.x"
+    limit: 2
+artifacts:
+  - source: ghcr.io/stefanprodan/manifests/podinfo
+    destination: localhost:5050/manifests/podinfo
+    selector:
+      regex:
+        pattern: '^6\.11\.(?P<patch>\d+)$'
+        extract: "${patch}"
+      sortBy: numerical
+      limit: 2
+    includeReferrers: true
+    overwrite: true
+    verify:
+      provider: cosign
+      minAge: 48h
+      matchOIDCIdentity:
+        - issuer: https://token.actions.githubusercontent.com
+          subject: ^https://github\.com/stefanprodan/.*$
+  - source: ghcr.io/stefanprodan/podinfo
+    destination: localhost:5050/podinfo
+    selector:
+      semver: "6.11.x"
+      limit: 2
+    includeReferrers: true
+    overwrite: false
+    verify:
+      provider: cosign
+      minAge: 48h
+      matchOIDCIdentity:
+        - issuer: https://token.actions.githubusercontent.com
+          subject: ^https://github\.com/stefanprodan/.*$
