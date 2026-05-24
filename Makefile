@@ -77,6 +77,10 @@ registry-down: ## Stop the local OCI registry.
 		echo "Registry $(REGISTRY_NAME) is not running."; \
 	fi
 
+.PHONY: e2e
+e2e: ## Run the podinfo end-to-end test (requires build and registry-up).
+	./test/podinfo.sh
+
 .PHONY: install
 install: test lint build ## Test, lint, build and copy the binary to GOBIN.
 	cp bin/flux-mirror $(GOBIN)

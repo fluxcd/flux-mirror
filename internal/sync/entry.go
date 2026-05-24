@@ -50,7 +50,7 @@ type Outcome string
 const (
 	OutcomeCopied         Outcome = "copied"
 	OutcomeOverwritten    Outcome = "overwritten"
-	OutcomeSkipped        Outcome = "skipped" // dst already had the same digest
+	OutcomeSkipped        Outcome = "skipped" // nothing was copied
 	OutcomeDrifted        Outcome = "drifted" // dst had a different digest, overwrite=false
 	OutcomeWouldCopy      Outcome = "would-copy"
 	OutcomeWouldOverwrite Outcome = "would-overwrite"

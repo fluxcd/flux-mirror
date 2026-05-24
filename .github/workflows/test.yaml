@@ -13,17 +13,26 @@ permissions:
 jobs:
   test-and-lint:
     runs-on: ubuntu-latest
+    services:
+      registry:
+        image: registry:3
+        ports:
+          - 5050:5000
     steps:
       - name: Test suite setup
         uses: fluxcd/gha-workflows/.github/actions/setup-kubernetes@v0.10.0
         with:
           go-version: 1.26.x
+      - name: Setup Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Run tests
         run: make test
       - name: Run linters
         run: make lint
       - name: Build binary
         run: make build
+      - name: Run e2e tests
+        run: make e2e
       - name: Build Docker image
         run: make docker-build
       - name: Check if working tree is dirty

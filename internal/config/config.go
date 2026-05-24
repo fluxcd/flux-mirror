@@ -13,6 +13,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/go-containerregistry/pkg/name"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -129,8 +130,9 @@ type ArtifactEntry struct {
 
 // ArtifactVerification configures signature verification for source artifacts.
 type ArtifactVerification struct {
-	Provider          string         `json:"provider"`
-	MatchOIDCIdentity []OIDCIdentity `json:"matchOIDCIdentity,omitempty"`
+	Provider          string           `json:"provider"`
+	MatchOIDCIdentity []OIDCIdentity   `json:"matchOIDCIdentity,omitempty"`
+	MinAge            *metav1.Duration `json:"minAge,omitempty"`
 }
 
 // OIDCIdentity matches a Fulcio certificate identity.
@@ -356,6 +358,9 @@ func (v ArtifactVerification) validate() error {
 	}
 	if len(v.MatchOIDCIdentity) == 0 {
 		return fmt.Errorf("matchOIDCIdentity must contain at least one identity")
+	}
+	if v.MinAge != nil && v.MinAge.Duration < 0 {
+		return fmt.Errorf("minAge must be >= 0")
 	}
 	for i, id := range v.MatchOIDCIdentity {
 		if strings.TrimSpace(id.Issuer) == "" {

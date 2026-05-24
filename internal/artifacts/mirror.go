@@ -5,6 +5,7 @@ package artifacts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -102,6 +103,22 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 
 		if m.entry.Verify != nil {
 			if err := m.opts.Verifier.Verify(ctx, job.src, *m.entry.Verify); err != nil {
+				var tooNew *oci.SignatureTooNewError
+				if errors.As(err, &tooNew) {
+					m.opts.Logger.Info("signature too new; skipping tag",
+						"src", job.src,
+						"integrated_time", tooNew.IntegratedTime.Format(time.RFC3339),
+						"age", tooNew.Age.Round(time.Second),
+						"min_age", tooNew.MinAge)
+					plan.Jobs = append(plan.Jobs, sync.Job{
+						ID:  tag,
+						Dst: job.dst,
+						Run: func(context.Context) (sync.Outcome, error) {
+							return sync.OutcomeSkipped, nil
+						},
+					})
+					continue
+				}
 				return plan, fmt.Errorf("verify %s: %w", job.src, err)
 			}
 		}

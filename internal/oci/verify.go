@@ -10,6 +10,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -26,6 +27,21 @@ const (
 	minBundleVersion              = "v0.3"
 	sigstoreBundleMediaTypePrefix = "application/vnd.dev.sigstore.bundle"
 )
+
+// SignatureTooNewError reports a valid signature that has not aged past the
+// configured minimum transparency-log integration age.
+type SignatureTooNewError struct {
+	IntegratedTime time.Time
+	Age            time.Duration
+	MinAge         time.Duration
+}
+
+func (e *SignatureTooNewError) Error() string {
+	return fmt.Sprintf("signature age (%s) is less than the required minAge (%s); signature was integrated at %s",
+		e.Age.Round(time.Second),
+		e.MinAge,
+		e.IntegratedTime.Format(time.RFC3339))
+}
 
 // Verifier verifies cosign keyless signatures stored as OCI referrers.
 type Verifier struct {
@@ -115,8 +131,41 @@ func (v *Verifier) Verify(ctx context.Context, ref string, cfg config.ArtifactVe
 		verify.WithArtifactDigest(desc.Digest.Algorithm, digestBytes),
 		policyOptions...,
 	)
-	if _, err := sigVerifier.Verify(&b, policy); err != nil {
+	result, err := sigVerifier.Verify(&b, policy)
+	if err != nil {
 		return fmt.Errorf("signature verification failed: %w", err)
+	}
+	if cfg.MinAge != nil && cfg.MinAge.Duration > 0 {
+		if err := enforceMinAge(result, cfg.MinAge.Duration, time.Now()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func enforceMinAge(result *verify.VerificationResult, minAge time.Duration, now time.Time) error {
+	var signatureTime time.Time
+	for _, ts := range result.VerifiedTimestamps {
+		if ts.Type != "Tlog" || ts.Timestamp.IsZero() {
+			continue
+		}
+		if signatureTime.IsZero() || ts.Timestamp.Before(signatureTime) {
+			signatureTime = ts.Timestamp
+		}
+	}
+	if signatureTime.IsZero() {
+		return fmt.Errorf("cannot enforce minAge: no verified transparency log integrated timestamps found in signature bundle")
+	}
+	signatureAge := now.Sub(signatureTime)
+	if signatureAge < 0 {
+		signatureAge = 0
+	}
+	if signatureAge < minAge {
+		return &SignatureTooNewError{
+			IntegratedTime: signatureTime,
+			Age:            signatureAge,
+			MinAge:         minAge,
+		}
 	}
 	return nil
 }

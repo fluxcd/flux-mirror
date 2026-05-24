@@ -24,6 +24,7 @@ artifacts:
     includeReferrers: true
     verify:
       provider: cosign
+      minAge: 24h
       matchOIDCIdentity:
         - issuer: https://token.actions.githubusercontent.com
           subject: ^https://github\.com/stefanprodan/.*$

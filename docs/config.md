@@ -18,6 +18,7 @@ artifacts:
     includeReferrers: true
     verify:
       provider: cosign
+      minAge: 48h
       matchOIDCIdentity:
         - issuer: https://token.actions.githubusercontent.com
           subject: ^https://github\.com/stefanprodan/.*$
@@ -202,15 +203,21 @@ mirrored. Verification uses Cosign v3 bundles attached to the source
 artifact as OCI referrers. If any selected tag has no matching valid signature,
 planning fails for that artifact entry and no copy job is scheduled for it.
 
-| Field               | Type   | Description                                                                 |
-|---------------------|--------|-----------------------------------------------------------------------------|
-| `provider`          | string | Must be `cosign`.                                                           |
-| `matchOIDCIdentity` | list   | One or more OIDC identity matchers accepted for the signing certificate.    |
-| `issuer`            | string | OIDC issuer URL, e.g. `https://token.actions.githubusercontent.com`.        |
-| `subject`           | string | Go regexp matched against the signing certificate subject alternative name. |
+| Field               | Type     | Description                                                                                                 |
+|---------------------|----------|-------------------------------------------------------------------------------------------------------------|
+| `provider`          | string   | Must be `cosign`.                                                                                           |
+| `minAge`            | duration | Optional minimum age since the verified Rekor integrated timestamp. Tags with newer signatures are skipped. |
+| `matchOIDCIdentity` | list     | One or more OIDC identity matchers accepted for the signing certificate.                                    |
+| `issuer`            | string   | OIDC issuer URL, e.g. `https://token.actions.githubusercontent.com`.                                        |
+| `subject`           | string   | Go regexp matched against the signing certificate subject alternative name.                                 |
 
 Multiple `matchOIDCIdentity` entries are treated as alternatives; a signature
 is accepted when any identity matches.
+
+When `minAge` is set, the signature must contain a verified transparency-log
+integrated timestamp old enough to satisfy the duration. Tags with valid but
+too-recent signatures are reported as `skipped` and are not copied; signatures
+without an enforceable verified integrated timestamp fail verification.
 
 ```yaml
 artifacts:
@@ -222,6 +229,7 @@ artifacts:
     includeReferrers: true
     verify:
       provider: cosign
+      minAge: 168h # 7 days old
       matchOIDCIdentity:
         - issuer: https://token.actions.githubusercontent.com
           subject: ^https://github\.com/stefanprodan/.*$
@@ -341,6 +349,7 @@ that exist with a different digest are skipped (default) or replaced
 | `artifacts[].overwrite`        | `false`  |
 | `artifacts[].includeReferrers` | `false`  |
 | `artifacts[].verify`           | unset    |
+| `artifacts[].verify.minAge`    | unset    |
 | `charts[].version`             | `*`      |
 | `charts[].limit`               | `1`      |
 | `charts[].overwrite`           | `false`  |
