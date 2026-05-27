@@ -27,13 +27,40 @@ import (
 // writeJWK writes a fresh private Ed25519 JWK to a temp file and returns its path.
 func writeJWK(t *testing.T) string {
 	t.Helper()
+	return writeJWKFile(t, mustMarshalJWK(t))
+}
+
+// writeJWKS writes a fresh private Ed25519 JWK wrapped in a {"keys":[...]} set
+// of size n to a temp file and returns its path.
+func writeJWKS(t *testing.T, n int) string {
+	t.Helper()
+	g := NewWithT(t)
+	keys := make([]json.RawMessage, n)
+	for i := range keys {
+		keys[i] = mustMarshalJWK(t)
+	}
+	b, err := json.Marshal(struct {
+		Keys []json.RawMessage `json:"keys"`
+	}{Keys: keys})
+	g.Expect(err).ToNot(HaveOccurred())
+	return writeJWKFile(t, b)
+}
+
+func mustMarshalJWK(t *testing.T) []byte {
+	t.Helper()
 	g := NewWithT(t)
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	g.Expect(err).ToNot(HaveOccurred())
 	b, err := json.Marshal(jose.JSONWebKey{Key: priv, KeyID: "k", Algorithm: "EdDSA"})
 	g.Expect(err).ToNot(HaveOccurred())
+	return b
+}
+
+func writeJWKFile(t *testing.T, data []byte) string {
+	t.Helper()
+	g := NewWithT(t)
 	path := filepath.Join(t.TempDir(), "jwk.json")
-	g.Expect(os.WriteFile(path, b, 0o600)).To(Succeed())
+	g.Expect(os.WriteFile(path, data, 0o600)).To(Succeed())
 	return path
 }
 
@@ -104,6 +131,66 @@ func TestJWTTransportOptions(t *testing.T) {
 		}}}
 		_, err := jwtTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).To(MatchError(ContainSubstring("read jwkPath")))
+	})
+
+	t.Run("jwkPath accepts a JWK set with exactly one key", func(t *testing.T) {
+		g := NewWithT(t)
+		auth := &config.Auth{Hosts: []config.AuthHost{{
+			Host: "registry.example",
+			JWT: &config.AuthJWT{
+				JWKPath: writeJWKS(t, 1),
+				Iss:     "https://issuer.example",
+				Sub:     "client-id",
+			},
+		}}}
+		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
+		g.Expect(err).ToNot(HaveOccurred())
+		_, err = cijwt.NewTransport(opts...)
+		g.Expect(err).ToNot(HaveOccurred())
+	})
+
+	t.Run("jwkPath rejects a JWK set with more than one key", func(t *testing.T) {
+		g := NewWithT(t)
+		auth := &config.Auth{Hosts: []config.AuthHost{{
+			Host: "registry.example",
+			JWT: &config.AuthJWT{
+				JWKPath: writeJWKS(t, 2),
+				Iss:     "https://issuer.example",
+				Sub:     "client-id",
+			},
+		}}}
+		_, err := jwtTransportOptions(http.DefaultTransport, auth)
+		g.Expect(err).To(MatchError(ContainSubstring("exactly one key, got 2")))
+	})
+
+	t.Run("jwkPath rejects an empty JWK set", func(t *testing.T) {
+		g := NewWithT(t)
+		path := writeJWKFile(t, []byte(`{"keys":[]}`))
+		auth := &config.Auth{Hosts: []config.AuthHost{{
+			Host: "registry.example",
+			JWT: &config.AuthJWT{
+				JWKPath: path,
+				Iss:     "https://issuer.example",
+				Sub:     "client-id",
+			},
+		}}}
+		_, err := jwtTransportOptions(http.DefaultTransport, auth)
+		g.Expect(err).To(MatchError(ContainSubstring("exactly one key, got 0")))
+	})
+
+	t.Run("jwkPath rejects malformed JSON", func(t *testing.T) {
+		g := NewWithT(t)
+		path := writeJWKFile(t, []byte("not json"))
+		auth := &config.Auth{Hosts: []config.AuthHost{{
+			Host: "registry.example",
+			JWT: &config.AuthJWT{
+				JWKPath: path,
+				Iss:     "https://issuer.example",
+				Sub:     "client-id",
+			},
+		}}}
+		_, err := jwtTransportOptions(http.DefaultTransport, auth)
+		g.Expect(err).To(MatchError(ContainSubstring("parse JWK")))
 	})
 
 	t.Run("multiple hosts of mixed kinds build one transport", func(t *testing.T) {

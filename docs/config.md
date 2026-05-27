@@ -85,7 +85,7 @@ auth:
 |------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `provider` | Mints an OIDC ID token for `aud` from the GitHub/Forgejo Actions endpoint (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`). Cached for the first 50% of its lifetime, then reminted. One of: `github`, `forgejo`. |
 | `fromEnv`  | Sends the JWT read from the named environment variable as-is (e.g. a GitLab CI `id_token`). Errors at runtime if the variable is unset or empty.                                                          |
-| `jwkPath`  | Signs a fresh, 60-second JWT on **every** request with the private Ed25519/ECDSA key in the JWK file at this path. The key id is set in the `kid` header.                                                  |
+| `jwkPath`  | Signs a fresh, 60-second JWT on **every** request with the private Ed25519/ECDSA key in the JWK file at this path. The file may be a bare JWK or a JWK set (`{"keys":[...]}`) containing exactly one key. The key id is set in the `kid` header. Generate a key pair with [`flux-mirror keygen sig`](./keygen.md). |
 
 ### Fields
 
@@ -94,7 +94,7 @@ auth:
 | `host`     | string |         | Registry host to authenticate. Required and unique across `hosts`.                           |
 | `provider` | string |         | OIDC provider, one of `github`, `forgejo`. Mutually exclusive with `fromEnv` and `jwkPath`.  |
 | `fromEnv`  | string |         | Environment variable holding a static JWT. Mutually exclusive with `provider` and `jwkPath`. |
-| `jwkPath`  | string |         | Path to a private JSON Web Key. Mutually exclusive with `provider` and `fromEnv`.            |
+| `jwkPath`  | string |         | Path to a private JSON Web Key, as a bare JWK or a single-key JWK set. Mutually exclusive with `provider` and `fromEnv`. |
 | `iss`      | string |         | Token issuer. Required with `jwkPath`; not allowed otherwise.                                |
 | `sub`      | string |         | Token subject. Required with `jwkPath`; not allowed otherwise.                               |
 | `aud`      | string | `host`  | Token audience. Allowed only with `jwkPath` or `provider`; defaults to `host`.               |

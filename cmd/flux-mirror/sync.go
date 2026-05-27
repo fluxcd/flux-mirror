@@ -21,6 +21,7 @@ import (
 	"github.com/fluxcd/flux-mirror/internal/charts"
 	"github.com/fluxcd/flux-mirror/internal/config"
 	"github.com/fluxcd/flux-mirror/internal/flags"
+	"github.com/fluxcd/flux-mirror/internal/jwkio"
 	"github.com/fluxcd/flux-mirror/internal/oci"
 	"github.com/fluxcd/flux-mirror/internal/sync"
 )
@@ -321,11 +322,11 @@ func jwtTransportOptions(inner http.RoundTripper, auth *config.Auth) ([]cijwt.Op
 			}
 			opts = append(opts, cijwt.WithHostToken(h.Host, token))
 		case j.JWKPath != "":
-			jwk, err := os.ReadFile(j.JWKPath)
+			jwk, err := jwkio.ReadPrivateJWK(j.JWKPath)
 			if err != nil {
 				return nil, fmt.Errorf("auth host %q: read jwkPath: %w", h.Host, err)
 			}
-			opts = append(opts, cijwt.WithHostJWK(h.Host, string(jwk), j.Iss, aud, j.Sub))
+			opts = append(opts, cijwt.WithHostJWK(h.Host, jwk, j.Iss, aud, j.Sub))
 		}
 	}
 
