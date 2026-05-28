@@ -62,12 +62,14 @@ type AuthHost struct {
 }
 
 // AuthJWT configures a per-host JWT credential. Exactly one of Provider,
-// FromEnv, or JWKPath selects how the token is obtained:
+// FromEnv, FromPath, or JWKPath selects how the token is obtained:
 //
 //   - Provider mints an OIDC ID token for Aud from a CI platform's Actions
 //     endpoint (see JWTProviderGitHub, JWTProviderForgejo).
 //   - FromEnv sends a static JWT read as-is from the named environment variable
 //     (e.g. a GitLab CI id_token).
+//   - FromPath sends a static JWT read from the file at the path, with leading
+//     and trailing whitespace trimmed.
 //   - JWKPath signs a fresh JWT on every request with the private JSON Web Key
 //     at the path.
 //
@@ -76,6 +78,7 @@ type AuthHost struct {
 type AuthJWT struct {
 	Provider string `json:"provider,omitempty"`
 	FromEnv  string `json:"fromEnv,omitempty"`
+	FromPath string `json:"fromPath,omitempty"`
 	JWKPath  string `json:"jwkPath,omitempty"`
 
 	Iss string `json:"iss,omitempty"`
@@ -268,16 +271,17 @@ func (h AuthHost) validate() error {
 func (j AuthJWT) validate() error {
 	provider := strings.TrimSpace(j.Provider)
 	fromEnv := strings.TrimSpace(j.FromEnv)
+	fromPath := strings.TrimSpace(j.FromPath)
 	jwkPath := strings.TrimSpace(j.JWKPath)
 
 	n := 0
-	for _, set := range []bool{provider != "", fromEnv != "", jwkPath != ""} {
+	for _, set := range []bool{provider != "", fromEnv != "", fromPath != "", jwkPath != ""} {
 		if set {
 			n++
 		}
 	}
 	if n != 1 {
-		return fmt.Errorf("exactly one of provider, fromEnv, or jwkPath must be set")
+		return fmt.Errorf("exactly one of provider, fromEnv, fromPath, or jwkPath must be set")
 	}
 
 	hasIss := strings.TrimSpace(j.Iss) != ""
@@ -302,7 +306,7 @@ func (j AuthJWT) validate() error {
 		if hasIss || hasSub {
 			return fmt.Errorf("iss and sub can only be set with jwkPath")
 		}
-	case fromEnv != "":
+	case fromEnv != "", fromPath != "":
 		if hasIss || hasSub {
 			return fmt.Errorf("iss and sub can only be set with jwkPath")
 		}
