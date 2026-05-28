@@ -242,28 +242,49 @@ func TestValidate_Table(t *testing.T) {
 			name: "auth valid provider",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
 				Auth: &Auth{Hosts: []AuthHost{{
-					Host: "mint.example", JWT: &AuthJWT{Provider: JWTProviderGitHub, Aud: "custom"},
+					Host: "mint.example", Credential: &AuthCredential{Provider: JWTProviderGitHub, Aud: "custom"},
+				}}}},
+		},
+		{
+			name: "auth valid provider gcp",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "us-docker.pkg.dev", Credential: &AuthCredential{Provider: JWTProviderGCP, Aud: "custom"},
+				}}}},
+		},
+		{
+			name: "auth valid provider azure",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "myregistry.azurecr.io", Credential: &AuthCredential{Provider: JWTProviderAzure, Aud: "custom"},
+				}}}},
+		},
+		{
+			name: "auth valid provider aws",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "registry.example.com", Credential: &AuthCredential{Provider: JWTProviderAWS, Aud: "custom"},
 				}}}},
 		},
 		{
 			name: "auth valid fromEnv",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
 				Auth: &Auth{Hosts: []AuthHost{{
-					Host: "static.example", JWT: &AuthJWT{FromEnv: "TOKEN"},
+					Host: "static.example", Credential: &AuthCredential{FromEnv: "TOKEN"},
 				}}}},
 		},
 		{
 			name: "auth valid fromPath",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
 				Auth: &Auth{Hosts: []AuthHost{{
-					Host: "static.example", JWT: &AuthJWT{FromPath: "/run/secrets/token"},
+					Host: "static.example", Credential: &AuthCredential{FromPath: "/run/secrets/token"},
 				}}}},
 		},
 		{
 			name: "auth valid jwkPath",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
 				Auth: &Auth{Hosts: []AuthHost{{
-					Host: "registry.example", JWT: &AuthJWT{
+					Host: "registry.example", Credential: &AuthCredential{
 						JWKPath: "/path/jwk.json", Iss: "https://issuer", Sub: "client", Aud: "registry.example",
 					},
 				}}}},
@@ -277,34 +298,34 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth missing host",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{JWT: &AuthJWT{FromEnv: "TOKEN"}}}}},
+				Auth: &Auth{Hosts: []AuthHost{{Credential: &AuthCredential{FromEnv: "TOKEN"}}}}},
 			errMsg: "host is required",
 		},
 		{
-			name: "auth missing jwt",
+			name: "auth missing credential",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
 				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example"}}}},
-			errMsg: "jwt is required",
+			errMsg: "credential is required",
 		},
 		{
 			name: "auth duplicate host",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
 				Auth: &Auth{Hosts: []AuthHost{
-					{Host: "dup.example", JWT: &AuthJWT{FromEnv: "A"}},
-					{Host: "dup.example", JWT: &AuthJWT{FromEnv: "B"}},
+					{Host: "dup.example", Credential: &AuthCredential{FromEnv: "A"}},
+					{Host: "dup.example", Credential: &AuthCredential{FromEnv: "B"}},
 				}}},
 			errMsg: "configured more than once",
 		},
 		{
 			name: "auth no source set",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{}}}}},
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{}}}}},
 			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
 		},
 		{
 			name: "auth two sources set",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					Provider: JWTProviderGitHub, FromEnv: "TOKEN",
 				}}}}},
 			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
@@ -312,15 +333,15 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth invalid provider",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					Provider: "gitlab",
 				}}}}},
-			errMsg: "must be one of: github, forgejo",
+			errMsg: "must be one of: github, forgejo, gcp, azure, aws",
 		},
 		{
 			name: "auth jwkPath missing iss",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					JWKPath: "/k.json", Sub: "client",
 				}}}}},
 			errMsg: "iss is required with jwkPath",
@@ -328,7 +349,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth jwkPath missing sub",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					JWKPath: "/k.json", Iss: "https://issuer",
 				}}}}},
 			errMsg: "sub is required with jwkPath",
@@ -336,7 +357,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth iss set without jwkPath",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					Provider: JWTProviderGitHub, Iss: "https://issuer",
 				}}}}},
 			errMsg: "iss and sub can only be set with jwkPath",
@@ -344,7 +365,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth aud set with fromEnv",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					FromEnv: "TOKEN", Aud: "nope",
 				}}}}},
 			errMsg: "aud can only be set with jwkPath or provider",
@@ -352,7 +373,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth aud set with fromPath",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					FromPath: "/path/token", Aud: "nope",
 				}}}}},
 			errMsg: "aud can only be set with jwkPath or provider",
@@ -360,7 +381,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth iss set with fromPath",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					FromPath: "/path/token", Iss: "https://issuer",
 				}}}}},
 			errMsg: "iss and sub can only be set with jwkPath",
@@ -368,7 +389,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth fromPath and fromEnv set",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					FromEnv: "TOKEN", FromPath: "/path/token",
 				}}}}},
 			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",

@@ -33,6 +33,21 @@ const (
 	// so the config can adapt to each platform's breaking changes.
 	JWTProviderGitHub  = "github"
 	JWTProviderForgejo = "forgejo"
+	// JWTProviderGCP mints a Google ID token for the audience via Application
+	// Default Credentials (GKE/GCE metadata server, service account key file,
+	// workload identity federation, ...).
+	JWTProviderGCP = "gcp"
+	// JWTProviderAzure mints a Microsoft Entra ID access token for the audience
+	// via the default Azure credential chain (AKS/managed identity, workload
+	// identity federation, environment credentials, ...).
+	JWTProviderAzure = "azure"
+	// JWTProviderAWS proves the caller's AWS identity to the registry. AWS mints
+	// no JWT, so instead of an OIDC token this signs an sts:GetCallerIdentity
+	// request with the ambient role credentials (IMDS, env, ...) and wraps it in
+	// a JWT-shaped envelope; the registry replays the signed request to STS to
+	// verify it and read the caller's account/ARN. aud pins the target registry
+	// via a signed header, not an OIDC audience claim.
+	JWTProviderAWS = "aws"
 
 	defaultChartVersion = "*"
 	defaultLimit        = 1
@@ -47,7 +62,7 @@ type Config struct {
 	Artifacts  []ArtifactEntry `json:"artifacts,omitempty"`
 }
 
-// Auth configures per-host JWT authentication for outbound OCI registry
+// Auth configures per-host credential authentication for outbound OCI registry
 // requests. Hosts that are not listed keep their ambient keychain
 // authentication; a given host should use either auth or ambient credentials,
 // not both. See docs/config.md#auth.
@@ -57,15 +72,17 @@ type Auth struct {
 
 // AuthHost binds an authentication method to a registry host.
 type AuthHost struct {
-	Host string   `json:"host"`
-	JWT  *AuthJWT `json:"jwt,omitempty"`
+	Host       string          `json:"host"`
+	Credential *AuthCredential `json:"credential,omitempty"`
 }
 
-// AuthJWT configures a per-host JWT credential. Exactly one of Provider,
-// FromEnv, FromPath, or JWKPath selects how the token is obtained:
+// AuthCredential configures a per-host credential. Exactly one of Provider,
+// FromEnv, FromPath, or JWKPath selects how the credential is obtained:
 //
-//   - Provider mints an OIDC ID token for Aud from a CI platform's Actions
-//     endpoint (see JWTProviderGitHub, JWTProviderForgejo).
+//   - Provider mints a per-request credential for Aud (an OIDC token for the
+//     OIDC providers, or a signed sts:GetCallerIdentity envelope for aws; see
+//     JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,
+//     JWTProviderAWS).
 //   - FromEnv sends a static JWT read as-is from the named environment variable
 //     (e.g. a GitLab CI id_token).
 //   - FromPath sends a static JWT read from the file at the path, with leading
@@ -75,7 +92,7 @@ type AuthHost struct {
 //
 // Iss and Sub are required for, and may only be set with, JWKPath. Aud is
 // optional and may only be set with JWKPath or Provider; it defaults to Host.
-type AuthJWT struct {
+type AuthCredential struct {
 	Provider string `json:"provider,omitempty"`
 	FromEnv  string `json:"fromEnv,omitempty"`
 	FromPath string `json:"fromPath,omitempty"`
@@ -89,10 +106,10 @@ type AuthJWT struct {
 
 // EffectiveAud returns the audience with the documented default (the host) applied.
 func (h AuthHost) EffectiveAud() string {
-	if h.JWT == nil || strings.TrimSpace(h.JWT.Aud) == "" {
+	if h.Credential == nil || strings.TrimSpace(h.Credential.Aud) == "" {
 		return h.Host
 	}
-	return h.JWT.Aud
+	return h.Credential.Aud
 }
 
 // ChartEntry mirrors a Helm chart from an HTTP/S or OCI source to an OCI destination.
@@ -259,16 +276,16 @@ func (h AuthHost) validate() error {
 	if strings.TrimSpace(h.Host) == "" {
 		return fmt.Errorf("host is required")
 	}
-	if h.JWT == nil {
-		return fmt.Errorf("jwt is required")
+	if h.Credential == nil {
+		return fmt.Errorf("credential is required")
 	}
-	if err := h.JWT.validate(); err != nil {
-		return fmt.Errorf("jwt: %w", err)
+	if err := h.Credential.validate(); err != nil {
+		return fmt.Errorf("credential: %w", err)
 	}
 	return nil
 }
 
-func (j AuthJWT) validate() error {
+func (j AuthCredential) validate() error {
 	provider := strings.TrimSpace(j.Provider)
 	fromEnv := strings.TrimSpace(j.FromEnv)
 	fromPath := strings.TrimSpace(j.FromPath)
@@ -298,10 +315,10 @@ func (j AuthJWT) validate() error {
 		}
 	case provider != "":
 		switch provider {
-		case JWTProviderGitHub, JWTProviderForgejo:
+		case JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure, JWTProviderAWS:
 		default:
-			return fmt.Errorf("provider %q must be one of: %s, %s",
-				provider, JWTProviderGitHub, JWTProviderForgejo)
+			return fmt.Errorf("provider %q must be one of: %s, %s, %s, %s, %s",
+				provider, JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure, JWTProviderAWS)
 		}
 		if hasIss || hasSub {
 			return fmt.Errorf("iss and sub can only be set with jwkPath")

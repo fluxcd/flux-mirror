@@ -68,8 +68,8 @@ func TestJWTTransportOptions(t *testing.T) {
 	t.Run("provider audience builds a transport with host as default aud", func(t *testing.T) {
 		g := NewWithT(t)
 		auth := &config.Auth{Hosts: []config.AuthHost{{
-			Host: "mint.example",
-			JWT:  &config.AuthJWT{Provider: config.JWTProviderForgejo},
+			Host:       "mint.example",
+			Credential: &config.AuthCredential{Provider: config.JWTProviderForgejo},
 		}}}
 		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -82,8 +82,8 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		t.Setenv("MY_CI_TOKEN", "env-token")
 		auth := &config.Auth{Hosts: []config.AuthHost{{
-			Host: "static.example",
-			JWT:  &config.AuthJWT{FromEnv: "MY_CI_TOKEN"},
+			Host:       "static.example",
+			Credential: &config.AuthCredential{FromEnv: "MY_CI_TOKEN"},
 		}}}
 		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -95,8 +95,8 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		t.Setenv("MY_CI_TOKEN", "")
 		auth := &config.Auth{Hosts: []config.AuthHost{{
-			Host: "static.example",
-			JWT:  &config.AuthJWT{FromEnv: "MY_CI_TOKEN"},
+			Host:       "static.example",
+			Credential: &config.AuthCredential{FromEnv: "MY_CI_TOKEN"},
 		}}}
 		_, err := jwtTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
@@ -105,8 +105,8 @@ func TestJWTTransportOptions(t *testing.T) {
 	t.Run("fromPath builds a token-file transport", func(t *testing.T) {
 		g := NewWithT(t)
 		auth := &config.Auth{Hosts: []config.AuthHost{{
-			Host: "static.example",
-			JWT:  &config.AuthJWT{FromPath: "/run/secrets/token"},
+			Host:       "static.example",
+			Credential: &config.AuthCredential{FromPath: "/run/secrets/token"},
 		}}}
 		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -118,7 +118,7 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		auth := &config.Auth{Hosts: []config.AuthHost{{
 			Host: "registry.example",
-			JWT: &config.AuthJWT{
+			Credential: &config.AuthCredential{
 				JWKPath: writeJWK(t),
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -135,7 +135,7 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		auth := &config.Auth{Hosts: []config.AuthHost{{
 			Host: "registry.example",
-			JWT: &config.AuthJWT{
+			Credential: &config.AuthCredential{
 				JWKPath: filepath.Join(t.TempDir(), "missing.json"),
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -149,7 +149,7 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		auth := &config.Auth{Hosts: []config.AuthHost{{
 			Host: "registry.example",
-			JWT: &config.AuthJWT{
+			Credential: &config.AuthCredential{
 				JWKPath: writeJWKS(t, 1),
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -165,7 +165,7 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		auth := &config.Auth{Hosts: []config.AuthHost{{
 			Host: "registry.example",
-			JWT: &config.AuthJWT{
+			Credential: &config.AuthCredential{
 				JWKPath: writeJWKS(t, 2),
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -180,7 +180,7 @@ func TestJWTTransportOptions(t *testing.T) {
 		path := writeJWKFile(t, []byte(`{"keys":[]}`))
 		auth := &config.Auth{Hosts: []config.AuthHost{{
 			Host: "registry.example",
-			JWT: &config.AuthJWT{
+			Credential: &config.AuthCredential{
 				JWKPath: path,
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -195,7 +195,7 @@ func TestJWTTransportOptions(t *testing.T) {
 		path := writeJWKFile(t, []byte("not json"))
 		auth := &config.Auth{Hosts: []config.AuthHost{{
 			Host: "registry.example",
-			JWT: &config.AuthJWT{
+			Credential: &config.AuthCredential{
 				JWKPath: path,
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -209,9 +209,9 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		t.Setenv("MY_CI_TOKEN", "env-token")
 		auth := &config.Auth{Hosts: []config.AuthHost{
-			{Host: "static.example", JWT: &config.AuthJWT{FromEnv: "MY_CI_TOKEN"}},
-			{Host: "mint.example", JWT: &config.AuthJWT{Provider: config.JWTProviderGitHub}},
-			{Host: "registry.example", JWT: &config.AuthJWT{
+			{Host: "static.example", Credential: &config.AuthCredential{FromEnv: "MY_CI_TOKEN"}},
+			{Host: "mint.example", Credential: &config.AuthCredential{Provider: config.JWTProviderGitHub}},
+			{Host: "registry.example", Credential: &config.AuthCredential{
 				JWKPath: writeJWK(t), Iss: "https://issuer.example", Sub: "client-id",
 			}},
 		}}
