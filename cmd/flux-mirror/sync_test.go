@@ -102,6 +102,18 @@ func TestJWTTransportOptions(t *testing.T) {
 		g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
 	})
 
+	t.Run("fromPath builds a token-file transport", func(t *testing.T) {
+		g := NewWithT(t)
+		auth := &config.Auth{Hosts: []config.AuthHost{{
+			Host: "static.example",
+			JWT:  &config.AuthJWT{FromPath: "/run/secrets/token"},
+		}}}
+		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
+		g.Expect(err).ToNot(HaveOccurred())
+		_, err = cijwt.NewTransport(opts...)
+		g.Expect(err).ToNot(HaveOccurred())
+	})
+
 	t.Run("jwkPath signs from the key file", func(t *testing.T) {
 		g := NewWithT(t)
 		auth := &config.Auth{Hosts: []config.AuthHost{{

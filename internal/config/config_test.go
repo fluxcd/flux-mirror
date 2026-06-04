@@ -253,6 +253,13 @@ func TestValidate_Table(t *testing.T) {
 				}}}},
 		},
 		{
+			name: "auth valid fromPath",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "static.example", JWT: &AuthJWT{FromPath: "/run/secrets/token"},
+				}}}},
+		},
+		{
 			name: "auth valid jwkPath",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
 				Auth: &Auth{Hosts: []AuthHost{{
@@ -292,7 +299,7 @@ func TestValidate_Table(t *testing.T) {
 			name: "auth no source set",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
 				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{}}}}},
-			errMsg: "exactly one of provider, fromEnv, or jwkPath",
+			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
 		},
 		{
 			name: "auth two sources set",
@@ -300,7 +307,7 @@ func TestValidate_Table(t *testing.T) {
 				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
 					Provider: JWTProviderGitHub, FromEnv: "TOKEN",
 				}}}}},
-			errMsg: "exactly one of provider, fromEnv, or jwkPath",
+			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
 		},
 		{
 			name: "auth invalid provider",
@@ -341,6 +348,30 @@ func TestValidate_Table(t *testing.T) {
 					FromEnv: "TOKEN", Aud: "nope",
 				}}}}},
 			errMsg: "aud can only be set with jwkPath or provider",
+		},
+		{
+			name: "auth aud set with fromPath",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+					FromPath: "/path/token", Aud: "nope",
+				}}}}},
+			errMsg: "aud can only be set with jwkPath or provider",
+		},
+		{
+			name: "auth iss set with fromPath",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+					FromPath: "/path/token", Iss: "https://issuer",
+				}}}}},
+			errMsg: "iss and sub can only be set with jwkPath",
+		},
+		{
+			name: "auth fromPath and fromEnv set",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", JWT: &AuthJWT{
+					FromEnv: "TOKEN", FromPath: "/path/token",
+				}}}}},
+			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
 		},
 		{
 			name: "verify negative minAge",

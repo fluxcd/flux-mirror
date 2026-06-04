@@ -302,10 +302,11 @@ func buildClientTransport(auth *config.Auth) (http.RoundTripper, error) {
 }
 
 // jwtTransportOptions turns the validated auth.hosts config into cijwt options,
-// reading FromEnv environment variables and JWKPath files at this point. It
-// assumes the config has passed config validation (exactly one source per host
-// and the required fields present), so it only reports errors that need runtime
-// state: an unset env var or an unreadable key file.
+// reading FromEnv environment variables and JWKPath files at this point.
+// FromPath is wired straight to cijwt, which re-reads the file on every
+// request. It assumes the config has passed config validation (exactly one
+// source per host and the required fields present), so it only reports errors
+// that need runtime state: an unset env var or an unreadable key file.
 func jwtTransportOptions(inner http.RoundTripper, auth *config.Auth) ([]cijwt.Option, error) {
 	opts := []cijwt.Option{cijwt.WithInner(inner)}
 
@@ -321,6 +322,8 @@ func jwtTransportOptions(inner http.RoundTripper, auth *config.Auth) ([]cijwt.Op
 				return nil, fmt.Errorf("auth host %q: environment variable %q is not set or empty", h.Host, j.FromEnv)
 			}
 			opts = append(opts, cijwt.WithHostToken(h.Host, token))
+		case j.FromPath != "":
+			opts = append(opts, cijwt.WithHostTokenFile(h.Host, j.FromPath))
 		case j.JWKPath != "":
 			jwk, err := jwkio.ReadPrivateJWK(j.JWKPath)
 			if err != nil {

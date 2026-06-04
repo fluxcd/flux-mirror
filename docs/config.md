@@ -66,9 +66,10 @@ auth:
   hosts:
     - host: registry.example.com
       jwt:
-        # Exactly one of the following three selects how the token is obtained.
+        # Exactly one of the following four selects how the token is obtained.
         provider: github           # mint an OIDC ID token (github or forgejo)
         fromEnv: SOME_ENV_VAR      # send a static JWT read from this env var
+        fromPath: /path/to/token   # send a static JWT read from this file
         jwkPath: /path/to/jwk.json # sign a fresh JWT per request with this key
 
         # Required for, and allowed only with, jwkPath.
