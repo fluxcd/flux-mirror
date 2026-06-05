@@ -25,9 +25,11 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	craneLogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/spf13/cobra"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/idtoken"
 
 	"github.com/fluxcd/pkg/auth/actionsoidc"
+	"github.com/fluxcd/pkg/auth/jwt"
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
 	"github.com/fluxcd/flux-mirror/internal/artifacts"
@@ -136,7 +138,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := loadConfig(cmd, cfgPath)
+	cfg, err := loadConfig(cmd, cfgPath, true)
 	if err != nil {
 		return err
 	}
@@ -299,11 +301,11 @@ func buildClientTransport(auth *config.Auth) (http.RoundTripper, error) {
 		if err != nil {
 			return nil, err
 		}
-		jwt, err := cijwt.NewTransport(opts...)
+		jwtTransport, err := cijwt.NewTransport(opts...)
 		if err != nil {
 			return nil, err
 		}
-		t = jwt
+		t = jwtTransport
 	}
 	if chunkSet {
 		t = &oci.ChunkingTransport{
@@ -347,11 +349,59 @@ func jwtTransportOptions(inner http.RoundTripper, auth *config.Auth) ([]cijwt.Op
 			if err != nil {
 				return nil, fmt.Errorf("auth host %q: read jwkPath: %w", h.Host, err)
 			}
-			opts = append(opts, cijwt.WithHostJWK(h.Host, jwk, j.Iss, aud, j.Sub))
+			if j.Exp == nil {
+				// Default: cijwt signs a fresh 60s token per request.
+				opts = append(opts, cijwt.WithHostJWK(h.Host, jwk, j.Iss, aud, j.Sub))
+				break
+			}
+			// Custom exp: sign it ourselves and let cijwt cache per its exp.
+			fn, err := jwkTokenFunc(jwk, j.Iss, j.Sub, aud, j.Exp.Duration)
+			if err != nil {
+				return nil, fmt.Errorf("auth host %q: parse jwkPath: %w", h.Host, err)
+			}
+			opts = append(opts, cijwt.WithHostTokenFunc(h.Host, fn))
 		}
 	}
 
 	return opts, nil
+}
+
+// jwkTokenFunc parses a private JWK once and returns a cijwt.TokenFunc that
+// signs a fresh JWT with the given claims and lifetime on each call. Used for
+// jwkPath credentials that set a custom exp; the default 60s lifetime is served
+// by cijwt.WithHostJWK instead.
+func jwkTokenFunc(jwk, iss, sub, aud string, ttl time.Duration) (cijwt.TokenFunc, error) {
+	key, err := jwt.ParseJWK(jwk)
+	if err != nil {
+		return nil, err
+	}
+	return func(context.Context) (string, error) {
+		return key.Issue(iss, sub, aud, ttl)
+	}, nil
+}
+
+// gcpUserIDToken returns the default-audience OIDC ID token carried in the
+// Application Default Credentials token response. It is the fallback for user
+// credentials (authorized_user), which Google forbids from minting a
+// custom-audience ID token. The returned token's aud is fixed to the gcloud
+// OAuth client ID and its identity is the signed-in user (email/sub) — it is a
+// real Google-signed ID token (iss=accounts.google.com), just not for the
+// configured audience.
+func gcpUserIDToken(ctx context.Context) (string, error) {
+	creds, err := google.FindDefaultCredentials(ctx,
+		"openid", "https://www.googleapis.com/auth/userinfo.email")
+	if err != nil {
+		return "", fmt.Errorf("find GCP default credentials: %w", err)
+	}
+	tok, err := creds.TokenSource.Token()
+	if err != nil {
+		return "", fmt.Errorf("get GCP token: %w", err)
+	}
+	idTok, ok := tok.Extra("id_token").(string)
+	if !ok || idTok == "" {
+		return "", fmt.Errorf("GCP credential response carried no id_token")
+	}
+	return idTok, nil
 }
 
 // providerTokenFunc returns a cijwt.TokenFunc that mints a per-request bearer
@@ -370,6 +420,14 @@ func providerTokenFunc(provider, aud string) (cijwt.TokenFunc, error) {
 		return func(ctx context.Context) (string, error) {
 			ts, err := idtoken.NewTokenSource(ctx, aud)
 			if err != nil {
+				// User credentials (authorized_user, e.g. `gcloud auth
+				// application-default login`) cannot mint a custom-audience ID
+				// token. Fall back to the default-audience id_token from ADC,
+				// whose aud is the gcloud OAuth client ID (not aud) and whose
+				// identity is the human's email/sub.
+				if strings.Contains(err.Error(), "unsupported credentials type") {
+					return gcpUserIDToken(ctx)
+				}
 				return "", fmt.Errorf("create GCP ID token source: %w", err)
 			}
 			tok, err := ts.Token()
@@ -498,16 +556,33 @@ func resolveConfigPath(args []string) (string, error) {
 	return "", fmt.Errorf("config required: pass the config path as the first argument, pass '-' for stdin, or set %s", envConfig)
 }
 
-func loadConfig(cmd *cobra.Command, path string) (*config.Config, error) {
-	if path != "-" {
-		return config.Load(path)
-	}
-	cfg, err := config.Decode(cmd.InOrStdin())
+// loadConfig decodes the config from path ('-' reads stdin) and validates it.
+// requireEntries enforces that at least one charts/artifacts entry is present;
+// pass false for commands that consume only the auth section (login).
+func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*config.Config, error) {
+	cfg, err := decodeConfig(cmd, path)
 	if err != nil {
 		return nil, err
 	}
-	if err := cfg.Validate(); err != nil {
+	if requireEntries {
+		err = cfg.Validate()
+	} else {
+		err = cfg.ValidateNoEntriesOK()
+	}
+	if err != nil {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func decodeConfig(cmd *cobra.Command, path string) (*config.Config, error) {
+	if path == "-" {
+		return config.Decode(cmd.InOrStdin())
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open config: %w", err)
+	}
+	defer f.Close()
+	return config.Decode(f)
 }

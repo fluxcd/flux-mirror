@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -51,6 +51,11 @@ const (
 
 	defaultChartVersion = "*"
 	defaultLimit        = 1
+
+	// defaultJWKExp is the jwkPath JWT lifetime when exp is unset. It matches
+	// cijwt's per-request signing lifetime, keeping the default behavior of
+	// short-lived, freshly signed tokens.
+	defaultJWKExp = 60 * time.Second
 )
 
 // Config is the top-level flux-mirror declarative config.
@@ -87,11 +92,14 @@ type AuthHost struct {
 //     (e.g. a GitLab CI id_token).
 //   - FromPath sends a static JWT read from the file at the path, with leading
 //     and trailing whitespace trimmed.
-//   - JWKPath signs a fresh JWT on every request with the private JSON Web Key
-//     at the path.
+//   - JWKPath signs a fresh JWT with the private JSON Web Key at the path.
 //
 // Iss and Sub are required for, and may only be set with, JWKPath. Aud is
 // optional and may only be set with JWKPath or Provider; it defaults to Host.
+// Exp sets the JWT lifetime and may only be set with JWKPath, the one source
+// whose lifetime flux-mirror controls; it defaults to a short 60s. Every other
+// source's lifetime is fixed by an external issuer or is an opaque static
+// token, so Exp is rejected for them.
 type AuthCredential struct {
 	Provider string `json:"provider,omitempty"`
 	FromEnv  string `json:"fromEnv,omitempty"`
@@ -101,7 +109,17 @@ type AuthCredential struct {
 	Iss string `json:"iss,omitempty"`
 	Sub string `json:"sub,omitempty"`
 
-	Aud string `json:"aud,omitempty"`
+	Aud string           `json:"aud,omitempty"`
+	Exp *metav1.Duration `json:"exp,omitempty"`
+}
+
+// EffectiveExp returns the jwkPath JWT lifetime with the documented default
+// (60s) applied. Only meaningful for jwkPath credentials.
+func (c AuthCredential) EffectiveExp() time.Duration {
+	if c.Exp != nil {
+		return c.Exp.Duration
+	}
+	return defaultJWKExp
 }
 
 // EffectiveAud returns the audience with the documented default (the host) applied.
@@ -207,34 +225,29 @@ func Decode(r io.Reader) (*Config, error) {
 	return &cfg, nil
 }
 
-// Load reads and validates a config file from disk.
-func Load(path string) (*Config, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open config: %w", err)
-	}
-	defer f.Close()
-	cfg, err := Decode(f)
-	if err != nil {
-		return nil, err
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-	return cfg, nil
-}
-
 // Validate checks the config for semantic correctness. It does not perform any
 // network operations; it only verifies that values parse and that required
-// fields are present.
+// fields are present. A config must declare at least one charts or artifacts
+// entry.
 func (c *Config) Validate() error {
+	return c.validate(true)
+}
+
+// ValidateNoEntriesOK is like Validate but permits a config with no charts or
+// artifacts. Used by commands that consume only the auth section (e.g.
+// `flux-mirror login`), for which a mirror entry would be meaningless.
+func (c *Config) ValidateNoEntriesOK() error {
+	return c.validate(false)
+}
+
+func (c *Config) validate(requireEntries bool) error {
 	if c.APIVersion != APIVersion {
 		return fmt.Errorf("apiVersion must be %q, got %q", APIVersion, c.APIVersion)
 	}
 	if c.Kind != Kind {
 		return fmt.Errorf("kind must be %q, got %q", Kind, c.Kind)
 	}
-	if len(c.Charts) == 0 && len(c.Artifacts) == 0 {
+	if requireEntries && len(c.Charts) == 0 && len(c.Artifacts) == 0 {
 		return fmt.Errorf("config has no entries: at least one of 'charts' or 'artifacts' must be set")
 	}
 	if c.Auth != nil {
@@ -304,6 +317,7 @@ func (j AuthCredential) validate() error {
 	hasIss := strings.TrimSpace(j.Iss) != ""
 	hasSub := strings.TrimSpace(j.Sub) != ""
 	hasAud := strings.TrimSpace(j.Aud) != ""
+	hasExp := j.Exp != nil
 
 	switch {
 	case jwkPath != "":
@@ -312,6 +326,9 @@ func (j AuthCredential) validate() error {
 		}
 		if !hasSub {
 			return fmt.Errorf("sub is required with jwkPath")
+		}
+		if hasExp && j.Exp.Duration <= 0 {
+			return fmt.Errorf("exp must be a positive duration")
 		}
 	case provider != "":
 		switch provider {
@@ -323,12 +340,18 @@ func (j AuthCredential) validate() error {
 		if hasIss || hasSub {
 			return fmt.Errorf("iss and sub can only be set with jwkPath")
 		}
+		if hasExp {
+			return fmt.Errorf("exp can only be set with jwkPath")
+		}
 	case fromEnv != "", fromPath != "":
 		if hasIss || hasSub {
 			return fmt.Errorf("iss and sub can only be set with jwkPath")
 		}
 		if hasAud {
 			return fmt.Errorf("aud can only be set with jwkPath or provider")
+		}
+		if hasExp {
+			return fmt.Errorf("exp can only be set with jwkPath")
 		}
 	}
 	return nil

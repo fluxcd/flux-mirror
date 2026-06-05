@@ -290,6 +290,47 @@ func TestValidate_Table(t *testing.T) {
 				}}}},
 		},
 		{
+			name: "auth valid jwkPath with exp",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "registry.example", Credential: &AuthCredential{
+						JWKPath: "/path/jwk.json", Iss: "https://issuer", Sub: "client",
+						Exp: &metav1.Duration{Duration: time.Hour},
+					},
+				}}}},
+		},
+		{
+			name: "auth jwkPath exp non-positive",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "registry.example", Credential: &AuthCredential{
+						JWKPath: "/path/jwk.json", Iss: "https://issuer", Sub: "client",
+						Exp: &metav1.Duration{Duration: 0},
+					},
+				}}}},
+			errMsg: "exp must be a positive duration",
+		},
+		{
+			name: "auth exp rejected with provider",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "registry.example", Credential: &AuthCredential{
+						Provider: JWTProviderGitHub, Exp: &metav1.Duration{Duration: time.Hour},
+					},
+				}}}},
+			errMsg: "exp can only be set with jwkPath",
+		},
+		{
+			name: "auth exp rejected with fromEnv",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "registry.example", Credential: &AuthCredential{
+						FromEnv: "TOKEN", Exp: &metav1.Duration{Duration: time.Hour},
+					},
+				}}}},
+			errMsg: "exp can only be set with jwkPath",
+		},
+		{
 			name: "auth empty hosts",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
 				Auth: &Auth{}},

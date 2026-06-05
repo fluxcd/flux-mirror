@@ -40,7 +40,9 @@ charts:
 | `artifacts`  | list   | `[]`    | OCI artifacts (images, OCI Helm charts, Flux artifacts, etc.). See [Artifacts](#artifacts). |
 | `charts`     | list   | `[]`    | Helm charts from HTTP/S or OCI Helm repositories. See [Charts](#charts).                    |
 
-At least one of `artifacts` or `charts` must be set.
+At least one of `artifacts` or `charts` must be set, except for
+[`flux-mirror login`](./login.md), which reads only the `auth` section and
+accepts an `auth`-only config.
 
 ## Auth
 
@@ -78,6 +80,9 @@ auth:
 
         # Optional; allowed only with jwkPath or provider. Defaults to host.
         aud: registry.example.com
+
+        # Optional; allowed only with jwkPath. JWT lifetime; defaults to 60s.
+        exp: 1h
 ```
 
 ### Token sources
@@ -86,7 +91,7 @@ auth:
 |------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `provider` | Mints a per-request credential for `aud`. `github`/`forgejo` use the Actions endpoint (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`); `gcp` uses Google Application Default Credentials (GKE/GCE metadata server, service account key, workload identity federation); `azure` uses the default Azure credential chain (AKS/managed identity, workload identity federation, environment credentials) and requests the `<aud>/.default` scope. `aws` is **not OIDC**: it signs an `sts:GetCallerIdentity` request with the ambient role credentials (IMDS, env, ...) and wraps it in a JWT-shaped envelope, with `aud` sent as a signed `X-Audience` header pinning the target registry. The registry verifies it by replaying the signed request to AWS STS and reading the caller's account/ARN — so the destination must understand this scheme (a generic OIDC registry will not). The envelope is tagged with the JOSE header `{"alg":"none","typ":"aws-sigv4-getcalleridentity"}` so the registry can route it away from JWKS validation; it must derive identity only from the STS response, never from the envelope's own claims. Cached and refreshed on demand. |
 | `fromEnv`  | Sends the JWT read from the named environment variable as-is (e.g. a GitLab CI `id_token`). Errors at runtime if the variable is unset or empty.                                                          |
-| `jwkPath`  | Signs a fresh, 60-second JWT on **every** request with the private Ed25519/ECDSA key in the JWK file at this path. The file may be a bare JWK or a JWK set (`{"keys":[...]}`) containing exactly one key. The key id is set in the `kid` header. Generate a key pair with [`flux-mirror keygen sig`](./keygen.md). |
+| `jwkPath`  | Signs a fresh JWT with the private Ed25519/ECDSA key in the JWK file at this path. By default each request gets a new **60-second** token; set `exp` to issue longer-lived tokens (then cached and reminted at half-life). The file may be a bare JWK or a JWK set (`{"keys":[...]}`) containing exactly one key. The key id is set in the `kid` header. Generate a key pair with [`flux-mirror keygen`](./keygen.md). |
 
 ### Fields
 
@@ -99,6 +104,7 @@ auth:
 | `iss`      | string |         | Token issuer. Required with `jwkPath`; not allowed otherwise.                                |
 | `sub`      | string |         | Token subject. Required with `jwkPath`; not allowed otherwise.                               |
 | `aud`      | string | `host`  | Token audience. Allowed only with `jwkPath` or `provider`; defaults to `host`.               |
+| `exp`      | duration | `60s` | JWT lifetime (e.g. `1h`). Allowed only with `jwkPath` — the one source whose lifetime flux-mirror controls. Must be positive. Other sources' lifetimes are fixed by their issuer. |
 
 ## Artifacts
 
