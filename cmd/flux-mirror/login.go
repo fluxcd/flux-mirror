@@ -4,24 +4,16 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	dockercfg "github.com/docker/cli/cli/config"
 	"github.com/docker/cli/cli/config/credentials"
 	"github.com/docker/cli/cli/config/types"
 	"github.com/spf13/cobra"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
-	"github.com/fluxcd/flux-mirror/internal/jwkio"
+	"github.com/fluxcd/flux-mirror/internal/registryauth"
 )
-
-// loginUsername is stored as the username of the Docker credential entry. The
-// identity is carried entirely by the credential (the password), so the
-// username is just a non-empty placeholder; token-auth registries ignore it.
-const loginUsername = "flux-mirror"
 
 type loginFlags struct {
 	config       string
@@ -76,7 +68,7 @@ func loginCmdRun(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	hosts, err := selectAuthHosts(cfg, loginArgs.hosts)
+	hosts, err := registryauth.SelectAuthHosts(cfg, loginArgs.hosts)
 	if err != nil {
 		return err
 	}
@@ -98,7 +90,7 @@ func loginCmdRun(cmd *cobra.Command, _ []string) error {
 	}
 
 	for _, h := range hosts {
-		cred, err := resolveCredential(cmd.Context(), h)
+		ha, err := registryauth.ResolveHostAuth(cmd.Context(), h)
 		if err != nil {
 			return fmt.Errorf("host %q: %w", h.Host, err)
 		}
@@ -111,8 +103,8 @@ func loginCmdRun(cmd *cobra.Command, _ []string) error {
 			store = dcf.GetCredentialsStore(h.Host)
 		}
 		if err := store.Store(types.AuthConfig{
-			Username:      loginUsername,
-			Password:      cred,
+			Username:      ha.Username,
+			Password:      ha.Password,
 			ServerAddress: h.Host,
 		}); err != nil {
 			return fmt.Errorf("store docker credential for %q: %w", h.Host, err)
@@ -158,70 +150,6 @@ func configFlagUsage() string {
 		def = "$FLUX_MIRROR_CONFIG, else " + exe + ".config"
 	}
 	return "Path to the flux-mirror config, or '-' for stdin (default " + def + ")"
-}
-
-// selectAuthHosts returns the auth hosts to log in: the ones named in filter
-// (erroring on any not present), or all configured hosts when filter is empty.
-func selectAuthHosts(cfg *config.Config, filter []string) ([]config.AuthHost, error) {
-	if cfg.Auth == nil || len(cfg.Auth.Hosts) == 0 {
-		return nil, fmt.Errorf("config has no auth.hosts")
-	}
-	if len(filter) == 0 {
-		return cfg.Auth.Hosts, nil
-	}
-	byHost := make(map[string]config.AuthHost, len(cfg.Auth.Hosts))
-	for _, h := range cfg.Auth.Hosts {
-		byHost[h.Host] = h
-	}
-	out := make([]config.AuthHost, 0, len(filter))
-	for _, name := range filter {
-		h, ok := byHost[name]
-		if !ok {
-			return nil, fmt.Errorf("host %q not found in auth.hosts", name)
-		}
-		out = append(out, h)
-	}
-	return out, nil
-}
-
-// resolveCredential mints or reads the credential for a single host, mirroring
-// what jwtTransportOptions wires into the sync transport but returning the value
-// directly. It assumes the config has passed validation (exactly one source).
-func resolveCredential(ctx context.Context, h config.AuthHost) (string, error) {
-	c := h.Credential
-	aud := h.EffectiveAud()
-	switch {
-	case c.Provider != "":
-		fn, err := providerTokenFunc(c.Provider, aud)
-		if err != nil {
-			return "", err
-		}
-		return fn(ctx)
-	case c.FromEnv != "":
-		token := os.Getenv(c.FromEnv)
-		if token == "" {
-			return "", fmt.Errorf("environment variable %q is not set or empty", c.FromEnv)
-		}
-		return token, nil
-	case c.FromPath != "":
-		b, err := os.ReadFile(c.FromPath)
-		if err != nil {
-			return "", fmt.Errorf("read fromPath: %w", err)
-		}
-		return strings.TrimSpace(string(b)), nil
-	case c.JWKPath != "":
-		raw, err := jwkio.ReadPrivateJWK(c.JWKPath)
-		if err != nil {
-			return "", fmt.Errorf("read jwkPath: %w", err)
-		}
-		fn, err := jwkTokenFunc(raw, c.Iss, c.Sub, aud, c.EffectiveExp())
-		if err != nil {
-			return "", fmt.Errorf("parse jwkPath: %w", err)
-		}
-		return fn(ctx)
-	default:
-		return "", fmt.Errorf("credential has no source")
-	}
 }
 
 func init() {

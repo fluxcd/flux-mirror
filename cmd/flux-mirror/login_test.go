@@ -15,6 +15,8 @@ import (
 
 	gojwt "github.com/golang-jwt/jwt/v5"
 	. "github.com/onsi/gomega"
+
+	"github.com/fluxcd/flux-mirror/internal/registryauth"
 )
 
 // writeLoginConfig writes a valid config whose single auth host carries the
@@ -235,7 +237,7 @@ func TestLogin_PlaintextStoresUserAndPassword(t *testing.T) {
 	g.Expect(ok).To(BeTrue())
 	dec, err := base64.StdEncoding.DecodeString(entry.Auth)
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(string(dec)).To(Equal(loginUsername + ":static-token-value"))
+	g.Expect(string(dec)).To(Equal(registryauth.Username + ":static-token-value"))
 }
 
 func TestLogin_AllHostsByDefault(t *testing.T) {
