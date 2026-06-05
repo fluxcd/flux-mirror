@@ -68,7 +68,7 @@ else ~/.docker — the same as 'docker --config'.`,
 }
 
 func loginCmdRun(cmd *cobra.Command, _ []string) error {
-	cfgPath, err := resolveLoginConfigPath()
+	cfgPath, err := resolveConfigFlag(loginArgs.config)
 	if err != nil {
 		return err
 	}
@@ -133,11 +133,12 @@ func loginCmdRun(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// resolveLoginConfigPath picks the flux-mirror config path: --config if set,
-// else $FLUX_MIRROR_CONFIG, else a path derived from the executable location.
-func resolveLoginConfigPath() (string, error) {
-	if loginArgs.config != "" {
-		return loginArgs.config, nil
+// resolveConfigFlag picks the flux-mirror config path for the flag-based
+// commands (login, create): the --config value if set, else
+// $FLUX_MIRROR_CONFIG, else a path next to the executable (<binary>.config).
+func resolveConfigFlag(flagVal string) (string, error) {
+	if flagVal != "" {
+		return flagVal, nil
 	}
 	if env := os.Getenv(envConfig); env != "" {
 		return env, nil
@@ -147,6 +148,16 @@ func resolveLoginConfigPath() (string, error) {
 		return "", fmt.Errorf("resolve default config path: %w", err)
 	}
 	return exe + ".config", nil
+}
+
+// configFlagUsage is the shared --config flag help, with the executable-derived
+// default resolved at startup.
+func configFlagUsage() string {
+	def := "$FLUX_MIRROR_CONFIG, else <executable>.config"
+	if exe, err := os.Executable(); err == nil {
+		def = "$FLUX_MIRROR_CONFIG, else " + exe + ".config"
+	}
+	return "Path to the flux-mirror config, or '-' for stdin (default " + def + ")"
 }
 
 // selectAuthHosts returns the auth hosts to log in: the ones named in filter
@@ -214,13 +225,7 @@ func resolveCredential(ctx context.Context, h config.AuthHost) (string, error) {
 }
 
 func init() {
-	exeConfig := "<executable>.config"
-	if exe, err := os.Executable(); err == nil {
-		exeConfig = exe + ".config"
-	}
-	loginCmd.Flags().StringVarP(&loginArgs.config, "config", "f", "",
-		fmt.Sprintf("Path to the flux-mirror config, or '-' for stdin "+
-			"(default $FLUX_MIRROR_CONFIG, else %s)", exeConfig))
+	loginCmd.Flags().StringVarP(&loginArgs.config, "config", "f", "", configFlagUsage())
 	loginCmd.Flags().StringArrayVar(&loginArgs.hosts, "host", nil,
 		"Registry host from the config to log in; repeatable, defaults to all hosts")
 	loginCmd.Flags().StringVar(&loginArgs.dockerConfig, "docker-config", "",
