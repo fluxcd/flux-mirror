@@ -216,8 +216,8 @@ destination registry credentials from a `Secret` created via
 | Command                     | Description                                                      |
 |-----------------------------|------------------------------------------------------------------|
 | `flux-mirror sync [CONFIG]` | Mirror Helm charts and OCI artifacts described by a YAML config. |
-| `flux-mirror keygen sig`    | Generate an EdDSA JWK pair for JWK-based registry auth.          |
-| `flux-mirror sign jwt`      | Sign a JWT with a private JWK and write it to a file.            |
+| `flux-mirror login`         | Store configured credentials in the Docker config (or OS keychain). |
+| `flux-mirror keygen`        | Generate an EdDSA JWK pair for JWK-based registry auth.          |
 | `flux-mirror version`       | Print the CLI version.                                           |
 | `flux-mirror completion`    | Generate shell completion for bash, fish, powershell and zsh.    |
 
@@ -231,8 +231,8 @@ Run `flux-mirror <command> --help` for the full flag list.
   `charts` entries, selector pipeline, overwrite semantics, defaults.
 - [Keygen command reference](docs/keygen.md) — generate EdDSA JWK pairs for
   JWK-based registry auth.
-- [Sign command reference](docs/sign.md) — mint static JWTs from a private JWK
-  for pull paths that cannot run `flux-mirror sync`.
+- [Login command reference](docs/login.md) — print a host's configured
+  credential for piping into `docker login`.
 - [Examples](examples/) — runnable configs for common mirror scenarios.
 
 ## License

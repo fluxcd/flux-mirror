@@ -1,19 +1,12 @@
 # Flux Mirror Keygen Command
 
-The `flux-mirror keygen` command generates JSON Web Keys for JWK-based registry
-auth. The output files plug directly into the [`auth.hosts[].jwt.jwkPath`](./config.md#auth)
-config field and into [`flux-mirror sign jwt`](./sign.md).
-
-## Subcommands
-
-| Command                  | Description                                                       |
-|--------------------------|-------------------------------------------------------------------|
-| `flux-mirror keygen sig` | Generate an EdDSA JWK pair for signing JWTs.                      |
-
-## `keygen sig`
+The `flux-mirror keygen` command generates an EdDSA JSON Web Key pair for
+JWK-based registry auth. The output files plug directly into the
+[`auth.hosts[].credential.jwkPath`](./config.md#auth) config field, which
+`flux-mirror sync` and [`flux-mirror login`](./login.md) use to sign JWTs.
 
 ```
-flux-mirror keygen sig [flags]
+flux-mirror keygen [flags]
 ```
 
 Generates an EdDSA Ed25519 key pair and writes it to a directory as two JWK
@@ -45,10 +38,10 @@ a UUIDv6 `kid` so the signature can be matched against the public set.
 
 ```bash
 # Write a key pair into the current directory.
-flux-mirror keygen sig
+flux-mirror keygen
 
 # Write a key pair into ./keys/registry (created if missing).
-flux-mirror keygen sig -o ./keys/registry
+flux-mirror keygen -o ./keys/registry
 ```
 
 Output:
@@ -60,9 +53,9 @@ Output:
 
 ### Using the generated keys
 
-- **In a sync config** — point `auth.hosts[].jwt.jwkPath` at `privkey.json`.
+- **In a sync config** — point `auth.hosts[].credential.jwkPath` at `privkey.json`.
   See the [`auth` section of the config spec](./config.md#auth).
-- **To mint a one-shot JWT** — pass `privkey.json` to
-  [`flux-mirror sign jwt -k`](./sign.md).
+- **To mint a one-shot JWT** — reference `privkey.json` from a host's
+  `credential.jwkPath` and run [`flux-mirror login`](./login.md).
 - **To grant access** — share `pubkey.json` with the registry operator, or
   publish it at an HTTPS URL the registry can fetch.
