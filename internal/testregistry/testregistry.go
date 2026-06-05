@@ -71,7 +71,26 @@ func Start(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("new registry: %w", err)
 	}
 	go func() { _ = reg.ListenAndServe() }()
-	return host, nil
+
+	// ListenAndServe binds the socket asynchronously, so block until the
+	// registry actually accepts a connection. Without this, callers race the
+	// goroutine and hit connection-refused on a loaded runner.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		conn, derr := net.DialTimeout("tcp", host, 200*time.Millisecond)
+		if derr == nil {
+			_ = conn.Close()
+			return host, nil
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("registry not ready at %s: %w", host, derr)
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 // UseEmptyDockerConfig points Docker-aware clients at an empty config for the
