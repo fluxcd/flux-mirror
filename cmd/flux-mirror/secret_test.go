@@ -11,6 +11,7 @@ import (
 
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -59,14 +60,14 @@ func TestApplySecret_CreateThenReplace(t *testing.T) {
 
 	s1, err := buildDockerConfigSecret("regcreds", "flux-system", map[string]registryauth.HostAuth{"a.example": {Username: "robot", Password: "v1"}})
 	g.Expect(err).ToNot(HaveOccurred())
-	created, err := applySecret(ctx, client, s1)
+	created, err := applySecret(ctx, client, s1, false)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(created).To(BeTrue())
 
 	// Second apply with new data replaces the existing secret.
 	s2, err := buildDockerConfigSecret("regcreds", "flux-system", map[string]registryauth.HostAuth{"a.example": {Username: "robot", Password: "v2"}})
 	g.Expect(err).ToNot(HaveOccurred())
-	created, err = applySecret(ctx, client, s2)
+	created, err = applySecret(ctx, client, s2, false)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(created).To(BeFalse())
 
@@ -77,4 +78,33 @@ func TestApplySecret_CreateThenReplace(t *testing.T) {
 	}
 	g.Expect(json.Unmarshal(got.Data[corev1.DockerConfigJsonKey], &parsed)).To(Succeed())
 	g.Expect(parsed.Auths["a.example"].Password).To(Equal("v2"))
+}
+
+func TestApplySecret_CreateOnlyConflict(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	client := fake.NewClientset()
+
+	s1, err := buildDockerConfigSecret("regcreds", "flux-system", map[string]registryauth.HostAuth{"a.example": {Username: "robot", Password: "v1"}})
+	g.Expect(err).ToNot(HaveOccurred())
+	created, err := applySecret(ctx, client, s1, true)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(created).To(BeTrue())
+
+	// With --create (createOnly), a second apply must fail with AlreadyExists
+	// instead of replacing the existing secret.
+	s2, err := buildDockerConfigSecret("regcreds", "flux-system", map[string]registryauth.HostAuth{"a.example": {Username: "robot", Password: "v2"}})
+	g.Expect(err).ToNot(HaveOccurred())
+	_, err = applySecret(ctx, client, s2, true)
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(apierrors.IsAlreadyExists(err)).To(BeTrue())
+
+	// The original secret is untouched.
+	got, err := client.CoreV1().Secrets("flux-system").Get(ctx, "regcreds", metav1.GetOptions{})
+	g.Expect(err).ToNot(HaveOccurred())
+	var parsed struct {
+		Auths map[string]dockerConfigEntry `json:"auths"`
+	}
+	g.Expect(json.Unmarshal(got.Data[corev1.DockerConfigJsonKey], &parsed)).To(Succeed())
+	g.Expect(parsed.Auths["a.example"].Password).To(Equal("v1"))
 }

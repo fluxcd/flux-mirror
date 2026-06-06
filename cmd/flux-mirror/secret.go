@@ -19,53 +19,56 @@ import (
 	"github.com/fluxcd/flux-mirror/internal/registryauth"
 )
 
-type createSecretFlags struct {
+type secretFlags struct {
 	config string
 	hosts  []string
+	create bool
 }
 
-var createSecretArgs createSecretFlags
+var secretArgs secretFlags
 
-// createSecretKubeFlags exposes the standard kubectl connection flags
-// (--kubeconfig, --context, --cluster, --namespace/-n, --user, --server,
-// --token, --request-timeout, --as, ...) and honors their env vars (KUBECONFIG,
-// ...). NewConfigFlags(true) loads from a kubeconfig and falls back to the
-// in-cluster config, so the command works both locally and inside a pod.
-var createSecretKubeFlags = genericclioptions.NewConfigFlags(true)
+// secretKubeFlags exposes the standard kubectl connection flags (--kubeconfig,
+// --context, --cluster, --namespace/-n, --user, --server, --token,
+// --request-timeout, --as, ...) and honors their env vars (KUBECONFIG, ...).
+// NewConfigFlags(true) loads from a kubeconfig and falls back to the in-cluster
+// config, so the command works both locally and inside a pod.
+var secretKubeFlags = genericclioptions.NewConfigFlags(true)
 
-var createCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create Kubernetes resources from a flux-mirror config",
-	Args:  cobra.NoArgs,
-}
-
-var createSecretCmd = &cobra.Command{
+var secretCmd = &cobra.Command{
 	Use:   "secret <name>",
 	Short: "Create or replace a dockerconfigjson Secret with per-host credentials",
 	Long: `Resolve the credential configured under auth.hosts for each selected
 host and write them into a Kubernetes Secret of type
 kubernetes.io/dockerconfigjson, the same shape 'kubectl create secret
-docker-registry' produces. An existing Secret with the same name is replaced.
+docker-registry' produces.
+
+By default the Secret is upserted: an existing Secret with the same name is
+replaced in place. This is the right semantic for rotating pull Secrets from a
+CronJob. Pass --create to instead fail if the Secret already exists, matching
+'kubectl create secret docker-registry'.
 
 By default every host in the config is included; restrict with one or more
---host flags. The config is read from --config (default
-~/.flux-mirror/config.yaml, or '-' for stdin). The cluster, namespace, and
-credentials are resolved from the standard kubectl flags and env vars, working
-both with a local kubeconfig and in-cluster.`,
-	Example: `  # Secret for all hosts in the default config, in the current namespace
-  flux-mirror create secret regcreds
+--host flags. The config is read from --config (default ~/.flux-mirror/config.yaml,
+or '-' for stdin). The cluster, namespace, and credentials are resolved from the
+standard kubectl flags and env vars, working both with a local kubeconfig and
+in-cluster.`,
+	Example: `  # Upsert a Secret for all hosts in the default config, in the current namespace
+  flux-mirror secret regcreds
+
+  # Fail if the Secret already exists, like 'kubectl create secret docker-registry'
+  flux-mirror secret regcreds --create
 
   # Specific hosts, a specific namespace and kubeconfig context
-  flux-mirror create secret regcreds -n flux-system --context prod \
+  flux-mirror secret regcreds -n flux-system --context prod \
     --host registry.example.com --host other.example.com -f ./flux-mirror.yaml`,
 	Args: cobra.ExactArgs(1),
-	RunE: createSecretCmdRun,
+	RunE: secretCmdRun,
 }
 
-func createSecretCmdRun(cmd *cobra.Command, args []string) error {
+func secretCmdRun(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
-	cfgPath, err := resolveConfigFlag(createSecretArgs.config)
+	cfgPath, err := resolveConfigFlag(secretArgs.config)
 	if err != nil {
 		return err
 	}
@@ -73,18 +76,18 @@ func createSecretCmdRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	hosts, err := registryauth.SelectAuthHosts(cfg, createSecretArgs.hosts)
+	hosts, err := registryauth.SelectAuthHosts(cfg, secretArgs.hosts)
 	if err != nil {
 		return err
 	}
 
 	// Resolve cluster + namespace before minting credentials so a broken
 	// kubeconfig fails fast.
-	ns, _, err := createSecretKubeFlags.ToRawKubeConfigLoader().Namespace()
+	ns, _, err := secretKubeFlags.ToRawKubeConfigLoader().Namespace()
 	if err != nil {
 		return fmt.Errorf("resolve namespace: %w", err)
 	}
-	restConfig, err := createSecretKubeFlags.ToRESTConfig()
+	restConfig, err := secretKubeFlags.ToRESTConfig()
 	if err != nil {
 		return fmt.Errorf("build kubernetes client config: %w", err)
 	}
@@ -106,7 +109,7 @@ func createSecretCmdRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	created, err := applySecret(cmd.Context(), clientset, secret)
+	created, err := applySecret(cmd.Context(), clientset, secret, secretArgs.create)
 	if err != nil {
 		return err
 	}
@@ -155,13 +158,16 @@ func buildDockerConfigSecret(name, namespace string, creds map[string]registryau
 	}, nil
 }
 
-// applySecret creates the secret, or replaces it if it already exists. Returns
-// true when the secret was newly created.
-func applySecret(ctx context.Context, client kubernetes.Interface, secret *corev1.Secret) (bool, error) {
+// applySecret writes the secret. By default it upserts: create, or replace if it
+// already exists. When createOnly is true it only creates, returning the
+// AlreadyExists error if a Secret with the same name is already present (matching
+// 'kubectl create secret docker-registry'). Returns true when the secret was
+// newly created.
+func applySecret(ctx context.Context, client kubernetes.Interface, secret *corev1.Secret, createOnly bool) (bool, error) {
 	secrets := client.CoreV1().Secrets(secret.Namespace)
 	if _, err := secrets.Create(ctx, secret, metav1.CreateOptions{}); err == nil {
 		return true, nil
-	} else if !apierrors.IsAlreadyExists(err) {
+	} else if createOnly || !apierrors.IsAlreadyExists(err) {
 		return false, fmt.Errorf("create secret: %w", err)
 	}
 	existing, err := secrets.Get(ctx, secret.Name, metav1.GetOptions{})
@@ -176,10 +182,11 @@ func applySecret(ctx context.Context, client kubernetes.Interface, secret *corev
 }
 
 func init() {
-	createSecretCmd.Flags().StringVarP(&createSecretArgs.config, "config", "f", "", configFlagUsage())
-	createSecretCmd.Flags().StringArrayVar(&createSecretArgs.hosts, "host", nil,
+	secretCmd.Flags().StringVarP(&secretArgs.config, "config", "f", "", configFlagUsage())
+	secretCmd.Flags().StringArrayVar(&secretArgs.hosts, "host", nil,
 		"Registry host from the config to include; repeatable, defaults to all hosts")
-	createSecretKubeFlags.AddFlags(createSecretCmd.Flags())
-	createCmd.AddCommand(createSecretCmd)
-	rootCmd.AddCommand(createCmd)
+	secretCmd.Flags().BoolVar(&secretArgs.create, "create", false,
+		"Fail if the Secret already exists instead of replacing it")
+	secretKubeFlags.AddFlags(secretCmd.Flags())
+	rootCmd.AddCommand(secretCmd)
 }
