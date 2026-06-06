@@ -26,9 +26,9 @@ type Runner struct {
 	// OnJobFinished, if non-nil, is invoked once per job after Run returns.
 	// It runs from the worker goroutine (so concurrent invocations are
 	// possible — the callback must be safe to call from multiple goroutines)
-	// before the per-tag outcome is recorded, but after retries and outcome
+	// before the per-tag row is recorded, but after retries and status
 	// validation. Used by the cmd layer to drive a progress spinner.
-	OnJobFinished func(entry, id, dst string, oc Outcome, err error)
+	OnJobFinished func(entry, id, dst string, st Status, err error)
 
 	// OnEntryFinished, if non-nil, is invoked from the main goroutine once
 	// per entry, after all of that entry's jobs have completed (or its plan
@@ -79,13 +79,13 @@ func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (res Result, er
 		}
 		entryRes, err := r.runEntry(ctx, m)
 		if err != nil {
-			// Plan-time error (couldn't list tags etc.) — record as a single
-			// entry-level failure but keep going so the rest of the config
-			// gets exercised.
+			// Plan-time error (couldn't list tags etc.) — mark the entry failed
+			// but keep going so the rest of the config gets exercised. This is
+			// the only path that sets EntryFailed; per-tag failures live as
+			// StatusFailed rows on an EntryCompleted entry.
 			r.Logger.Error("plan failed", "entry", entryRes.Name, "err", err)
-			entryRes.Failures = append(entryRes.Failures, TagFailure{
-				Tag: "<plan>", Err: err.Error(),
-			})
+			entryRes.Status = EntryFailed
+			entryRes.Error = err.Error()
 			if r.OnPlanError != nil {
 				r.OnPlanError(entryRes.Name, err)
 			}
@@ -101,11 +101,15 @@ func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (res Result, er
 func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (EntryResult, error) {
 	plan, err := m.Plan(ctx)
 	if err != nil {
-		return EntryResult{Name: plan.Name, Outcomes: map[Outcome][]string{}}, err
+		return EntryResult{Name: plan.Name, Status: EntryFailed, Tags: []TagResult{}}, err
 	}
+	// Pre-size the rows slice so each job writes to its own plan-order index
+	// regardless of completion order — output is deterministic even under
+	// concurrency. Trimmed below to the number of jobs actually launched.
 	out := EntryResult{
-		Name:     plan.Name,
-		Outcomes: map[Outcome][]string{},
+		Name:   plan.Name,
+		Status: EntryCompleted,
+		Tags:   make([]TagResult, len(plan.Jobs)),
 	}
 	r.Logger.Info("entry started", "name", plan.Name, "jobs", len(plan.Jobs))
 	defer func(start time.Time) {
@@ -113,44 +117,69 @@ func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (EntryResult, erro
 			"name", plan.Name,
 			"wall", time.Since(start).Round(time.Millisecond),
 			"jobs", len(plan.Jobs),
-			"failures", len(out.Failures))
+			"failures", out.failedCount())
 	}(time.Now())
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(r.Concurrency)
 
 	var mu sync.Mutex
-	record := func(tag string, oc Outcome, err error) {
+	record := func(i int, job Job, res JobResult, err error) {
 		mu.Lock()
 		defer mu.Unlock()
-		if err != nil {
-			out.Failures = append(out.Failures, TagFailure{Tag: tag, Err: err.Error()})
-			return
+		// Digest and Referrers carry over whatever the job resolved: a
+		// copy-failed row keeps the compare digest and any referrers mirrored
+		// before the failure; a plan-failed/verify-failed row leaves both empty
+		// (zero JobResult), so the error stands alone.
+		row := TagResult{
+			Tag:          job.ID,
+			Verification: job.Verification,
+			Digest:       res.Digest,
+			Referrers:    res.Referrers,
 		}
-		out.Outcomes[oc] = append(out.Outcomes[oc], tag)
+		if err != nil {
+			row.Status = StatusFailed
+			row.Error = err.Error()
+		} else {
+			row.Status = res.Status
+			row.Reason = res.Reason
+		}
+		out.Tags[i] = row
 	}
 
-	for _, job := range plan.Jobs {
+	launched := 0
+	for i, job := range plan.Jobs {
 		if gctx.Err() != nil {
 			break
 		}
+		launched++
 		g.Go(func() error {
-			oc, err := r.runJob(gctx, job)
-			if err == nil && !oc.Valid() {
-				err = fmt.Errorf("entry returned invalid outcome %q", string(oc))
+			// A plan-time-known failure is recorded directly, skipping Run and
+			// the retry budget — retrying a guaranteed failure is wasted work.
+			res, err := JobResult{}, job.PlanError
+			if err == nil {
+				res, err = r.runJob(gctx, job)
+				if err == nil && !res.Status.Valid() {
+					err = fmt.Errorf("entry returned invalid status %q", string(res.Status))
+				}
 			}
 			if r.OnJobFinished != nil {
-				r.OnJobFinished(plan.Name, job.ID, job.Dst, oc, err)
+				r.OnJobFinished(plan.Name, job.ID, job.Dst, res.Status, err)
 			}
-			record(job.ID, oc, err)
+			record(i, job, res, err)
 			// Never propagate the error — failures are recorded per-tag and
 			// shouldn't cancel sibling tag jobs in the same entry.
 			return nil
 		})
 	}
 
-	if err := g.Wait(); err != nil {
-		return out, err
+	werr := g.Wait()
+	// Trim to the prefix actually launched (jobs are launched in plan order and
+	// the loop breaks on context cancellation), so we never serialize
+	// zero-value rows for jobs that never ran.
+	out.Tags = out.Tags[:launched]
+	if werr != nil {
+		return out, werr
 	}
 	return out, nil
 }
@@ -158,24 +187,27 @@ func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (EntryResult, erro
 // runJob applies the per-tag retry budget. The Run closure may be invoked
 // up to Retries+1 times within PerJobTimeout, with exponential backoff
 // between attempts. crane.Copy is idempotent so retries are safe.
-func (r *Runner) runJob(parent context.Context, job Job) (Outcome, error) {
+func (r *Runner) runJob(parent context.Context, job Job) (JobResult, error) {
 	ctx, cancel := context.WithTimeout(parent, r.PerJobTimeout)
 	defer cancel()
 
+	// Keep the last attempt's result so a copy-failed row still carries the
+	// digest/referrers the closure resolved before erroring.
+	var lastRes JobResult
 	var lastErr error
 	for attempt := 0; attempt <= r.Retries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			if lastErr != nil {
-				return "", fmt.Errorf("attempts exhausted (%d) after %w; last: %w",
+				return lastRes, fmt.Errorf("attempts exhausted (%d) after %w; last: %w",
 					attempt, err, lastErr)
 			}
-			return "", err
+			return lastRes, err
 		}
-		oc, err := job.Run(ctx)
+		res, err := job.Run(ctx)
 		if err == nil {
-			return oc, nil
+			return res, nil
 		}
-		lastErr = err
+		lastRes, lastErr = res, err
 		// Don't waste the budget on a retry if the context is already done.
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			break
@@ -187,9 +219,9 @@ func (r *Runner) runJob(parent context.Context, job Job) (Outcome, error) {
 			select {
 			case <-time.After(backoff):
 			case <-ctx.Done():
-				return "", ctx.Err()
+				return lastRes, ctx.Err()
 			}
 		}
 	}
-	return "", lastErr
+	return lastRes, lastErr
 }

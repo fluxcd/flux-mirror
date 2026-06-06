@@ -36,9 +36,12 @@ type Options struct {
 	Verifier Verifier
 }
 
-// Verifier checks a selected source reference before it is mirrored.
+// Verifier checks a selected source reference before it is mirrored. On
+// success it returns the confirmed signature metadata so the report can record
+// the verified identity; a *oci.SignatureTooNewError is returned alongside the
+// info when the signature is valid but younger than the configured minAge.
 type Verifier interface {
-	Verify(ctx context.Context, ref string, cfg config.ArtifactVerification) error
+	Verify(ctx context.Context, ref string, cfg config.ArtifactVerification) (*oci.VerificationInfo, error)
 }
 
 // New builds an EntryMirror for the given artifact entry.
@@ -65,12 +68,13 @@ type mirror struct {
 // time. Pulling these into a struct keeps runTag's signature compact and
 // makes the "captured at plan time" relationship explicit.
 type tagJob struct {
-	tag       string
-	src       string
-	dst       string
-	srcDigest string // pre-fetched only when refs were snapshotted; otherwise ""
-	refs      []oci.Referrer
-	overwrite bool
+	tag          string
+	src          string
+	dst          string
+	srcDigest    string // pre-fetched only when refs were snapshotted; otherwise ""
+	refs         []oci.Referrer
+	overwrite    bool
+	verification *sync.Verification // confirmed at plan time when entry.verify is set
 }
 
 func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
@@ -102,7 +106,8 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 		}
 
 		if m.entry.Verify != nil {
-			if err := m.opts.Verifier.Verify(ctx, job.src, *m.entry.Verify); err != nil {
+			info, err := m.opts.Verifier.Verify(ctx, job.src, *m.entry.Verify)
+			if err != nil {
 				var tooNew *oci.SignatureTooNewError
 				if errors.As(err, &tooNew) {
 					m.opts.Logger.Info("signature too new; skipping tag",
@@ -110,17 +115,42 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 						"integrated_time", tooNew.IntegratedTime.Format(time.RFC3339),
 						"age", tooNew.Age.Round(time.Second),
 						"min_age", tooNew.MinAge)
+					ver := toVerification(info)
+					if ver == nil {
+						ver = &sync.Verification{}
+					}
+					ver.Age = tooNew.Age.Round(time.Second).String()
+					ver.MinAge = tooNew.MinAge.String()
+					skipDigest := ""
+					if info != nil {
+						skipDigest = info.Digest
+					}
 					plan.Jobs = append(plan.Jobs, sync.Job{
-						ID:  tag,
-						Dst: job.dst,
-						Run: func(context.Context) (sync.Outcome, error) {
-							return sync.OutcomeSkipped, nil
+						ID:           tag,
+						Dst:          job.dst,
+						Verification: ver,
+						Run: func(context.Context) (sync.JobResult, error) {
+							return sync.JobResult{
+								Status: sync.StatusSkipped,
+								Reason: sync.ReasonSignatureTooNew,
+								Digest: skipDigest,
+							}, nil
 						},
 					})
 					continue
 				}
-				return plan, fmt.Errorf("verify %s: %w", job.src, err)
+				// Any other verify failure becomes a failed tag row carrying the
+				// error; planning stops after it (tags verified earlier still
+				// run, later tags are not attempted). Unlike a plan-time error,
+				// this keeps the entry status "completed".
+				plan.Jobs = append(plan.Jobs, sync.Job{
+					ID:        tag,
+					Dst:       job.dst,
+					PlanError: fmt.Errorf("verify %s: %w", job.src, err),
+				})
+				break
 			}
+			job.verification = toVerification(info)
 		}
 
 		// Snapshot referrers at plan time, not inside the retry closure —
@@ -141,9 +171,10 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 		}
 
 		plan.Jobs = append(plan.Jobs, sync.Job{
-			ID:  tag,
-			Dst: job.dst,
-			Run: func(jctx context.Context) (sync.Outcome, error) { return m.runTag(jctx, job) },
+			ID:           tag,
+			Dst:          job.dst,
+			Verification: job.verification,
+			Run:          func(jctx context.Context) (sync.JobResult, error) { return m.runTag(jctx, job) },
 		})
 	}
 	return plan, nil
@@ -151,7 +182,7 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 
 // runTag executes one tag's mirror flow. Idempotent — safe to retry under
 // the runner's per-tag budget.
-func (m *mirror) runTag(ctx context.Context, j tagJob) (sync.Outcome, error) {
+func (m *mirror) runTag(ctx context.Context, j tagJob) (sync.JobResult, error) {
 	start := time.Now()
 	m.opts.Logger.Info("mirroring tag", "src", j.src, "dst", j.dst)
 
@@ -159,24 +190,30 @@ func (m *mirror) runTag(ctx context.Context, j tagJob) (sync.Outcome, error) {
 	// skip the redundant src-side Digest call.
 	cmp, err := m.compareTag(ctx, j.src, j.dst, j.srcDigest)
 	if err != nil {
-		return "", err
+		return sync.JobResult{}, err
 	}
 
-	oc, err := m.applyOutcome(ctx, j.src, j.dst, cmp, j.overwrite, m.opts.CopyJobs)
+	st, reason, err := m.applyOutcome(ctx, j.src, j.dst, cmp, j.overwrite, m.opts.CopyJobs)
 	if err != nil {
-		return "", err
+		// Compare resolved the source digest before the copy failed — keep it
+		// on the failed row.
+		return sync.JobResult{Digest: cmp.SrcDigest}, err
 	}
 
+	var refResults []sync.ReferrerResult
 	if len(j.refs) > 0 {
-		if err := m.mirrorReferrers(ctx, j.refs, j.overwrite); err != nil {
-			return "", err
+		refResults, err = m.mirrorReferrers(ctx, j.refs, j.overwrite)
+		if err != nil {
+			// A referrer failure fails the parent tag; carry the digest and the
+			// partial referrer list (including the failed one) on the row.
+			return sync.JobResult{Digest: cmp.SrcDigest, Referrers: refResults}, err
 		}
 	}
 	m.opts.Logger.Info("tag done",
 		"src", j.src,
-		"outcome", string(oc),
+		"status", string(st),
 		"elapsed", time.Since(start).Round(time.Millisecond))
-	return oc, nil
+	return sync.JobResult{Status: st, Digest: cmp.SrcDigest, Reason: reason, Referrers: refResults}, nil
 }
 
 // compareTag does Compare or CompareWithKnownSrc depending on whether we
@@ -188,69 +225,107 @@ func (m *mirror) compareTag(ctx context.Context, src, dst, knownSrcDigest string
 	return m.client.Compare(ctx, src, dst)
 }
 
-// applyOutcome consolidates the Compare → Copy/skip switch shared between
-// the parent tag and each referrer.
-func (m *mirror) applyOutcome(ctx context.Context, src, dst string, cmp oci.CompareResult, overwrite bool, jobs int) (sync.Outcome, error) {
+// resolveCompare maps a Compare state to a status + skip reason, running copy
+// for the StateMissing/StateDrifted cases unless dry-run. copy performs the
+// actual mirror; onDrift logs the overwrite=false skip. Shared by the parent
+// tag and each referrer so the status mapping lives in one place.
+func (m *mirror) resolveCompare(cmp oci.CompareResult, overwrite bool, copyFn func() error, onDrift func()) (sync.Status, string, error) {
 	switch cmp.State {
 	case oci.StateEqual:
-		return sync.OutcomeSkipped, nil
+		return sync.StatusSkipped, sync.ReasonUpToDate, nil
 	case oci.StateMissing:
 		if m.opts.DryRun {
-			return sync.OutcomeWouldCopy, nil
+			return sync.StatusWouldCopy, "", nil
 		}
-		if err := m.client.CopyTag(ctx, src, dst, jobs); err != nil {
-			return "", err
+		if err := copyFn(); err != nil {
+			return "", "", err
 		}
-		return sync.OutcomeCopied, nil
+		return sync.StatusCopied, "", nil
 	case oci.StateDrifted:
 		if !overwrite {
+			onDrift()
+			return sync.StatusDrifted, "", nil
+		}
+		if m.opts.DryRun {
+			return sync.StatusWouldOverwrite, "", nil
+		}
+		if err := copyFn(); err != nil {
+			return "", "", err
+		}
+		return sync.StatusOverwritten, "", nil
+	}
+	return "", "", fmt.Errorf("compare returned unknown state %d", cmp.State)
+}
+
+// applyOutcome resolves the Compare → Copy/skip switch for the parent tag.
+func (m *mirror) applyOutcome(ctx context.Context, src, dst string, cmp oci.CompareResult, overwrite bool, jobs int) (sync.Status, string, error) {
+	return m.resolveCompare(cmp, overwrite,
+		func() error { return m.client.CopyTag(ctx, src, dst, jobs) },
+		func() {
 			m.opts.Logger.Warn("destination tag drifted from source; skipping (overwrite=false)",
 				"src", src, "src_digest", cmp.SrcDigest,
 				"dst", dst, "dst_digest", cmp.DstDigest)
-			return sync.OutcomeDrifted, nil
-		}
-		if m.opts.DryRun {
-			return sync.OutcomeWouldOverwrite, nil
-		}
-		if err := m.client.CopyTag(ctx, src, dst, jobs); err != nil {
-			return "", err
-		}
-		return sync.OutcomeOverwritten, nil
-	}
-	return "", fmt.Errorf("compare returned unknown state %d", cmp.State)
+		})
 }
 
 // mirrorReferrers walks the snapshotted referrer set and applies the same
-// Compare → Copy gate as the parent tag. The src digest of each referrer is
-// the referrer's own digest (we know it without a network call), so we use
-// CompareWithKnownSrc to skip the redundant src-side fetch per referrer.
-func (m *mirror) mirrorReferrers(ctx context.Context, refs []oci.Referrer, overwrite bool) error {
+// Compare → Copy gate as the parent tag, collecting a per-referrer result row.
+// The src digest of each referrer is the referrer's own digest (we know it
+// without a network call), so we use CompareWithKnownSrc to skip the redundant
+// src-side fetch per referrer. On the first referrer error it appends a failed
+// row for that referrer and returns the rows collected so far alongside the
+// error (a referrer failure fails the parent tag).
+func (m *mirror) mirrorReferrers(ctx context.Context, refs []oci.Referrer, overwrite bool) ([]sync.ReferrerResult, error) {
+	results := make([]sync.ReferrerResult, 0, len(refs))
 	for _, r := range refs {
 		dstRef := m.entry.Destination + "@" + r.Digest
 		cmp, err := m.client.CompareWithKnownSrc(ctx, r.Digest, dstRef)
 		if err != nil {
-			return fmt.Errorf("compare referrer %s: %w", r.Digest, err)
+			results = append(results, sync.ReferrerResult{
+				Digest: r.Digest, ArtifactType: r.ArtifactType, Status: sync.StatusFailed,
+			})
+			return results, fmt.Errorf("compare referrer %s: %w", r.Digest, err)
 		}
-		switch cmp.State {
-		case oci.StateEqual:
-			continue
-		case oci.StateMissing, oci.StateDrifted:
-			if cmp.State == oci.StateDrifted && !overwrite {
-				m.opts.Logger.Warn("destination referrer drifted; skipping (overwrite=false)",
-					"src_repo", m.entry.Source, "dst_repo", m.entry.Destination,
-					"digest", r.Digest, "dst_digest", cmp.DstDigest)
-				continue
-			}
-			if m.opts.DryRun {
-				m.opts.Logger.Info("would copy referrer (dry-run)",
-					"src_repo", m.entry.Source, "dst_repo", m.entry.Destination,
-					"digest", r.Digest, "state", cmp.State.String())
-				continue
-			}
-			if err := m.client.CopyReferrer(ctx, m.entry.Source, m.entry.Destination, r.Digest); err != nil {
-				return err
-			}
+		st, reason, err := m.applyReferrerOutcome(ctx, r, cmp, overwrite)
+		if err != nil {
+			results = append(results, sync.ReferrerResult{
+				Digest: r.Digest, ArtifactType: r.ArtifactType, Status: sync.StatusFailed,
+			})
+			return results, err
 		}
+		results = append(results, sync.ReferrerResult{
+			Digest: r.Digest, ArtifactType: r.ArtifactType, Status: st, Reason: reason,
+		})
 	}
-	return nil
+	return results, nil
+}
+
+// applyReferrerOutcome resolves one referrer's compare state, copying via
+// CopyReferrer. Mirrors applyOutcome through the shared resolveCompare switch.
+func (m *mirror) applyReferrerOutcome(ctx context.Context, r oci.Referrer, cmp oci.CompareResult, overwrite bool) (sync.Status, string, error) {
+	return m.resolveCompare(cmp, overwrite,
+		func() error { return m.client.CopyReferrer(ctx, m.entry.Source, m.entry.Destination, r.Digest) },
+		func() {
+			m.opts.Logger.Warn("destination referrer drifted; skipping (overwrite=false)",
+				"src_repo", m.entry.Source, "dst_repo", m.entry.Destination,
+				"digest", r.Digest, "dst_digest", cmp.DstDigest)
+		})
+}
+
+// toVerification converts the oci-layer verification info into the report's
+// wire type, formatting the integrated time as RFC 3339 (omitted when zero).
+// Returns nil when info is nil (no verify configured / nothing confirmed).
+func toVerification(info *oci.VerificationInfo) *sync.Verification {
+	if info == nil {
+		return nil
+	}
+	v := &sync.Verification{
+		Provider: info.Provider,
+		Issuer:   info.Issuer,
+		Identity: info.Identity,
+	}
+	if !info.IntegratedTime.IsZero() {
+		v.IntegratedTime = info.IntegratedTime.UTC().Format(time.RFC3339)
+	}
+	return v
 }

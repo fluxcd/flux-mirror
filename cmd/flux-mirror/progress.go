@@ -46,7 +46,7 @@ func newProgress(out, ttyOut io.Writer, totalEntries int) *progress {
 
 // JobFinished is the OnJobFinished hook for sync.Runner. Safe for
 // concurrent invocation.
-func (p *progress) JobFinished(entry, id, dst string, oc syncpkg.Outcome, err error) {
+func (p *progress) JobFinished(entry, id, dst string, st syncpkg.Status, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err != nil {
@@ -56,7 +56,7 @@ func (p *progress) JobFinished(entry, id, dst string, oc syncpkg.Outcome, err er
 		}
 		return
 	}
-	p.emitLocked("✓ %s:%s (%s)\n", entry, id, oc)
+	p.emitLocked("✓ %s:%s (%s)\n", entry, id, st)
 	if dst != "" {
 		p.emitLocked("→ %s\n", dst)
 	}
