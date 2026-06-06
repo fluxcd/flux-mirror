@@ -95,6 +95,20 @@ func loginCmdRun(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("host %q: %w", h.Host, err)
 		}
 
+		// A bearer RegistryToken can't live in a credential helper (those store
+		// username/secret pairs), so it always goes to the config file. A
+		// username/password pair respects --plaintext and any configured helper.
+		if ha.RegistryToken != "" {
+			if err := credentials.NewFileStore(dcf).Store(types.AuthConfig{
+				ServerAddress: h.Host,
+				RegistryToken: ha.RegistryToken,
+			}); err != nil {
+				return fmt.Errorf("store docker credential for %q: %w", h.Host, err)
+			}
+			cmd.Printf("✔ stored registry token for %s in %s\n", h.Host, dcf.Filename)
+			continue
+		}
+
 		var store credentials.Store
 		if loginArgs.plaintext {
 			// Force a base64 config.json entry, bypassing any helper.

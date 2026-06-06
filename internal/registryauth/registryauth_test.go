@@ -4,6 +4,7 @@
 package registryauth
 
 import (
+	"context"
 	"testing"
 
 	. "github.com/onsi/gomega"
@@ -49,6 +50,33 @@ func TestSelectAuthHosts_NoAuth(t *testing.T) {
 	g := NewWithT(t)
 	_, err := SelectAuthHosts(&config.Config{}, nil)
 	g.Expect(err).To(MatchError(ContainSubstring("no auth.hosts")))
+}
+
+func TestUsernameSwitch(t *testing.T) {
+	g := NewWithT(t)
+
+	bearer := &config.Auth{Hosts: []config.AuthHost{{
+		Host: "bearer.example", Credential: &config.AuthCredential{FromEnv: "X"},
+	}}}
+	userpass := &config.Auth{Hosts: []config.AuthHost{{
+		Host: "userpass.example", Credential: &config.AuthCredential{FromEnv: "X", Username: "robot"},
+	}}}
+
+	// cijwt (bearer-stamp) transport is needed only when a credential host has
+	// no username.
+	g.Expect(NeedsCredentialTransport(bearer)).To(BeTrue())
+	g.Expect(NeedsCredentialTransport(userpass)).To(BeFalse())
+
+	// A username credential is skipped by the cijwt options (goes via keychain).
+	t.Setenv("X", "tok")
+	opts, err := JWTTransportOptions(nil, userpass)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(opts).To(HaveLen(1)) // only WithInner; the host is skipped
+
+	// ...and is served by the keychain instead.
+	kc, err := BuildKeychain(context.Background(), userpass)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(kc).ToNot(BeNil())
 }
 
 func TestPkgAuthProviderName(t *testing.T) {

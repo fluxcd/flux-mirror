@@ -157,7 +157,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 	} else if t != nil {
 		clientOpts = append(clientOpts, oci.WithTransport(t))
 	}
-	if kc, err := registryauth.BuildProviderKeychain(cmd.Context(), cfg.Auth); err != nil {
+	if kc, err := registryauth.BuildKeychain(cmd.Context(), cfg.Auth); err != nil {
 		return err
 	} else if kc != nil {
 		clientOpts = append(clientOpts, oci.WithKeychain(kc))
@@ -278,7 +278,7 @@ func classifyExit(r sync.Result, driftExitCode int) error {
 func buildClientTransport(auth *config.Auth) (http.RoundTripper, error) {
 	// Only credential hosts use the cijwt transport; provider hosts authenticate
 	// through the keychain instead.
-	credSet := registryauth.HasCredentialHosts(auth)
+	credSet := registryauth.NeedsCredentialTransport(auth)
 	chunkSet := syncArgs.maxChunkSize > 0
 	if !credSet && !chunkSet {
 		return nil, nil

@@ -49,9 +49,11 @@ in-cluster service-account namespace).
   in-cluster config and service-account namespace).
 - With no `--host`, every host in `auth.hosts` is included. A `--host` that is
   not present in the config is an error.
-- The Secret's `.dockerconfigjson` holds one `auths` entry per host, each with a
-  placeholder username (`flux-mirror`) and the resolved credential as the
-  password — the identity is carried entirely by the credential.
+- The Secret's `.dockerconfigjson` holds one `auths` entry per host. A cloud
+  `provider` host, and a `credential` host with `username` set, write
+  `username`/`password`/`auth`. A `credential` host **without** `username` writes
+  the bearer `registrytoken` field (understood by go-containerregistry/Flux, not
+  by `kubelet`). See [`credential.username`](./config.md#bearer-token-vs-usernamepassword-credentialusername).
 - Credentials are short-lived (provider tokens, freshly signed JWTs). Re-run the
   command to refresh the Secret before they expire; it replaces the existing one
   in place.

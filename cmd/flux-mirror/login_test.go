@@ -15,8 +15,6 @@ import (
 
 	gojwt "github.com/golang-jwt/jwt/v5"
 	. "github.com/onsi/gomega"
-
-	"github.com/fluxcd/flux-mirror/internal/registryauth"
 )
 
 // writeLoginConfig writes a valid config whose single auth host carries the
@@ -55,9 +53,10 @@ func parseUnverified(t *testing.T, token string) gojwt.MapClaims {
 }
 
 // loginStore runs `login` for the standard test host storing into a fresh,
-// plaintext Docker config dir, and returns the password stored for it (the part
-// after the first colon of the decoded auth entry). --plaintext keeps the test
-// off any OS keychain helper.
+// plaintext Docker config dir, and returns the credential stored for it: the
+// registrytoken when present (credential hosts without a username), otherwise
+// the password from the decoded auth entry. --plaintext keeps the test off any
+// OS keychain helper.
 func loginStore(t *testing.T, configRef, input string) (string, error) {
 	t.Helper()
 	const host = "registry.example.com"
@@ -72,7 +71,8 @@ func loginStore(t *testing.T, configRef, input string) (string, error) {
 	}
 	var parsed struct {
 		Auths map[string]struct {
-			Auth string `json:"auth"`
+			Auth          string `json:"auth"`
+			RegistryToken string `json:"registrytoken"`
 		} `json:"auths"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -81,6 +81,9 @@ func loginStore(t *testing.T, configRef, input string) (string, error) {
 	entry, ok := parsed.Auths[host]
 	if !ok {
 		return "", fmt.Errorf("no auth entry for %q", host)
+	}
+	if entry.RegistryToken != "" {
+		return entry.RegistryToken, nil
 	}
 	dec, err := base64.StdEncoding.DecodeString(entry.Auth)
 	if err != nil {
@@ -213,7 +216,7 @@ auth:
 	g.Expect(err).To(MatchError(ContainSubstring("config has no entries")))
 }
 
-func TestLogin_PlaintextStoresUserAndPassword(t *testing.T) {
+func TestLogin_StoresRegistryToken(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
 	cfg := writeLoginConfig(t, "        fromEnv: MY_LOGIN_TOKEN\n")
@@ -229,15 +232,48 @@ func TestLogin_PlaintextStoresUserAndPassword(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 	var parsed struct {
 		Auths map[string]struct {
-			Auth string `json:"auth"`
+			Auth          string `json:"auth"`
+			Username      string `json:"username"`
+			Password      string `json:"password"`
+			RegistryToken string `json:"registrytoken"`
 		} `json:"auths"`
 	}
 	g.Expect(json.Unmarshal(data, &parsed)).To(Succeed())
 	entry, ok := parsed.Auths["registry.example.com"]
 	g.Expect(ok).To(BeTrue())
+	// No username => bearer registrytoken, no username/password/auth.
+	g.Expect(entry.RegistryToken).To(Equal("static-token-value"))
+	g.Expect(entry.Auth).To(BeEmpty())
+	g.Expect(entry.Username).To(BeEmpty())
+	g.Expect(entry.Password).To(BeEmpty())
+}
+
+func TestLogin_UsernameStoresUserPassword(t *testing.T) {
+	g := NewWithT(t)
+	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
+	cfg := writeLoginConfig(t, "        fromEnv: MY_LOGIN_TOKEN\n        username: robot\n")
+	dockerDir := t.TempDir()
+
+	_, err := executeCommand([]string{
+		"login", "--host", "registry.example.com", "--config", cfg, "--docker-config", dockerDir, "--plaintext",
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+
+	data, err := os.ReadFile(filepath.Join(dockerDir, "config.json"))
+	g.Expect(err).ToNot(HaveOccurred())
+	var parsed struct {
+		Auths map[string]struct {
+			Auth          string `json:"auth"`
+			RegistryToken string `json:"registrytoken"`
+		} `json:"auths"`
+	}
+	g.Expect(json.Unmarshal(data, &parsed)).To(Succeed())
+	entry := parsed.Auths["registry.example.com"]
+	// Username set => standard username/password/auth, no registrytoken.
+	g.Expect(entry.RegistryToken).To(BeEmpty())
 	dec, err := base64.StdEncoding.DecodeString(entry.Auth)
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(string(dec)).To(Equal(registryauth.Username + ":static-token-value"))
+	g.Expect(string(dec)).To(Equal("robot:static-token-value"))
 }
 
 func TestLogin_AllHostsByDefault(t *testing.T) {
@@ -266,19 +302,13 @@ auth:
 	g.Expect(err).ToNot(HaveOccurred())
 	var parsed struct {
 		Auths map[string]struct {
-			Auth string `json:"auth"`
+			RegistryToken string `json:"registrytoken"`
 		} `json:"auths"`
 	}
 	g.Expect(json.Unmarshal(data, &parsed)).To(Succeed())
 	g.Expect(parsed.Auths).To(HaveLen(2))
-	password := func(host string) string {
-		dec, derr := base64.StdEncoding.DecodeString(parsed.Auths[host].Auth)
-		g.Expect(derr).ToNot(HaveOccurred())
-		_, pass, _ := strings.Cut(string(dec), ":")
-		return pass
-	}
-	g.Expect(password("a.example.com")).To(Equal("cred-a"))
-	g.Expect(password("b.example.com")).To(Equal("cred-b"))
+	g.Expect(parsed.Auths["a.example.com"].RegistryToken).To(Equal("cred-a"))
+	g.Expect(parsed.Auths["b.example.com"].RegistryToken).To(Equal("cred-b"))
 }
 
 func TestLogin_HostNotFound(t *testing.T) {
