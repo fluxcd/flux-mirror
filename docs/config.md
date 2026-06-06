@@ -102,17 +102,17 @@ auth:
 
 - **Unset (default)** — the credential is a **bearer token**. `sync` sends it as
   `Authorization: Bearer` on every request (no auth challenge), and
-  `login`/`create secret` write it to the Docker config's `registrytoken` field.
+  `login`/`secret` write it to the Docker config's `registrytoken` field.
   This suits registries that validate an OIDC token natively. `registrytoken` is
   non-standard but understood by go-containerregistry (crane, Flux); it is **not**
   understood by `kubelet` image pulls.
 - **Set** — the credential becomes the **password** of a `username`/`password`
   pair. `sync` goes through the **standard registry auth challenge** (like the
   cloud providers — credentials are exchanged at the token endpoint), and
-  `login`/`create secret` write `username`/`password`/`auth`.
+  `login`/`secret` write `username`/`password`/`auth`.
 
 > ⚠️ Breaking change: credentials without `username` now default to
-> `registrytoken` in `login`/`create secret` output (previously a placeholder
+> `registrytoken` in `login`/`secret` output (previously a placeholder
 > `username`/`password`). Set `username` to restore `username`/`password`/`auth`.
 
 ### Registry providers

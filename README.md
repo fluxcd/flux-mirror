@@ -217,7 +217,7 @@ destination registry credentials from a `Secret` created via
 |-----------------------------|------------------------------------------------------------------|
 | `flux-mirror sync [CONFIG]` | Mirror Helm charts and OCI artifacts described by a YAML config. |
 | `flux-mirror login`         | Store configured credentials in the Docker config (or OS keychain). |
-| `flux-mirror create secret <name>` | Create/replace a `dockerconfigjson` Kubernetes Secret with per-host credentials. |
+| `flux-mirror secret <name>` | Create/replace (upsert) a `dockerconfigjson` Kubernetes Secret with per-host credentials. |
 | `flux-mirror keygen`        | Generate an EdDSA JWK pair for JWK-based registry auth.          |
 | `flux-mirror version`       | Print the CLI version.                                           |
 | `flux-mirror completion`    | Generate shell completion for bash, fish, powershell and zsh.    |
@@ -234,7 +234,7 @@ Run `flux-mirror <command> --help` for the full flag list.
   JWK-based registry auth.
 - [Login command reference](docs/login.md) — store configured credentials in
   the Docker config or OS keychain.
-- [Create command reference](docs/create.md) — write per-host credentials into
+- [Secret command reference](docs/secret.md) — upsert per-host credentials into
   a Kubernetes `dockerconfigjson` Secret.
 - [Examples](examples/) — runnable configs for common mirror scenarios.
 
