@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report/schema-1.0.0.json",
+  "title": "flux-mirror sync report",
+  "description": "Structured report emitted by `flux-mirror sync --output json|yaml`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "report"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "$schema": {
+      "type": "string",
+      "format": "uri"
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reporter", "timestamp", "durationMs", "summary", "results"],
+      "properties": {
+        "reporter": {
+          "type": "string",
+          "pattern": "^flux-mirror/"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entries",
+            "copied",
+            "overwritten",
+            "skipped",
+            "drifted",
+            "wouldCopy",
+            "wouldOverwrite",
+            "failed",
+            "exitCode"
+          ],
+          "properties": {
+            "entries":        { "type": "integer", "minimum": 0 },
+            "copied":         { "type": "integer", "minimum": 0 },
+            "overwritten":    { "type": "integer", "minimum": 0 },
+            "skipped":        { "type": "integer", "minimum": 0 },
+            "drifted":        { "type": "integer", "minimum": 0 },
+            "wouldCopy":      { "type": "integer", "minimum": 0 },
+            "wouldOverwrite": { "type": "integer", "minimum": 0 },
+            "failed":         { "type": "integer", "minimum": 0 },
+            "exitCode":       { "type": "integer", "enum": [0, 1, 2] }
+          }
+        },
+        "results": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/result" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "status": {
+      "description": "Outcome of mirroring one tag or referrer.",
+      "type": "string",
+      "enum": [
+        "copied",
+        "overwritten",
+        "skipped",
+        "drifted",
+        "would-copy",
+        "would-overwrite",
+        "failed"
+      ]
+    },
+    "reason": {
+      "description": "Why a skipped tag or referrer was skipped. Always present on a skipped status.",
+      "type": "string",
+      "enum": ["up-to-date", "signature-too-new"]
+    },
+    "result": {
+      "description": "One config entry (artifact or chart source).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status", "tags"],
+      "properties": {
+        "name": {
+          "description": "Entry identifier (the source repository/reference).",
+          "type": "string"
+        },
+        "status": {
+          "description": "Entry-level outcome. 'failed' means the entry could not be planned (e.g. tag listing failed) and 'tags' is empty; 'completed' means it was planned and run (its 'tags' may still contain failed rows, or be empty when nothing matched).",
+          "type": "string",
+          "enum": ["completed", "failed"]
+        },
+        "error": {
+          "description": "Plan-time error message. Present only when status is 'failed'.",
+          "type": "string"
+        },
+        "tags": {
+          "description": "Per-tag results, in plan order.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/tag" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "failed" } } },
+          "then": { "required": ["error"] },
+          "else": { "not": { "required": ["error"] } }
+        }
+      ]
+    },
+    "tag": {
+      "description": "Result of mirroring one tag (artifact tag or chart version).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "status"],
+      "properties": {
+        "tag": {
+          "description": "Tag name (artifacts) or chart version (charts).",
+          "type": "string"
+        },
+        "status": { "$ref": "#/$defs/status" },
+        "digest": {
+          "description": "Source artifact digest, when resolved. Absent on a verify-failed row.",
+          "type": "string"
+        },
+        "reason": { "$ref": "#/$defs/reason" },
+        "error": {
+          "description": "Error message. Present only when status is 'failed'.",
+          "type": "string"
+        },
+        "referrers": {
+          "description": "Mirrored sub-artifacts (cosign signatures, SBOMs, attestations). Present only with includeReferrers.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/referrer" }
+        },
+        "verification": { "$ref": "#/$defs/verification" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "skipped" } }, "required": ["status"] },
+          "then": { "required": ["reason"] },
+          "else": { "not": { "required": ["reason"] } }
+        },
+        {
+          "if": { "properties": { "status": { "const": "failed" } }, "required": ["status"] },
+          "then": { "required": ["error"] },
+          "else": { "not": { "required": ["error"] } }
+        }
+      ]
+    },
+    "referrer": {
+      "description": "Result of mirroring one referrer of a tag.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest", "status"],
+      "properties": {
+        "digest": {
+          "description": "Referrer manifest digest.",
+          "type": "string"
+        },
+        "artifactType": {
+          "description": "The referrer manifest's artifactType, when set.",
+          "type": "string"
+        },
+        "status": { "$ref": "#/$defs/status" },
+        "reason": { "$ref": "#/$defs/reason" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "skipped" } }, "required": ["status"] },
+          "then": { "required": ["reason"] },
+          "else": { "not": { "required": ["reason"] } }
+        }
+      ]
+    },
+    "verification": {
+      "description": "Signature verification metadata. Present only when a signature was confirmed (verify: configured). Only 'provider' is guaranteed; the rest is best-effort.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": {
+          "description": "Verification provider, e.g. 'cosign'.",
+          "type": "string"
+        },
+        "issuer": {
+          "description": "Matched OIDC issuer from the signing certificate.",
+          "type": "string"
+        },
+        "identity": {
+          "description": "Matched certificate identity (subject alternative name).",
+          "type": "string"
+        },
+        "integratedTime": {
+          "description": "Transparency-log integration time (RFC 3339). Present only when the bundle carries a verified Tlog timestamp.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "age": {
+          "description": "Signature age at evaluation time, as a Go duration string. Present only on a signature-too-new skip.",
+          "type": "string"
+        },
+        "minAge": {
+          "description": "Configured verify.minAge, as a Go duration string. Present only on a signature-too-new skip.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

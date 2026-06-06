@@ -50,7 +50,7 @@ repository credentials automatically.
 
 | Flag                            | Default | Description                                                                                                                                        |
 |---------------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| `-o, --output text\|yaml\|json` | `text`  | Output format. `text` is human-friendly; `yaml` and `json` print the structured `Result` to stdout.                                                |
+| `-o, --output text\|yaml\|json` | `text`  | Output format. `text` is human-friendly; `yaml` and `json` print the structured [sync report](./report/README.md) to stdout.                       |
 | `--concurrency N`               | `4`     | Maximum number of copy operations to run in parallel within a single config entry. Entries themselves are processed sequentially.                  |
 | `--retries N`                   | `3`     | Maximum number of retry attempts per job, bounded by `--timeout`.                                                                                  |
 | `--overwrite`                   | `false` | Force `overwrite: true` on every entry, regardless of per-entry config. See [Overwrite Behavior](./config.md#overwrite-behavior).                  |
@@ -91,36 +91,69 @@ and registry-side warning is logged. Reach for this when diagnosing TLS, auth, m
 2026/05/13 09:00:00 existing blob: sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a
 2026/05/13 09:00:00 localhost:5050/bar:1.0: digest: sha256:455d6a04fe43df4a93b40e1f92d65b2a9befaa0348e5a461295d961161ebf475 size: 829
 2026/05/13 09:00:00 updating fallback tag sha256-455d6a04... with new referrer
-2026/05/13 09:00:01 tag done src=ghcr.io/foo/bar:1.0 outcome=copied elapsed=812ms
+2026/05/13 09:00:01 tag done src=ghcr.io/foo/bar:1.0 status=copied elapsed=812ms
 …
 2026/05/13 09:00:04 sync complete entries=3 copied=1 overwritten=0 skipped=1 drifted=0 failed=1 duration=4.213s
 ```
 
 ### Structured output
 
-`-o yaml` and `-o json` print the full `Result` to stdout — entries with their per-outcome tag lists and any failures
-Suitable for piping into another tool.
+`-o yaml` and `-o json` print a versioned report to stdout: a top-level envelope
+(`version`, `$schema`, `report`) wrapping run metadata (`reporter`, `timestamp`,
+`durationMs`), an aggregate `summary` of per-status tag counts, and `results[]`
+where each entry carries a `status` (`completed`/`failed`) and a `tags[]` array
+of per-tag rows. Every row has a `status` and, when known, a source `digest`;
+skipped rows always carry a `reason`; verified rows carry a `verification` block;
+and, with `includeReferrers: true`, a `referrers[]` array. The envelope is
+documented by the [sync report schema](./report/README.md).
 
 ```bash
-flux-mirror sync config.yaml -o json | jq '.entries[].outcomes.copied'
+# Status of every tag, per entry
+flux-mirror sync config.yaml -o json | jq '.report.results[].tags[] | {tag, status}'
+
+# Tags that were copied
+flux-mirror sync config.yaml -o json | jq '.report.results[].tags[] | select(.status == "copied") | .tag'
+
+# Verified identities
+flux-mirror sync config.yaml -o json | jq '.report.results[].tags[] | select(.verification) | {tag, identity: .verification.identity}'
+
+# Aggregate counts
+flux-mirror sync config.yaml -o json | jq '.report.summary'
 ```
 
-## Outcomes
+## Status
 
-Each tag job lands in exactly one of these buckets:
+Each tag row (and each referrer row) lands in exactly one of these statuses:
 
-| Outcome           | Meaning                                                                                           |
+| Status            | Meaning                                                                                           |
 |-------------------|---------------------------------------------------------------------------------------------------|
 | `copied`          | Destination did not have the tag; mirrored from source.                                           |
 | `overwritten`     | Destination had a different digest; replaced (only with `overwrite: true`).                       |
-| `skipped`         | Nothing was copied: destination already matched, or `verify.minAge` deferred a too-new signature. |
+| `skipped`         | Nothing was copied; the row's `reason` says why (see below).                                       |
 | `drifted`         | Destination has a different digest, `overwrite: false` — left alone, surfaced in the summary.     |
 | `would-copy`      | Dry-run forecast: would have been copied.                                                         |
 | `would-overwrite` | Dry-run forecast: would have been overwritten.                                                    |
+| `failed`          | The operation errored; the row's `error` carries the message.                                     |
 
-Plan-time failures (e.g., source registry rejected a `ListTags`, or cosign
-verification failed for a selected source tag) are reported as a single
-`✗ <entry> — plan failed: <err>` line and counted toward `failed`.
+A `skipped` row always carries a `reason`: `up-to-date` (the destination already
+has the same digest) or `signature-too-new` (a valid signature was deferred by
+`verify.minAge`).
+
+A failed signature verification (bad/missing signature, OIDC mismatch) is recorded
+as a `failed` tag row carrying the verify error; verification runs at plan time, so
+the first failure stops the entry (tags verified before it still run) while the
+entry itself stays `completed`. A true plan-time failure (e.g. the source registry
+rejected a `ListTags`) surfaces as an entry with `status: "failed"`, an `error`, and
+an empty `tags` array, and is reported live as a `✗ <entry> — plan failed: <err>`
+line. Both kinds count toward `failed`.
+
+### Referrers
+
+When an entry sets `includeReferrers: true`, each tag row gains a `referrers[]`
+array — one row per mirrored sub-artifact (cosign signature bundle, SBOM,
+attestation), each with its own `digest`, `artifactType`, `status`, and (when
+skipped) `reason`. Referrers are evaluated in `--dry-run` too, reported with
+`would-copy` / `would-overwrite` / `skipped` statuses without writing.
 
 ## Exit codes
 
