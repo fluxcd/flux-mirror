@@ -13,6 +13,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
@@ -48,9 +49,22 @@ const (
 	// verify it and read the caller's account/ARN. aud pins the target registry
 	// via a signed header, not an OIDC audience claim.
 	JWTProviderAWS = "aws"
+	// JWTProviderJWTSVID fetches a JWT-SVID from the SPIFFE Workload API
+	// (ambient SPIFFE_ENDPOINT_SOCKET) for the audience (defaults to host) and
+	// sends it as the registry credential. This is the HTTP-layer counterpart to
+	// the transport-layer tls.spiffe (X.509-SVID mTLS); the two are independent.
+	JWTProviderJWTSVID = "jwt-svid"
+
+	// TrustDomainSelf, used in tls.serverAuth.spiffe.trustDomain, authorizes any
+	// server SVID in the client's own trust domain (read from its X.509-SVID).
+	TrustDomainSelf = "self"
+
+	// TLSClientProviderX509SVID, used in tls.clientAuth.provider, presents a
+	// SPIFFE X.509-SVID from the ambient Workload API as the client certificate.
+	TLSClientProviderX509SVID = "x509-svid"
 
 	// RegistryProviderECR, RegistryProviderACR and RegistryProviderGAR select a
-	// cloud registry provider for auth.hosts[].provider. They obtain registry
+	// cloud registry provider for hosts[].provider. They obtain registry
 	// credentials from the cloud provider's workload identity (the same way the
 	// `flux push artifact` family does), and are mutually exclusive with the
 	// per-host credential. ECR maps to AWS, ACR to Azure, GAR to GCP.
@@ -68,23 +82,25 @@ const (
 )
 
 // Config is the top-level flux-mirror declarative config.
+//
+// Hosts configures per-host authentication for outbound OCI registry requests.
+// Hosts that are not listed keep their ambient keychain authentication; a given
+// host should use either a configured credential or ambient credentials, not
+// both. See docs/config.md#hosts.
 type Config struct {
 	APIVersion string          `json:"apiVersion"`
 	Kind       string          `json:"kind"`
-	Auth       *Auth           `json:"auth,omitempty"`
+	Hosts      []AuthHost      `json:"hosts,omitempty"`
 	Charts     []ChartEntry    `json:"charts,omitempty"`
 	Artifacts  []ArtifactEntry `json:"artifacts,omitempty"`
 }
 
-// Auth configures per-host credential authentication for outbound OCI registry
-// requests. Hosts that are not listed keep their ambient keychain
-// authentication; a given host should use either auth or ambient credentials,
-// not both. See docs/config.md#auth.
-type Auth struct {
-	Hosts []AuthHost `json:"hosts,omitempty"`
-}
-
-// AuthHost binds an authentication method to a registry host.
+// AuthHost binds an authentication method to a registry host. Credential and
+// Provider configure the HTTP-layer registry credential (mutually exclusive).
+// TLS configures the transport-layer TLS/mTLS settings: it composes with
+// Credential, but is mutually exclusive with Provider — a cloud registry
+// provider is a managed registry whose transport flux-mirror does not customize.
+// At least one of Credential, Provider, or TLS must be set.
 type AuthHost struct {
 	Host       string          `json:"host"`
 	Credential *AuthCredential `json:"credential,omitempty"`
@@ -92,6 +108,9 @@ type AuthHost struct {
 	// identity, one of RegistryProviderECR, RegistryProviderACR or
 	// RegistryProviderGAR. Mutually exclusive with Credential.
 	Provider string `json:"provider,omitempty"`
+	// TLS configures transport-layer TLS for the host: server verification
+	// (custom CA), client certificate (mTLS), or SPIFFE X.509-SVID mTLS.
+	TLS *TLS `json:"tls,omitempty"`
 }
 
 // AuthCredential configures a per-host credential. Exactly one of Provider,
@@ -149,6 +168,69 @@ func (h AuthHost) EffectiveAud() string {
 		return h.Host
 	}
 	return h.Credential.Aud
+}
+
+// TLS configures transport-layer TLS for a host. ServerAuth verifies the
+// registry's server certificate; ClientAuth presents a client certificate
+// (mTLS). Either may use SPIFFE independently, so SPIFFE can authenticate the
+// client while a normal/custom CA verifies the server, or vice versa. At least
+// one of ServerAuth or ClientAuth must be set.
+type TLS struct {
+	ServerAuth *TLSServerAuth `json:"serverAuth,omitempty"`
+	ClientAuth *TLSClientAuth `json:"clientAuth,omitempty"`
+}
+
+// TLSServerAuth verifies the registry's server certificate. Exactly one of the
+// fields is set: FromPath/FromEnv/FromBytes provide a custom CA bundle (one or
+// more concatenated PEM certificates), or SPIFFE verifies the server's
+// X.509-SVID against the SPIFFE trust bundle. When ServerAuth is unset entirely,
+// the system trust pool is used.
+type TLSServerAuth struct {
+	FromPath  string     `json:"fromPath,omitempty"`
+	FromEnv   string     `json:"fromEnv,omitempty"`
+	FromBytes string     `json:"fromBytes,omitempty"`
+	SPIFFE    *SPIFFETLS `json:"spiffe,omitempty"`
+}
+
+// TLSData is a single PEM-encoded public value (a client cert chain or a CA
+// bundle) obtained from exactly one of FromPath, FromEnv, or FromBytes.
+type TLSData struct {
+	FromPath  string `json:"fromPath,omitempty"`
+	FromEnv   string `json:"fromEnv,omitempty"`
+	FromBytes string `json:"fromBytes,omitempty"`
+}
+
+// TLSKey is a private key source. Unlike the public certificate and CA values it
+// is a secret, so it cannot be inlined in the config (no FromBytes): exactly one
+// of FromPath or FromEnv.
+type TLSKey struct {
+	FromPath string `json:"fromPath,omitempty"`
+	FromEnv  string `json:"fromEnv,omitempty"`
+}
+
+// TLSClientAuth presents a client certificate (mTLS). Either Provider is set
+// (TLSClientProviderX509SVID, presenting a SPIFFE X.509-SVID from the Workload
+// API), or the static Certificate and Key pair is set — the two are mutually
+// exclusive.
+type TLSClientAuth struct {
+	Provider    string   `json:"provider,omitempty"`
+	Certificate *TLSData `json:"certificate,omitempty"`
+	Key         *TLSKey  `json:"key,omitempty"`
+}
+
+// SPIFFETLS configures SPIFFE X.509-SVID server verification under
+// TLSServerAuth. The trust bundle comes from the ambient Workload API socket
+// (SPIFFE_ENDPOINT_SOCKET); the only configuration is how to authorize the
+// server's SVID. Exactly one of ServerID, TrustDomain, or AuthorizeAny is set:
+//
+//   - ServerID authorizes one exact SPIFFE ID.
+//   - TrustDomain authorizes any SVID in the named trust domain; the value
+//     TrustDomainSelf ("self") uses the client's own trust domain.
+//   - AuthorizeAny accepts any SVID the bundle can validate (discouraged).
+type SPIFFETLS struct {
+	ServerID     string `json:"serverID,omitempty"`
+	TrustDomain  string `json:"trustDomain,omitempty"`
+	AuthorizeAny bool   `json:"authorizeAny,omitempty"`
 }
 
 // ChartEntry mirrors a Helm chart from an HTTP/S or OCI source to an OCI destination.
@@ -255,7 +337,7 @@ func (c *Config) Validate() error {
 }
 
 // ValidateNoEntriesOK is like Validate but permits a config with no charts or
-// artifacts. Used by commands that consume only the auth section (e.g.
+// artifacts. Used by commands that consume only the hosts section (e.g.
 // `flux-mirror login`), for which a mirror entry would be meaningless.
 func (c *Config) ValidateNoEntriesOK() error {
 	return c.validate(false)
@@ -271,10 +353,15 @@ func (c *Config) validate(requireEntries bool) error {
 	if requireEntries && len(c.Charts) == 0 && len(c.Artifacts) == 0 {
 		return fmt.Errorf("config has no entries: at least one of 'charts' or 'artifacts' must be set")
 	}
-	if c.Auth != nil {
-		if err := c.Auth.validate(); err != nil {
-			return fmt.Errorf("auth: %w", err)
+	seen := make(map[string]bool, len(c.Hosts))
+	for i, h := range c.Hosts {
+		if err := h.validate(); err != nil {
+			return fmt.Errorf("hosts[%d]: %w", i, err)
 		}
+		if seen[h.Host] {
+			return fmt.Errorf("hosts[%d]: host %q is configured more than once", i, h.Host)
+		}
+		seen[h.Host] = true
 	}
 	for i, ch := range c.Charts {
 		if err := ch.validate(); err != nil {
@@ -289,44 +376,171 @@ func (c *Config) validate(requireEntries bool) error {
 	return nil
 }
 
-func (a Auth) validate() error {
-	if len(a.Hosts) == 0 {
-		return fmt.Errorf("hosts must contain at least one host")
-	}
-	seen := make(map[string]bool, len(a.Hosts))
-	for i, h := range a.Hosts {
-		if err := h.validate(); err != nil {
-			return fmt.Errorf("hosts[%d]: %w", i, err)
-		}
-		if seen[h.Host] {
-			return fmt.Errorf("hosts[%d]: host %q is configured more than once", i, h.Host)
-		}
-		seen[h.Host] = true
-	}
-	return nil
-}
-
 func (h AuthHost) validate() error {
 	if strings.TrimSpace(h.Host) == "" {
 		return fmt.Errorf("host is required")
 	}
 	provider := strings.TrimSpace(h.Provider)
-	switch {
-	case h.Credential != nil && provider != "":
+	if h.Credential != nil && provider != "" {
 		return fmt.Errorf("credential and provider are mutually exclusive")
-	case h.Credential != nil:
+	}
+	if provider != "" && h.TLS != nil {
+		return fmt.Errorf("provider and tls are mutually exclusive")
+	}
+	if h.Credential != nil {
 		if err := h.Credential.validate(); err != nil {
 			return fmt.Errorf("credential: %w", err)
 		}
-	case provider != "":
+	}
+	if provider != "" {
 		switch provider {
 		case RegistryProviderECR, RegistryProviderACR, RegistryProviderGAR:
 		default:
 			return fmt.Errorf("provider %q must be one of: %s, %s, %s",
 				provider, RegistryProviderECR, RegistryProviderACR, RegistryProviderGAR)
 		}
-	default:
-		return fmt.Errorf("one of credential or provider is required")
+	}
+	if h.TLS != nil {
+		if err := h.TLS.validate(); err != nil {
+			return fmt.Errorf("tls: %w", err)
+		}
+	}
+	if h.Credential == nil && provider == "" && h.TLS == nil {
+		return fmt.Errorf("one of credential, provider, or tls is required")
+	}
+	return nil
+}
+
+// validate checks the TLS settings: at least one of serverAuth or clientAuth
+// must be set, and each (if set) must itself be valid.
+func (t TLS) validate() error {
+	if t.ServerAuth == nil && t.ClientAuth == nil {
+		return fmt.Errorf("one of serverAuth or clientAuth is required")
+	}
+	if t.ServerAuth != nil {
+		if err := t.ServerAuth.validate(); err != nil {
+			return fmt.Errorf("serverAuth: %w", err)
+		}
+	}
+	if t.ClientAuth != nil {
+		if err := t.ClientAuth.validate(); err != nil {
+			return fmt.Errorf("clientAuth: %w", err)
+		}
+	}
+	return nil
+}
+
+// validate checks that exactly one of the CA-bundle sources or spiffe is set.
+func (s TLSServerAuth) validate() error {
+	n := 0
+	for _, set := range []bool{
+		strings.TrimSpace(s.FromPath) != "",
+		strings.TrimSpace(s.FromEnv) != "",
+		strings.TrimSpace(s.FromBytes) != "",
+		s.SPIFFE != nil,
+	} {
+		if set {
+			n++
+		}
+	}
+	if n != 1 {
+		return fmt.Errorf("exactly one of fromPath, fromEnv, fromBytes, or spiffe must be set")
+	}
+	if s.SPIFFE != nil {
+		if err := s.SPIFFE.validate(); err != nil {
+			return fmt.Errorf("spiffe: %w", err)
+		}
+	}
+	return nil
+}
+
+// validate checks that exactly one source is set.
+func (d TLSData) validate() error {
+	n := 0
+	for _, set := range []bool{
+		strings.TrimSpace(d.FromPath) != "",
+		strings.TrimSpace(d.FromEnv) != "",
+		strings.TrimSpace(d.FromBytes) != "",
+	} {
+		if set {
+			n++
+		}
+	}
+	if n != 1 {
+		return fmt.Errorf("exactly one of fromPath, fromEnv, or fromBytes must be set")
+	}
+	return nil
+}
+
+// validate checks that exactly one source is set. A private key cannot be inlined.
+func (k TLSKey) validate() error {
+	n := 0
+	for _, set := range []bool{
+		strings.TrimSpace(k.FromPath) != "",
+		strings.TrimSpace(k.FromEnv) != "",
+	} {
+		if set {
+			n++
+		}
+	}
+	if n != 1 {
+		return fmt.Errorf("exactly one of fromPath or fromEnv must be set")
+	}
+	return nil
+}
+
+// validate checks the client cert source: either provider (x509-svid) or a
+// static certificate/key pair, mutually exclusive.
+func (c TLSClientAuth) validate() error {
+	provider := strings.TrimSpace(c.Provider)
+	hasStatic := c.Certificate != nil || c.Key != nil
+	if provider != "" && hasStatic {
+		return fmt.Errorf("provider is mutually exclusive with certificate and key")
+	}
+	if provider != "" {
+		if provider != TLSClientProviderX509SVID {
+			return fmt.Errorf("provider %q must be %q", provider, TLSClientProviderX509SVID)
+		}
+		return nil
+	}
+	if c.Certificate == nil {
+		return fmt.Errorf("certificate is required")
+	}
+	if err := c.Certificate.validate(); err != nil {
+		return fmt.Errorf("certificate: %w", err)
+	}
+	if c.Key == nil {
+		return fmt.Errorf("key is required")
+	}
+	if err := c.Key.validate(); err != nil {
+		return fmt.Errorf("key: %w", err)
+	}
+	return nil
+}
+
+// validate checks that exactly one authorizer is set and parses.
+func (s SPIFFETLS) validate() error {
+	serverID := strings.TrimSpace(s.ServerID)
+	trustDomain := strings.TrimSpace(s.TrustDomain)
+
+	n := 0
+	for _, set := range []bool{serverID != "", trustDomain != "", s.AuthorizeAny} {
+		if set {
+			n++
+		}
+	}
+	if n != 1 {
+		return fmt.Errorf("exactly one of serverID, trustDomain, or authorizeAny must be set")
+	}
+	if serverID != "" {
+		if _, err := spiffeid.FromString(serverID); err != nil {
+			return fmt.Errorf("serverID %q is not a valid SPIFFE ID: %w", serverID, err)
+		}
+	}
+	if trustDomain != "" && trustDomain != TrustDomainSelf {
+		if _, err := spiffeid.TrustDomainFromString(trustDomain); err != nil {
+			return fmt.Errorf("trustDomain %q is not valid: %w", trustDomain, err)
+		}
 	}
 	return nil
 }
@@ -365,10 +579,10 @@ func (j AuthCredential) validate() error {
 		}
 	case provider != "":
 		switch provider {
-		case JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure, JWTProviderAWS:
+		case JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure, JWTProviderAWS, JWTProviderJWTSVID:
 		default:
-			return fmt.Errorf("provider %q must be one of: %s, %s, %s, %s, %s",
-				provider, JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure, JWTProviderAWS)
+			return fmt.Errorf("provider %q must be one of: %s, %s, %s, %s, %s, %s",
+				provider, JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure, JWTProviderAWS, JWTProviderJWTSVID)
 		}
 		if hasIss || hasSub {
 			return fmt.Errorf("iss and sub can only be set with jwkPath")

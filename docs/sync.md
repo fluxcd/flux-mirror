@@ -30,16 +30,20 @@ FLUX_MIRROR_CONFIG=examples/podinfo.yaml flux-mirror sync
 `sync` authenticates OCI registry requests (`artifacts` and `oci://` Helm
 sources) per registry host:
 
-1. Hosts listed in [`auth.hosts`](./config.md#auth) use their configured auth:
+1. Hosts listed in [`hosts`](./config.md#hosts) use their configured auth:
    - `provider: ecr|acr|gar` obtains registry credentials from the cloud
      provider's workload identity.
    - `credential` resolves a per-host secret from GitHub/Forgejo OIDC, GCP,
-     Azure, AWS STS, `fromEnv`, `fromPath`, or `jwkPath`. With no `username`,
-     it is sent directly as `Authorization: Bearer`. With `username`, it is used
-     as the password in the standard registry auth challenge,
+     Azure, AWS STS, SPIFFE JWT-SVID, `fromEnv`, `fromPath`, or `jwkPath`. With no
+     `username`, it is sent directly as `Authorization: Bearer`. With `username`,
+     it is used as the password in the standard registry auth challenge,
      which covers registries like Docker Hub, GHCR, and Quay without a prior `docker login`.
-2. Hosts not listed in `auth.hosts` use the Docker config and credential helpers from
+2. Hosts not listed in `hosts` use the Docker config and credential helpers from
    `~/.docker/config.json`, or the `DOCKER_CONFIG` env var if set.
+
+A non-`provider` host may also set [`tls`](./config.md#tls) to configure
+transport-layer TLS for its registry connections: a custom CA, a client
+certificate (mTLS), or SPIFFE X.509-SVID mTLS.
 
 Helm HTTP/S repository auth is separate from OCI auth and always comes from the
 ambient Helm repositories config:

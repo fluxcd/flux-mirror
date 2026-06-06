@@ -30,21 +30,21 @@ type HostAuth struct {
 // SelectAuthHosts returns the auth hosts to act on: the ones named in filter
 // (erroring on any not present), or all configured hosts when filter is empty.
 func SelectAuthHosts(cfg *config.Config, filter []string) ([]config.AuthHost, error) {
-	if cfg.Auth == nil || len(cfg.Auth.Hosts) == 0 {
-		return nil, fmt.Errorf("config has no auth.hosts")
+	if len(cfg.Hosts) == 0 {
+		return nil, fmt.Errorf("config has no hosts")
 	}
 	if len(filter) == 0 {
-		return cfg.Auth.Hosts, nil
+		return cfg.Hosts, nil
 	}
-	byHost := make(map[string]config.AuthHost, len(cfg.Auth.Hosts))
-	for _, h := range cfg.Auth.Hosts {
+	byHost := make(map[string]config.AuthHost, len(cfg.Hosts))
+	for _, h := range cfg.Hosts {
 		byHost[h.Host] = h
 	}
 	out := make([]config.AuthHost, 0, len(filter))
 	for _, name := range filter {
 		h, ok := byHost[name]
 		if !ok {
-			return nil, fmt.Errorf("host %q not found in auth.hosts", name)
+			return nil, fmt.Errorf("host %q not found in hosts", name)
 		}
 		out = append(out, h)
 	}
@@ -150,12 +150,9 @@ func (m mintingAuthenticator) AuthorizationContext(ctx context.Context) (*authn.
 // credential hosts with a username — over the ambient Docker config. Provider
 // credentials are pre-fetched; username credentials are minted on demand.
 // Returns nil when no such host exists, so callers keep the default keychain.
-func BuildKeychain(ctx context.Context, auth *config.Auth) (authn.Keychain, error) {
-	if auth == nil {
-		return nil, nil
-	}
+func BuildKeychain(ctx context.Context, hosts []config.AuthHost) (authn.Keychain, error) {
 	auths := make(map[string]authn.Authenticator)
-	for _, h := range auth.Hosts {
+	for _, h := range hosts {
 		switch {
 		case h.Provider != "":
 			a, err := providerAuthenticator(ctx, h)
@@ -177,11 +174,8 @@ func BuildKeychain(ctx context.Context, auth *config.Auth) (authn.Keychain, erro
 // needed: true when any credential host has no username (a bearer token stamped
 // directly). Credential hosts with a username and provider hosts go through the
 // keychain instead.
-func NeedsCredentialTransport(auth *config.Auth) bool {
-	if auth == nil {
-		return false
-	}
-	for _, h := range auth.Hosts {
+func NeedsCredentialTransport(hosts []config.AuthHost) bool {
+	for _, h := range hosts {
 		if h.Credential != nil && h.Credential.Username == "" {
 			return true
 		}
@@ -192,24 +186,24 @@ func NeedsCredentialTransport(auth *config.Auth) bool {
 // NewCredentialTransport wraps inner with a cijwt transport that stamps the
 // per-host JWT credential on each request. Provider hosts are skipped (they
 // authenticate through the keychain). Call only when HasCredentialHosts is true.
-func NewCredentialTransport(inner http.RoundTripper, auth *config.Auth) (http.RoundTripper, error) {
-	opts, err := JWTTransportOptions(inner, auth)
+func NewCredentialTransport(inner http.RoundTripper, hosts []config.AuthHost) (http.RoundTripper, error) {
+	opts, err := JWTTransportOptions(inner, hosts)
 	if err != nil {
 		return nil, err
 	}
 	return cijwt.NewTransport(opts...)
 }
 
-// JWTTransportOptions turns the validated auth.hosts config into cijwt options,
+// JWTTransportOptions turns the validated hosts config into cijwt options,
 // reading FromEnv environment variables and JWKPath files at this point and
 // wiring each Provider to its token-minting closure. FromPath is wired straight
 // to cijwt, which re-reads the file on every request. It assumes the config has
 // passed validation, so it only reports errors that need runtime state: an
 // unset env var or an unreadable key file.
-func JWTTransportOptions(inner http.RoundTripper, auth *config.Auth) ([]cijwt.Option, error) {
+func JWTTransportOptions(inner http.RoundTripper, hosts []config.AuthHost) ([]cijwt.Option, error) {
 	opts := []cijwt.Option{cijwt.WithInner(inner)}
 
-	for _, h := range auth.Hosts {
+	for _, h := range hosts {
 		if h.Credential == nil || h.Credential.Username != "" {
 			// Provider hosts and username credentials authenticate via the
 			// keychain (standard challenge), not the cijwt bearer-stamp.

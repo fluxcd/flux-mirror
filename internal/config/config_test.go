@@ -241,221 +241,338 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth valid provider",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "mint.example", Credential: &AuthCredential{Provider: JWTProviderGitHub, Aud: "custom"},
-				}}}},
+				}}},
 		},
 		{
 			name: "auth valid provider gcp",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "us-docker.pkg.dev", Credential: &AuthCredential{Provider: JWTProviderGCP, Aud: "custom"},
-				}}}},
+				}}},
 		},
 		{
 			name: "auth valid provider azure",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "myregistry.azurecr.io", Credential: &AuthCredential{Provider: JWTProviderAzure, Aud: "custom"},
-				}}}},
+				}}},
 		},
 		{
 			name: "auth valid provider aws",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "registry.example.com", Credential: &AuthCredential{Provider: JWTProviderAWS, Aud: "custom"},
-				}}}},
+				}}},
 		},
 		{
 			name: "auth valid fromEnv",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "static.example", Credential: &AuthCredential{FromEnv: "TOKEN"},
-				}}}},
+				}}},
 		},
 		{
 			name: "auth valid fromPath",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "static.example", Credential: &AuthCredential{FromPath: "/run/secrets/token"},
-				}}}},
+				}}},
 		},
 		{
 			name: "auth valid jwkPath",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "registry.example", Credential: &AuthCredential{
 						JWKPath: "/path/jwk.json", Iss: "https://issuer", Sub: "client", Aud: "registry.example",
 					},
-				}}}},
+				}}},
 		},
 		{
 			name: "auth valid jwkPath with exp",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "registry.example", Credential: &AuthCredential{
 						JWKPath: "/path/jwk.json", Iss: "https://issuer", Sub: "client",
 						Exp: &metav1.Duration{Duration: time.Hour},
 					},
-				}}}},
+				}}},
 		},
 		{
 			name: "auth jwkPath exp non-positive",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "registry.example", Credential: &AuthCredential{
 						JWKPath: "/path/jwk.json", Iss: "https://issuer", Sub: "client",
 						Exp: &metav1.Duration{Duration: 0},
 					},
-				}}}},
+				}}},
 			errMsg: "exp must be a positive duration",
 		},
 		{
 			name: "auth exp rejected with provider",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "registry.example", Credential: &AuthCredential{
 						Provider: JWTProviderGitHub, Exp: &metav1.Duration{Duration: time.Hour},
 					},
-				}}}},
+				}}},
 			errMsg: "exp can only be set with jwkPath",
 		},
 		{
 			name: "auth exp rejected with fromEnv",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "registry.example", Credential: &AuthCredential{
 						FromEnv: "TOKEN", Exp: &metav1.Duration{Duration: time.Hour},
 					},
-				}}}},
+				}}},
 			errMsg: "exp can only be set with jwkPath",
-		},
-		{
-			name: "auth empty hosts",
-			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{}},
-			errMsg: "hosts must contain at least one host",
 		},
 		{
 			name: "auth missing host",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Credential: &AuthCredential{FromEnv: "TOKEN"}}}}},
+				Hosts: []AuthHost{{Credential: &AuthCredential{FromEnv: "TOKEN"}}}},
 			errMsg: "host is required",
 		},
 		{
-			name: "auth missing credential and provider",
+			name: "auth missing credential, provider and tls",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example"}}}},
-			errMsg: "one of credential or provider is required",
+				Hosts: []AuthHost{{Host: "h.example"}}},
+			errMsg: "one of credential, provider, or tls is required",
 		},
 		{
 			name: "auth valid provider ecr",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: RegistryProviderECR,
-				}}}},
+				}}},
 		},
 		{
 			name: "auth invalid provider",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Provider: "dockerhub"}}}},
+				Hosts: []AuthHost{{Host: "h.example", Provider: "dockerhub"}}},
 			errMsg: "provider \"dockerhub\" must be one of: ecr, acr, gar",
 		},
 		{
 			name: "auth credential and provider mutually exclusive",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{
+				Hosts: []AuthHost{{
 					Host: "h.example", Provider: RegistryProviderGAR,
 					Credential: &AuthCredential{FromEnv: "TOKEN"},
-				}}}},
+				}}},
 			errMsg: "credential and provider are mutually exclusive",
 		},
 		{
 			name: "auth duplicate host",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{
+				Hosts: []AuthHost{
 					{Host: "dup.example", Credential: &AuthCredential{FromEnv: "A"}},
 					{Host: "dup.example", Credential: &AuthCredential{FromEnv: "B"}},
-				}}},
+				}},
 			errMsg: "configured more than once",
 		},
 		{
 			name: "auth no source set",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{}}}}},
+				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{}}}},
 			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
 		},
 		{
 			name: "auth two sources set",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					Provider: JWTProviderGitHub, FromEnv: "TOKEN",
-				}}}}},
+				}}}},
 			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
 		},
 		{
 			name: "auth invalid provider",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					Provider: "gitlab",
-				}}}}},
+				}}}},
 			errMsg: "must be one of: github, forgejo, gcp, azure, aws",
 		},
 		{
 			name: "auth jwkPath missing iss",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					JWKPath: "/k.json", Sub: "client",
-				}}}}},
+				}}}},
 			errMsg: "iss is required with jwkPath",
 		},
 		{
 			name: "auth jwkPath missing sub",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					JWKPath: "/k.json", Iss: "https://issuer",
-				}}}}},
+				}}}},
 			errMsg: "sub is required with jwkPath",
 		},
 		{
 			name: "auth iss set without jwkPath",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					Provider: JWTProviderGitHub, Iss: "https://issuer",
-				}}}}},
+				}}}},
 			errMsg: "iss and sub can only be set with jwkPath",
 		},
 		{
 			name: "auth aud set with fromEnv",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					FromEnv: "TOKEN", Aud: "nope",
-				}}}}},
+				}}}},
 			errMsg: "aud can only be set with jwkPath or provider",
 		},
 		{
 			name: "auth aud set with fromPath",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					FromPath: "/path/token", Aud: "nope",
-				}}}}},
+				}}}},
 			errMsg: "aud can only be set with jwkPath or provider",
 		},
 		{
 			name: "auth iss set with fromPath",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					FromPath: "/path/token", Iss: "https://issuer",
-				}}}}},
+				}}}},
 			errMsg: "iss and sub can only be set with jwkPath",
 		},
 		{
 			name: "auth fromPath and fromEnv set",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
-				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
 					FromEnv: "TOKEN", FromPath: "/path/token",
-				}}}}},
+				}}}},
 			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
+		},
+		{
+			name: "credential provider jwt-svid is valid",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+					Provider: JWTProviderJWTSVID, Aud: "h.example",
+				}}}},
+		},
+		{
+			name: "tls serverAuth only host is valid",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ServerAuth: &TLSServerAuth{FromPath: "/ca.crt"},
+				}}}},
+		},
+		{
+			name: "tls and provider mutually exclusive",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", Provider: RegistryProviderECR,
+					TLS: &TLS{ServerAuth: &TLSServerAuth{FromPath: "/ca.crt"}},
+				}}},
+			errMsg: "provider and tls are mutually exclusive",
+		},
+		{
+			name: "tls credential and tls together is valid",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example",
+					Credential: &AuthCredential{FromEnv: "TOKEN"},
+					TLS:        &TLS{ClientAuth: &TLSClientAuth{Certificate: &TLSData{FromPath: "/c.crt"}, Key: &TLSKey{FromPath: "/c.key"}}},
+				}}},
+		},
+		{
+			name: "tls client-only spiffe with custom CA server is valid",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ServerAuth: &TLSServerAuth{FromPath: "/ca.crt"},
+					ClientAuth: &TLSClientAuth{Provider: TLSClientProviderX509SVID},
+				}}}},
+		},
+		{
+			name: "tls full spiffe (client svid + server spiffe) is valid",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ServerAuth: &TLSServerAuth{SPIFFE: &SPIFFETLS{TrustDomain: TrustDomainSelf}},
+					ClientAuth: &TLSClientAuth{Provider: TLSClientProviderX509SVID},
+				}}}},
+		},
+		{
+			name: "tls empty is rejected",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{}}}},
+			errMsg: "one of serverAuth or clientAuth is required",
+		},
+		{
+			name: "tls serverAuth two sources",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ServerAuth: &TLSServerAuth{FromPath: "/ca.crt", FromEnv: "CA"},
+				}}}},
+			errMsg: "serverAuth: exactly one of fromPath, fromEnv, fromBytes, or spiffe",
+		},
+		{
+			name: "tls serverAuth ca and spiffe together",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ServerAuth: &TLSServerAuth{FromPath: "/ca.crt", SPIFFE: &SPIFFETLS{AuthorizeAny: true}},
+				}}}},
+			errMsg: "serverAuth: exactly one of fromPath, fromEnv, fromBytes, or spiffe",
+		},
+		{
+			name: "tls clientAuth missing key",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ClientAuth: &TLSClientAuth{Certificate: &TLSData{FromPath: "/c.crt"}},
+				}}}},
+			errMsg: "clientAuth: key is required",
+		},
+		{
+			name: "tls clientAuth provider and static mutually exclusive",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ClientAuth: &TLSClientAuth{Provider: TLSClientProviderX509SVID, Key: &TLSKey{FromPath: "/c.key"}},
+				}}}},
+			errMsg: "provider is mutually exclusive with certificate and key",
+		},
+		{
+			name: "tls clientAuth invalid provider",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ClientAuth: &TLSClientAuth{Provider: "jwt-svid"},
+				}}}},
+			errMsg: `provider "jwt-svid" must be "x509-svid"`,
+		},
+		{
+			name: "tls serverAuth spiffe serverID valid",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ServerAuth: &TLSServerAuth{SPIFFE: &SPIFFETLS{ServerID: "spiffe://example.org/registry"}},
+				}}}},
+		},
+		{
+			name: "tls serverAuth spiffe no authorizer",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ServerAuth: &TLSServerAuth{SPIFFE: &SPIFFETLS{}},
+				}}}},
+			errMsg: "exactly one of serverID, trustDomain, or authorizeAny must be set",
+		},
+		{
+			name: "tls serverAuth spiffe two authorizers",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ServerAuth: &TLSServerAuth{SPIFFE: &SPIFFETLS{TrustDomain: TrustDomainSelf, AuthorizeAny: true}},
+				}}}},
+			errMsg: "exactly one of serverID, trustDomain, or authorizeAny must be set",
+		},
+		{
+			name: "tls serverAuth spiffe invalid serverID",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+					ServerAuth: &TLSServerAuth{SPIFFE: &SPIFFETLS{ServerID: "not-a-spiffe-id"}},
+				}}}},
+			errMsg: "is not a valid SPIFFE ID",
 		},
 		{
 			name: "verify negative minAge",

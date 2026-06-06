@@ -17,7 +17,7 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// writeLoginConfig writes a valid config whose single auth host carries the
+// writeLoginConfig writes a valid config whose single host carries the
 // given credential block (already indented two levels under `credential:`) and
 // returns its path.
 func writeLoginConfig(t *testing.T, credBlock string) string {
@@ -31,10 +31,9 @@ artifacts:
     selector:
       semver: ">=1.0.0"
       limit: 1
-auth:
-  hosts:
-    - host: registry.example.com
-      credential:
+hosts:
+  - host: registry.example.com
+    credential:
 ` + credBlock
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
@@ -96,7 +95,7 @@ func loginStore(t *testing.T, configRef, input string) (string, error) {
 func TestLogin_FromEnv(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "        fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
 
 	cred, err := loginStore(t, cfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
@@ -107,7 +106,7 @@ func TestLogin_FromPath(t *testing.T) {
 	g := NewWithT(t)
 	tokenPath := filepath.Join(t.TempDir(), "token")
 	g.Expect(os.WriteFile(tokenPath, []byte("  file-token\n"), 0o600)).To(Succeed())
-	cfg := writeLoginConfig(t, "        fromPath: "+tokenPath+"\n")
+	cfg := writeLoginConfig(t, "      fromPath: "+tokenPath+"\n")
 
 	cred, err := loginStore(t, cfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
@@ -118,10 +117,10 @@ func TestLogin_JWKPath(t *testing.T) {
 	g := NewWithT(t)
 	jwkPath := writeJWK(t)
 	cfg := writeLoginConfig(t,
-		"        jwkPath: "+jwkPath+"\n"+
-			"        iss: https://issuer.example\n"+
-			"        sub: client-id\n"+
-			"        aud: custom-aud\n")
+		"      jwkPath: "+jwkPath+"\n"+
+			"      iss: https://issuer.example\n"+
+			"      sub: client-id\n"+
+			"      aud: custom-aud\n")
 
 	cred, err := loginStore(t, cfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
@@ -139,9 +138,9 @@ func TestLogin_JWKPathExp(t *testing.T) {
 
 	// Default exp (~60s): exp claim is within a couple minutes of now.
 	defCfg := writeLoginConfig(t,
-		"        jwkPath: "+jwkPath+"\n"+
-			"        iss: https://issuer.example\n"+
-			"        sub: client-id\n")
+		"      jwkPath: "+jwkPath+"\n"+
+			"      iss: https://issuer.example\n"+
+			"      sub: client-id\n")
 	defCred, err := loginStore(t, defCfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
 	defExp, err := parseUnverified(t, defCred).GetExpirationTime()
@@ -150,10 +149,10 @@ func TestLogin_JWKPathExp(t *testing.T) {
 
 	// Explicit exp (1h): exp claim is far in the future.
 	expCfg := writeLoginConfig(t,
-		"        jwkPath: "+jwkPath+"\n"+
-			"        iss: https://issuer.example\n"+
-			"        sub: client-id\n"+
-			"        exp: 1h\n")
+		"      jwkPath: "+jwkPath+"\n"+
+			"      iss: https://issuer.example\n"+
+			"      sub: client-id\n"+
+			"      exp: 1h\n")
 	expCred, err := loginStore(t, expCfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
 	longExp, err := parseUnverified(t, expCred).GetExpirationTime()
@@ -165,9 +164,9 @@ func TestLogin_AudDefaultsToHost(t *testing.T) {
 	g := NewWithT(t)
 	jwkPath := writeJWK(t)
 	cfg := writeLoginConfig(t,
-		"        jwkPath: "+jwkPath+"\n"+
-			"        iss: https://issuer.example\n"+
-			"        sub: client-id\n")
+		"      jwkPath: "+jwkPath+"\n"+
+			"      iss: https://issuer.example\n"+
+			"      sub: client-id\n")
 
 	cred, err := loginStore(t, cfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
@@ -181,11 +180,10 @@ func TestLogin_ConfigFromStdin(t *testing.T) {
 	t.Setenv("MY_LOGIN_TOKEN", "stdin-token")
 	src := `apiVersion: mirror.fluxcd.io/v1alpha1
 kind: Config
-auth:
-  hosts:
-    - host: registry.example.com
-      credential:
-        fromEnv: MY_LOGIN_TOKEN
+hosts:
+  - host: registry.example.com
+    credential:
+      fromEnv: MY_LOGIN_TOKEN
 `
 	cred, err := loginStore(t, "-", src)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -198,11 +196,10 @@ func TestLogin_AuthOnlyConfig(t *testing.T) {
 	// No charts or artifacts — valid for login, rejected by sync.
 	src := `apiVersion: mirror.fluxcd.io/v1alpha1
 kind: Config
-auth:
-  hosts:
-    - host: registry.example.com
-      credential:
-        fromEnv: MY_LOGIN_TOKEN
+hosts:
+  - host: registry.example.com
+    credential:
+      fromEnv: MY_LOGIN_TOKEN
 `
 	path := filepath.Join(t.TempDir(), "auth-only.yaml")
 	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
@@ -219,7 +216,7 @@ auth:
 func TestLogin_StoresRegistryToken(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "        fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
 	dockerDir := t.TempDir()
 
 	out, err := executeCommand([]string{
@@ -251,7 +248,7 @@ func TestLogin_StoresRegistryToken(t *testing.T) {
 func TestLogin_UsernameStoresUserPassword(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "        fromEnv: MY_LOGIN_TOKEN\n        username: robot\n")
+	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n      username: robot\n")
 	dockerDir := t.TempDir()
 
 	_, err := executeCommand([]string{
@@ -282,14 +279,13 @@ func TestLogin_AllHostsByDefault(t *testing.T) {
 	t.Setenv("TOKEN_B", "cred-b")
 	src := `apiVersion: mirror.fluxcd.io/v1alpha1
 kind: Config
-auth:
-  hosts:
-    - host: a.example.com
-      credential:
-        fromEnv: TOKEN_A
-    - host: b.example.com
-      credential:
-        fromEnv: TOKEN_B
+hosts:
+  - host: a.example.com
+    credential:
+      fromEnv: TOKEN_A
+  - host: b.example.com
+    credential:
+      fromEnv: TOKEN_B
 `
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	g.Expect(os.WriteFile(cfgPath, []byte(src), 0o600)).To(Succeed())
@@ -313,13 +309,13 @@ auth:
 
 func TestLogin_HostNotFound(t *testing.T) {
 	g := NewWithT(t)
-	cfg := writeLoginConfig(t, "        fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
 
 	_, err := executeCommand([]string{"login", "--host", "other.example.com", "--config", cfg})
 	g.Expect(err).To(MatchError(ContainSubstring(`host "other.example.com" not found`)))
 }
 
-func TestLogin_NoAuthSection(t *testing.T) {
+func TestLogin_NoHosts(t *testing.T) {
 	g := NewWithT(t)
 	src := `apiVersion: mirror.fluxcd.io/v1alpha1
 kind: Config
@@ -334,13 +330,13 @@ artifacts:
 	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
 
 	_, err := executeCommand([]string{"login", "--config", path})
-	g.Expect(err).To(MatchError(ContainSubstring("no auth.hosts")))
+	g.Expect(err).To(MatchError(ContainSubstring("no hosts")))
 }
 
 func TestLogin_FromEnvUnset(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "")
-	cfg := writeLoginConfig(t, "        fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
 
 	_, err := executeCommand([]string{"login", "--config", cfg})
 	g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))

@@ -68,11 +68,11 @@ func writeJWKFile(t *testing.T, data []byte) string {
 func TestJWTTransportOptions(t *testing.T) {
 	t.Run("provider audience builds a transport with host as default aud", func(t *testing.T) {
 		g := NewWithT(t)
-		auth := &config.Auth{Hosts: []config.AuthHost{{
+		hosts := []config.AuthHost{{
 			Host:       "mint.example",
 			Credential: &config.AuthCredential{Provider: config.JWTProviderForgejo},
-		}}}
-		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
+		}}
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(opts).To(HaveLen(2)) // WithInner + 1 audience.
 		_, err = cijwt.NewTransport(opts...)
@@ -82,11 +82,11 @@ func TestJWTTransportOptions(t *testing.T) {
 	t.Run("fromEnv reads the named env var", func(t *testing.T) {
 		g := NewWithT(t)
 		t.Setenv("MY_CI_TOKEN", "env-token")
-		auth := &config.Auth{Hosts: []config.AuthHost{{
+		hosts := []config.AuthHost{{
 			Host:       "static.example",
 			Credential: &config.AuthCredential{FromEnv: "MY_CI_TOKEN"},
-		}}}
-		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
+		}}
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
 		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -95,21 +95,21 @@ func TestJWTTransportOptions(t *testing.T) {
 	t.Run("fromEnv with unset env var errors", func(t *testing.T) {
 		g := NewWithT(t)
 		t.Setenv("MY_CI_TOKEN", "")
-		auth := &config.Auth{Hosts: []config.AuthHost{{
+		hosts := []config.AuthHost{{
 			Host:       "static.example",
 			Credential: &config.AuthCredential{FromEnv: "MY_CI_TOKEN"},
-		}}}
-		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
+		}}
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
 	})
 
 	t.Run("fromPath builds a token-file transport", func(t *testing.T) {
 		g := NewWithT(t)
-		auth := &config.Auth{Hosts: []config.AuthHost{{
+		hosts := []config.AuthHost{{
 			Host:       "static.example",
 			Credential: &config.AuthCredential{FromPath: "/run/secrets/token"},
-		}}}
-		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
+		}}
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
 		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -117,7 +117,7 @@ func TestJWTTransportOptions(t *testing.T) {
 
 	t.Run("jwkPath signs from the key file", func(t *testing.T) {
 		g := NewWithT(t)
-		auth := &config.Auth{Hosts: []config.AuthHost{{
+		hosts := []config.AuthHost{{
 			Host: "registry.example",
 			Credential: &config.AuthCredential{
 				JWKPath: writeJWK(t),
@@ -125,8 +125,8 @@ func TestJWTTransportOptions(t *testing.T) {
 				Sub:     "client-id",
 				Aud:     "registry.example",
 			},
-		}}}
-		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
+		}}
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
 		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -134,29 +134,29 @@ func TestJWTTransportOptions(t *testing.T) {
 
 	t.Run("jwkPath with unreadable file errors", func(t *testing.T) {
 		g := NewWithT(t)
-		auth := &config.Auth{Hosts: []config.AuthHost{{
+		hosts := []config.AuthHost{{
 			Host: "registry.example",
 			Credential: &config.AuthCredential{
 				JWKPath: filepath.Join(t.TempDir(), "missing.json"),
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
 			},
-		}}}
-		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
+		}}
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).To(MatchError(ContainSubstring("read jwkPath")))
 	})
 
 	t.Run("jwkPath accepts a JWK set with exactly one key", func(t *testing.T) {
 		g := NewWithT(t)
-		auth := &config.Auth{Hosts: []config.AuthHost{{
+		hosts := []config.AuthHost{{
 			Host: "registry.example",
 			Credential: &config.AuthCredential{
 				JWKPath: writeJWKS(t, 1),
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
 			},
-		}}}
-		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
+		}}
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
 		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -164,59 +164,59 @@ func TestJWTTransportOptions(t *testing.T) {
 
 	t.Run("jwkPath rejects a JWK set with more than one key", func(t *testing.T) {
 		g := NewWithT(t)
-		auth := &config.Auth{Hosts: []config.AuthHost{{
+		hosts := []config.AuthHost{{
 			Host: "registry.example",
 			Credential: &config.AuthCredential{
 				JWKPath: writeJWKS(t, 2),
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
 			},
-		}}}
-		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
+		}}
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).To(MatchError(ContainSubstring("exactly one key, got 2")))
 	})
 
 	t.Run("jwkPath rejects an empty JWK set", func(t *testing.T) {
 		g := NewWithT(t)
 		path := writeJWKFile(t, []byte(`{"keys":[]}`))
-		auth := &config.Auth{Hosts: []config.AuthHost{{
+		hosts := []config.AuthHost{{
 			Host: "registry.example",
 			Credential: &config.AuthCredential{
 				JWKPath: path,
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
 			},
-		}}}
-		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
+		}}
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).To(MatchError(ContainSubstring("exactly one key, got 0")))
 	})
 
 	t.Run("jwkPath rejects malformed JSON", func(t *testing.T) {
 		g := NewWithT(t)
 		path := writeJWKFile(t, []byte("not json"))
-		auth := &config.Auth{Hosts: []config.AuthHost{{
+		hosts := []config.AuthHost{{
 			Host: "registry.example",
 			Credential: &config.AuthCredential{
 				JWKPath: path,
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
 			},
-		}}}
-		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
+		}}
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).To(MatchError(ContainSubstring("parse JWK")))
 	})
 
 	t.Run("multiple hosts of mixed kinds build one transport", func(t *testing.T) {
 		g := NewWithT(t)
 		t.Setenv("MY_CI_TOKEN", "env-token")
-		auth := &config.Auth{Hosts: []config.AuthHost{
+		hosts := []config.AuthHost{
 			{Host: "static.example", Credential: &config.AuthCredential{FromEnv: "MY_CI_TOKEN"}},
 			{Host: "mint.example", Credential: &config.AuthCredential{Provider: config.JWTProviderGitHub}},
 			{Host: "registry.example", Credential: &config.AuthCredential{
 				JWKPath: writeJWK(t), Iss: "https://issuer.example", Sub: "client-id",
 			}},
-		}}
-		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
+		}
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(opts).To(HaveLen(4)) // WithInner + 3 hosts.
 		_, err = cijwt.NewTransport(opts...)

@@ -37,7 +37,7 @@ var secretKubeFlags = genericclioptions.NewConfigFlags(true)
 var secretCmd = &cobra.Command{
 	Use:   "secret <name>",
 	Short: "Create or replace a dockerconfigjson Secret with per-host credentials",
-	Long: `Resolve the credential configured under auth.hosts for each selected
+	Long: `Resolve the credential configured under hosts for each selected
 host and write them into a Kubernetes Secret of type
 kubernetes.io/dockerconfigjson, the same shape 'kubectl create secret
 docker-registry' produces.

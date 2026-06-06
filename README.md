@@ -46,8 +46,9 @@ on upstream chart repositories.
   as a distinct outcome and exit code, so audit pipelines can differentiate "out of date" from "mutated tags".
 - **Registry auth** — OCI auth supports Docker config and credential helpers,
   cloud workload identity for ECR/ACR/GAR, and per-host bearer credentials from
-  GitHub/Forgejo OIDC, GCP, Azure, AWS STS, env vars, files, or JWK-signed JWTs.
-  Helm HTTP/S credentials come from Helm's repositories config.
+  GitHub/Forgejo OIDC, GCP, Azure, AWS STS, SPIFFE JWT-SVID, env vars, files, or
+  JWK-signed JWTs. Per-host TLS/mTLS (custom CA, client cert, or SPIFFE X.509-SVID)
+  is also supported. Helm HTTP/S credentials come from Helm's repositories config.
 - **Structured output** — `text` and `yaml`/`json` for downstream
   tooling, plus a verbose mode that streams every blob and manifest digest
   for diagnosing TLS, auth, or push failures.

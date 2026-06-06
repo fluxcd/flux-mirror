@@ -4,7 +4,7 @@
 flux-mirror secret <name> [flags]
 ```
 
-Resolve the credential configured under [`auth.hosts`](./config.md#auth) for each
+Resolve the credential configured under [`hosts`](./config.md#hosts) for each
 selected host and write them into a Kubernetes Secret of type
 `kubernetes.io/dockerconfigjson` — the same shape `kubectl create secret
 docker-registry` produces.
@@ -45,7 +45,7 @@ in-cluster service-account namespace).
   in-cluster config and service-account namespace).
 - By default the Secret is upserted (created, or replaced if it exists). With
   `--create`, an existing Secret of the same name is an error.
-- With no `--host`, every host in `auth.hosts` is included. A `--host` that is
+- With no `--host`, every host in `hosts` is included. A `--host` that is
   not present in the config is an error.
 - The Secret's `.dockerconfigjson` holds one `auths` entry per host. A cloud
   `provider` host, and a `credential` host with `username` set, write

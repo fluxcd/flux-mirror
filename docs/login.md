@@ -1,7 +1,7 @@
 # Flux Mirror Login Command
 
 The `flux-mirror login` command resolves the credentials configured under
-[`auth.hosts`](./config.md#auth) and logs in to those registries. It mints the
+[`hosts`](./config.md#hosts) and logs in to those registries. It mints the
 *same* credentials `flux-mirror sync` would attach, but once. By default it
 stores them in the Docker config, exactly like `docker login`.
 
@@ -49,28 +49,27 @@ Exactly one source is set per host (enforced by config validation):
 
 | Source     | Credential                                                                                     |
 |------------|------------------------------------------------------------------------------------------------|
-| `provider` | A freshly minted token for the provider (`github`/`forgejo`/`gcp`/`azure`, or the `aws` SigV4 envelope). Carries its own expiry. |
+| `provider` | A freshly minted token for the provider (`github`/`forgejo`/`gcp`/`azure`, the `aws` SigV4 envelope, or a `jwt-svid` from the SPIFFE Workload API). Carries its own expiry. |
 | `fromEnv`  | The value of the named environment variable, as-is.                                            |
 | `fromPath` | The contents of the file at the path, with surrounding whitespace trimmed.                     |
 | `jwkPath`  | A freshly signed JWT (`iss`/`sub`/`aud` from the config), valid for the credential's `exp` (default **60s**). Set `exp` in the config for a longer-lived login token. |
 
-## Auth-only config
+## Hosts-only config
 
-`login` reads only the `auth` section, so — unlike `sync` — it accepts a config
+`login` reads only the `hosts` section, so — unlike `sync` — it accepts a config
 with no `artifacts` or `charts`:
 
 ```yaml
 apiVersion: mirror.fluxcd.io/v1alpha1
 kind: Config
-auth:
-  hosts:
-    - host: registry.example.com
-      credential:
-        jwkPath: ./keys/registry/privkey.json
-        iss: https://my-issuer.example
-        sub: client-id
-        # aud: registry.example.com   # optional, defaults to host
-        # exp: 1h                      # optional, defaults to 60s
+hosts:
+  - host: registry.example.com
+    credential:
+      jwkPath: ./keys/registry/privkey.json
+      iss: https://my-issuer.example
+      sub: client-id
+      # aud: registry.example.com   # optional, defaults to host
+      # exp: 1h                      # optional, defaults to 60s
 ```
 
 ## Examples

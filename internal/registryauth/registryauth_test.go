@@ -13,9 +13,9 @@ import (
 )
 
 func authHostsConfig(hosts ...string) *config.Config {
-	cfg := &config.Config{Auth: &config.Auth{}}
+	cfg := &config.Config{}
 	for _, h := range hosts {
-		cfg.Auth.Hosts = append(cfg.Auth.Hosts, config.AuthHost{
+		cfg.Hosts = append(cfg.Hosts, config.AuthHost{
 			Host:       h,
 			Credential: &config.AuthCredential{FromEnv: "X"},
 		})
@@ -49,18 +49,18 @@ func TestSelectAuthHosts_UnknownHost(t *testing.T) {
 func TestSelectAuthHosts_NoAuth(t *testing.T) {
 	g := NewWithT(t)
 	_, err := SelectAuthHosts(&config.Config{}, nil)
-	g.Expect(err).To(MatchError(ContainSubstring("no auth.hosts")))
+	g.Expect(err).To(MatchError(ContainSubstring("no hosts")))
 }
 
 func TestUsernameSwitch(t *testing.T) {
 	g := NewWithT(t)
 
-	bearer := &config.Auth{Hosts: []config.AuthHost{{
+	bearer := []config.AuthHost{{
 		Host: "bearer.example", Credential: &config.AuthCredential{FromEnv: "X"},
-	}}}
-	userpass := &config.Auth{Hosts: []config.AuthHost{{
+	}}
+	userpass := []config.AuthHost{{
 		Host: "userpass.example", Credential: &config.AuthCredential{FromEnv: "X", Username: "robot"},
-	}}}
+	}}
 
 	// cijwt (bearer-stamp) transport is needed only when a credential host has
 	// no username.

@@ -27,7 +27,7 @@ var loginArgs loginFlags
 var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Store configured credentials in the Docker config",
-	Long: `Resolve the credentials configured under auth.hosts and store them in
+	Long: `Resolve the credentials configured under hosts and store them in
 the Docker config so subsequent registry requests authenticate as those
 identities. These are the same credentials the sync command would attach, minted
 once: an OIDC/cloud token for a provider, the value of fromEnv, the contents of

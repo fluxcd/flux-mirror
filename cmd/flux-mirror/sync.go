@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -152,12 +153,15 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 	if syncArgs.insecure {
 		clientOpts = append(clientOpts, oci.Insecure())
 	}
-	if t, err := buildClientTransport(cfg.Auth); err != nil {
+	t, closeTransport, err := buildClientTransport(cmd.Context(), cfg.Hosts)
+	if err != nil {
 		return err
-	} else if t != nil {
+	}
+	defer closeTransport()
+	if t != nil {
 		clientOpts = append(clientOpts, oci.WithTransport(t))
 	}
-	if kc, err := registryauth.BuildKeychain(cmd.Context(), cfg.Auth); err != nil {
+	if kc, err := registryauth.BuildKeychain(cmd.Context(), cfg.Hosts); err != nil {
 		return err
 	} else if kc != nil {
 		clientOpts = append(clientOpts, oci.WithKeychain(kc))
@@ -266,29 +270,40 @@ func classifyExit(r sync.Result, driftExitCode int) error {
 }
 
 // buildClientTransport composes the optional transport stack from the config's
-// auth hosts and --oci-max-chunk-size. Returns (nil, nil) if neither is
-// requested. Stack order, outer first:
+// hosts and --oci-max-chunk-size. Returns (nil, noop, nil) if none is requested.
+// Stack order, outer first:
 //
 //	ChunkingTransport (split big PATCH bodies)
 //	  → cijwt.Transport (stamp Authorization on each chunk request)
-//	    → http.DefaultTransport
+//	    → tls dispatch (per-host TLS/mTLS) | http.DefaultTransport
 //
-// JWT is the inner wrapper so that per-request token minting works per chunk;
-// chunking is the outer wrapper so split chunks each get freshly stamped auth
-// from the JWT layer.
-func buildClientTransport(auth *config.Auth) (http.RoundTripper, error) {
+// TLS is the inner-most layer (the transport handshake); JWT sits above it so
+// per-request token minting works per chunk; chunking is the outer wrapper so
+// split chunks each get freshly stamped auth from the JWT layer. The returned
+// closer releases any SPIFFE Workload API sources and must be called when done.
+func buildClientTransport(ctx context.Context, hosts []config.AuthHost) (http.RoundTripper, func() error, error) {
+	noop := func() error { return nil }
+
 	// Only credential hosts use the cijwt transport; provider hosts authenticate
 	// through the keychain instead.
-	credSet := registryauth.NeedsCredentialTransport(auth)
+	credSet := registryauth.NeedsCredentialTransport(hosts)
 	chunkSet := syncArgs.maxChunkSize > 0
-	if !credSet && !chunkSet {
-		return nil, nil
+	tlsSet := registryauth.NeedsTLS(hosts)
+	if !credSet && !chunkSet && !tlsSet {
+		return nil, noop, nil
 	}
-	t := http.DefaultTransport
+
+	// Inner-most: per-host TLS dispatch, or the default transport.
+	base, closeTLS, err := registryauth.NewTLSTransport(ctx, http.DefaultTransport, hosts)
+	if err != nil {
+		return nil, noop, err
+	}
+	t := base
 	if credSet {
-		ct, err := registryauth.NewCredentialTransport(t, auth)
+		ct, err := registryauth.NewCredentialTransport(t, hosts)
 		if err != nil {
-			return nil, err
+			_ = closeTLS()
+			return nil, noop, err
 		}
 		t = ct
 	}
@@ -298,7 +313,7 @@ func buildClientTransport(auth *config.Auth) (http.RoundTripper, error) {
 			ChunkSize: int64(syncArgs.maxChunkSize) * 1024,
 		}
 	}
-	return t, nil
+	return t, closeTLS, nil
 }
 
 func resolveConfigPath(args []string) (string, error) {
@@ -313,7 +328,7 @@ func resolveConfigPath(args []string) (string, error) {
 
 // loadConfig decodes the config from path ('-' reads stdin) and validates it.
 // requireEntries enforces that at least one charts/artifacts entry is present;
-// pass false for commands that consume only the auth section (login).
+// pass false for commands that consume only the hosts section (login).
 func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*config.Config, error) {
 	cfg, err := decodeConfig(cmd, path)
 	if err != nil {

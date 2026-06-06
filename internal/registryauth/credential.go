@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package registryauth resolves OCI registry credentials for the hosts in a
-// flux-mirror config's auth section: JWT credentials (provider/fromEnv/fromPath/
+// flux-mirror config's hosts section: JWT credentials (provider/fromEnv/fromPath/
 // jwkPath) and cloud registry providers (ecr/acr/gar). It is the auth layer
 // shared by the sync, login, and create commands.
 package registryauth
@@ -24,6 +24,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/idtoken"
 
@@ -175,6 +177,23 @@ func providerTokenFunc(provider, aud string) (cijwt.TokenFunc, error) {
 				region = "us-east-1"
 			}
 			return mintAWSSTSToken(ctx, cfg.Credentials, signer, region, aud)
+		}, nil
+	case config.JWTProviderJWTSVID:
+		return func(ctx context.Context) (string, error) {
+			// Fetch a JWT-SVID for the audience from the ambient Workload API
+			// (SPIFFE_ENDPOINT_SOCKET). The source is opened per cache-miss call
+			// and closed immediately; cijwt caches the returned token's exp, so
+			// this does not dial the socket on every request.
+			src, err := workloadapi.NewJWTSource(ctx)
+			if err != nil {
+				return "", fmt.Errorf("create SPIFFE JWT source: %w", err)
+			}
+			defer src.Close()
+			svid, err := src.FetchJWTSVID(ctx, jwtsvid.Params{Audience: aud})
+			if err != nil {
+				return "", fmt.Errorf("fetch JWT-SVID: %w", err)
+			}
+			return svid.Marshal(), nil
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown provider %q", provider)
