@@ -27,24 +27,29 @@ FLUX_MIRROR_CONFIG=examples/podinfo.yaml flux-mirror sync
 
 ## Authentication
 
-OCI registry auth is read from the ambient Docker config:
+`sync` authenticates OCI registry requests (`artifacts` and `oci://` Helm
+sources) per registry host:
 
-- `~/.docker/config.json`, or the `DOCKER_CONFIG` env var if set.
-- Any configured credential helpers (e.g., `docker-credential-osxkeychain`, `docker-credential-ecr-login`, `docker-credential-gcloud`).
+1. Hosts listed in [`auth.hosts`](./config.md#auth) use their configured auth:
+   - `provider: ecr|acr|gar` obtains registry credentials from the cloud
+     provider's workload identity.
+   - `credential` resolves a per-host secret from GitHub/Forgejo OIDC, GCP,
+     Azure, AWS STS, `fromEnv`, `fromPath`, or `jwkPath`. With no `username`,
+     it is sent directly as `Authorization: Bearer`. With `username`, it is used
+     as the password in the standard registry auth challenge,
+     which covers registries like Docker Hub, GHCR, and Quay without a prior `docker login`.
+2. Hosts not listed in `auth.hosts` use the Docker config and credential helpers from
+   `~/.docker/config.json`, or the `DOCKER_CONFIG` env var if set.
 
-Log in once with `docker login`, `oras login`, etc. and `flux-mirror` picks up the credentials.
-
-Hosts listed in the config's [`auth`](./config.md#auth) section authenticate with a
-per-host JWT instead; use `auth` or ambient credentials for a given host, not both.
-
-Helm HTTP/S repository auth is read from the ambient Helm repositories config:
+Helm HTTP/S repository auth is separate from OCI auth and always comes from the
+ambient Helm repositories config:
 
 - Helm's default `repositories.yaml` path, or the `HELM_REPOSITORY_CONFIG` env var if set.
 - `username` / `password`, `certFile`, `keyFile`, `caFile`, `insecure_skip_tls_verify`, and
   `pass_credentials_all` are honored.
 
-Log in or add repositories with `helm repo add` and `flux-mirror` picks up matching HTTP/S
-repository credentials automatically.
+Log in or add repositories with `helm repo add` and `flux-mirror` picks up
+matching HTTP/S repository credentials automatically.
 
 ## Flags
 
@@ -125,15 +130,15 @@ flux-mirror sync config.yaml -o json | jq '.report.summary'
 
 Each tag row (and each referrer row) lands in exactly one of these statuses:
 
-| Status            | Meaning                                                                                           |
-|-------------------|---------------------------------------------------------------------------------------------------|
-| `copied`          | Destination did not have the tag; mirrored from source.                                           |
-| `overwritten`     | Destination had a different digest; replaced (only with `overwrite: true`).                       |
-| `skipped`         | Nothing was copied; the row's `reason` says why (see below).                                       |
-| `drifted`         | Destination has a different digest, `overwrite: false` — left alone, surfaced in the summary.     |
-| `would-copy`      | Dry-run forecast: would have been copied.                                                         |
-| `would-overwrite` | Dry-run forecast: would have been overwritten.                                                    |
-| `failed`          | The operation errored; the row's `error` carries the message.                                     |
+| Status            | Meaning                                                                                       |
+|-------------------|-----------------------------------------------------------------------------------------------|
+| `copied`          | Destination did not have the tag; mirrored from source.                                       |
+| `overwritten`     | Destination had a different digest; replaced (only with `overwrite: true`).                   |
+| `skipped`         | Nothing was copied; the row's `reason` says why (see below).                                  |
+| `drifted`         | Destination has a different digest, `overwrite: false` — left alone, surfaced in the summary. |
+| `would-copy`      | Dry-run forecast: would have been copied.                                                     |
+| `would-overwrite` | Dry-run forecast: would have been overwritten.                                                |
+| `failed`          | The operation errored; the row's `error` carries the message.                                 |
 
 A `skipped` row always carries a `reason`: `up-to-date` (the destination already
 has the same digest) or `signature-too-new` (a valid signature was deferred by
@@ -245,7 +250,7 @@ consuming `HelmRelease.spec.values` to point at the mirror.
 ### Preview without writing
 
 ```bash
-flux-mirror sync config.yaml --dry-run -o yaml
+flux-mirror sync config.yaml --dry-run -o json
 ```
 
 ### Force-resync drifted tags
