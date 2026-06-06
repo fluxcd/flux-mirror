@@ -71,7 +71,7 @@ type tagJob struct {
 	tag          string
 	src          string
 	dst          string
-	srcDigest    string // pre-fetched only when refs were snapshotted; otherwise ""
+	srcDigest    string // pre-fetched when verified or when refs were snapshotted; otherwise ""
 	refs         []oci.Referrer
 	overwrite    bool
 	verification *sync.Verification // confirmed at plan time when entry.verify is set
@@ -150,6 +150,10 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 				})
 				break
 			}
+			if info == nil || info.Digest == "" {
+				return plan, fmt.Errorf("verify %s: verifier returned no digest", job.src)
+			}
+			job.srcDigest = info.Digest
 			job.verification = toVerification(info)
 		}
 
@@ -158,15 +162,17 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 		// runner does. Without this, a transient failure mid-mirror could
 		// re-list and mix referrers from before/after a publish.
 		if m.entry.IncludeReferrers {
-			srcDigest, err := m.client.Digest(ctx, job.src)
-			if err != nil {
-				return plan, fmt.Errorf("resolve digest for referrers (%s): %w", job.src, err)
+			if job.srcDigest == "" {
+				srcDigest, err := m.client.Digest(ctx, job.src)
+				if err != nil {
+					return plan, fmt.Errorf("resolve digest for referrers (%s): %w", job.src, err)
+				}
+				job.srcDigest = srcDigest
 			}
-			refs, err := m.client.SnapshotReferrers(ctx, m.entry.Source, srcDigest)
+			refs, err := m.client.SnapshotReferrers(ctx, m.entry.Source, job.srcDigest)
 			if err != nil {
 				return plan, fmt.Errorf("snapshot referrers for %s: %w", job.src, err)
 			}
-			job.srcDigest = srcDigest
 			job.refs = refs
 		}
 
@@ -186,14 +192,18 @@ func (m *mirror) runTag(ctx context.Context, j tagJob) (sync.JobResult, error) {
 	start := time.Now()
 	m.opts.Logger.Info("mirroring tag", "src", j.src, "dst", j.dst)
 
-	// When refs were snapshotted at plan time, j.srcDigest is also known —
-	// skip the redundant src-side Digest call.
+	// When verification or referrer snapshotting resolved the source digest at
+	// plan time, use that digest as the source of truth.
 	cmp, err := m.compareTag(ctx, j.src, j.dst, j.srcDigest)
 	if err != nil {
 		return sync.JobResult{}, err
 	}
 
-	st, reason, err := m.applyOutcome(ctx, j.src, j.dst, cmp, j.overwrite, m.opts.CopyJobs)
+	copySrc := j.src
+	if j.srcDigest != "" {
+		copySrc = m.entry.Source + "@" + j.srcDigest
+	}
+	st, reason, err := m.applyOutcome(ctx, copySrc, j.dst, cmp, j.overwrite, m.opts.CopyJobs)
 	if err != nil {
 		// Compare resolved the source digest before the copy failed — keep it
 		// on the failed row.

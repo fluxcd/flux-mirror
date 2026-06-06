@@ -55,13 +55,17 @@ func newRunner() *sync.Runner {
 }
 
 type recordingVerifier struct {
-	refs []string
-	info *oci.VerificationInfo
-	err  error
+	refs        []string
+	info        *oci.VerificationInfo
+	err         error
+	afterVerify func()
 }
 
 func (v *recordingVerifier) Verify(_ context.Context, ref string, _ config.ArtifactVerification) (*oci.VerificationInfo, error) {
 	v.refs = append(v.refs, ref)
+	if v.afterVerify != nil {
+		v.afterVerify()
+	}
 	return v.info, v.err
 }
 
@@ -111,7 +115,7 @@ func TestMirror_VerifiesSelectedTags(t *testing.T) {
 	dst := repo("verify-dst")
 
 	testregistry.PushImage(t, src+":1.0.0")
-	testregistry.PushImage(t, src+":1.1.0")
+	srcDigest := testregistry.PushImage(t, src+":1.1.0")
 
 	c := oci.NewClient(oci.Insecure())
 	entry := config.ArtifactEntry{
@@ -131,6 +135,7 @@ func TestMirror_VerifiesSelectedTags(t *testing.T) {
 		Provider:       config.VerifyProviderCosign,
 		Issuer:         "https://token.actions.githubusercontent.com",
 		Identity:       "https://github.com/example/app/.github/workflows/release.yml@refs/tags/1.1.0",
+		Digest:         srcDigest,
 		IntegratedTime: integrated,
 	}}
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
@@ -157,6 +162,57 @@ func TestMirror_VerifiesSelectedTags(t *testing.T) {
 	// Age/minAge only appear on the too-new skip, not a normal verified copy.
 	g.Expect(row.Verification.Age).To(BeEmpty())
 	g.Expect(row.Verification.MinAge).To(BeEmpty())
+}
+
+func TestMirror_CopiesVerifiedDigestWhenTagMoves(t *testing.T) {
+	g := NewWithT(t)
+	src := repo("verify-move-src")
+	dst := repo("verify-move-dst")
+
+	verifiedDigest := testregistry.PushImage(t, src+":1.0.0")
+	var movedDigest string
+
+	c := oci.NewClient(oci.Insecure())
+	entry := config.ArtifactEntry{
+		Source:      src,
+		Destination: dst,
+		Selector:    config.Selector{Limit: new(1)},
+		Verify: &config.ArtifactVerification{
+			Provider: config.VerifyProviderCosign,
+			MatchOIDCIdentity: []config.OIDCIdentity{{
+				Issuer:  "https://token.actions.githubusercontent.com",
+				Subject: `^https://github\.com/example/.*$`,
+			}},
+		},
+	}
+	verifier := &recordingVerifier{
+		info: &oci.VerificationInfo{
+			Provider: config.VerifyProviderCosign,
+			Digest:   verifiedDigest,
+		},
+		afterVerify: func() {
+			movedDigest = testregistry.PushImage(t, src+":1.0.0")
+		},
+	}
+
+	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
+		New(c, entry, Options{
+			Verifier: verifier,
+			Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		}),
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(movedDigest).ToNot(BeEmpty())
+	g.Expect(movedDigest).ToNot(Equal(verifiedDigest))
+	g.Expect(verifier.refs).To(Equal([]string{src + ":1.0.0"}))
+
+	copied := tagsWithStatus(res.Entries[0], sync.StatusCopied)
+	g.Expect(copied).To(HaveLen(1))
+	g.Expect(copied[0].Digest).To(Equal(verifiedDigest))
+
+	dstDigest, err := crane.Digest(dst+":1.0.0", crane.Insecure)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(dstDigest).To(Equal(verifiedDigest))
 }
 
 func TestMirror_VerificationFailureStopsPlanning(t *testing.T) {
