@@ -15,6 +15,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/fluxcd/flux-mirror/internal/registryauth"
 )
 
 type createSecretFlags struct {
@@ -71,7 +73,7 @@ func createSecretCmdRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	hosts, err := selectAuthHosts(cfg, createSecretArgs.hosts)
+	hosts, err := registryauth.SelectAuthHosts(cfg, createSecretArgs.hosts)
 	if err != nil {
 		return err
 	}
@@ -91,13 +93,13 @@ func createSecretCmdRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("create kubernetes client: %w", err)
 	}
 
-	creds := make(map[string]string, len(hosts))
+	creds := make(map[string]registryauth.HostAuth, len(hosts))
 	for _, h := range hosts {
-		cred, err := resolveCredential(cmd.Context(), h)
+		ha, err := registryauth.ResolveHostAuth(cmd.Context(), h)
 		if err != nil {
 			return fmt.Errorf("host %q: %w", h.Host, err)
 		}
-		creds[h.Host] = cred
+		creds[h.Host] = ha
 	}
 
 	secret, err := buildDockerConfigSecret(name, ns, creds)
@@ -126,13 +128,13 @@ type dockerConfigEntry struct {
 
 // buildDockerConfigSecret assembles a kubernetes.io/dockerconfigjson Secret from
 // per-host credentials.
-func buildDockerConfigSecret(name, namespace string, creds map[string]string) (*corev1.Secret, error) {
+func buildDockerConfigSecret(name, namespace string, creds map[string]registryauth.HostAuth) (*corev1.Secret, error) {
 	auths := make(map[string]dockerConfigEntry, len(creds))
-	for host, cred := range creds {
+	for host, ha := range creds {
 		auths[host] = dockerConfigEntry{
-			Username: loginUsername,
-			Password: cred,
-			Auth:     base64.StdEncoding.EncodeToString([]byte(loginUsername + ":" + cred)),
+			Username: ha.Username,
+			Password: ha.Password,
+			Auth:     base64.StdEncoding.EncodeToString([]byte(ha.Username + ":" + ha.Password)),
 		}
 	}
 	dockerCfg, err := json.Marshal(map[string]any{"auths": auths})

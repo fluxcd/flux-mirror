@@ -21,6 +21,7 @@ import (
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
 	"github.com/fluxcd/flux-mirror/internal/config"
+	"github.com/fluxcd/flux-mirror/internal/registryauth"
 	"github.com/fluxcd/flux-mirror/internal/testregistry"
 )
 
@@ -71,7 +72,7 @@ func TestJWTTransportOptions(t *testing.T) {
 			Host:       "mint.example",
 			Credential: &config.AuthCredential{Provider: config.JWTProviderForgejo},
 		}}}
-		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(opts).To(HaveLen(2)) // WithInner + 1 audience.
 		_, err = cijwt.NewTransport(opts...)
@@ -85,7 +86,7 @@ func TestJWTTransportOptions(t *testing.T) {
 			Host:       "static.example",
 			Credential: &config.AuthCredential{FromEnv: "MY_CI_TOKEN"},
 		}}}
-		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
 		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -98,7 +99,7 @@ func TestJWTTransportOptions(t *testing.T) {
 			Host:       "static.example",
 			Credential: &config.AuthCredential{FromEnv: "MY_CI_TOKEN"},
 		}}}
-		_, err := jwtTransportOptions(http.DefaultTransport, auth)
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
 	})
 
@@ -108,7 +109,7 @@ func TestJWTTransportOptions(t *testing.T) {
 			Host:       "static.example",
 			Credential: &config.AuthCredential{FromPath: "/run/secrets/token"},
 		}}}
-		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
 		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -125,7 +126,7 @@ func TestJWTTransportOptions(t *testing.T) {
 				Aud:     "registry.example",
 			},
 		}}}
-		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
 		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -141,7 +142,7 @@ func TestJWTTransportOptions(t *testing.T) {
 				Sub:     "client-id",
 			},
 		}}}
-		_, err := jwtTransportOptions(http.DefaultTransport, auth)
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).To(MatchError(ContainSubstring("read jwkPath")))
 	})
 
@@ -155,7 +156,7 @@ func TestJWTTransportOptions(t *testing.T) {
 				Sub:     "client-id",
 			},
 		}}}
-		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
 		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -171,7 +172,7 @@ func TestJWTTransportOptions(t *testing.T) {
 				Sub:     "client-id",
 			},
 		}}}
-		_, err := jwtTransportOptions(http.DefaultTransport, auth)
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).To(MatchError(ContainSubstring("exactly one key, got 2")))
 	})
 
@@ -186,7 +187,7 @@ func TestJWTTransportOptions(t *testing.T) {
 				Sub:     "client-id",
 			},
 		}}}
-		_, err := jwtTransportOptions(http.DefaultTransport, auth)
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).To(MatchError(ContainSubstring("exactly one key, got 0")))
 	})
 
@@ -201,7 +202,7 @@ func TestJWTTransportOptions(t *testing.T) {
 				Sub:     "client-id",
 			},
 		}}}
-		_, err := jwtTransportOptions(http.DefaultTransport, auth)
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).To(MatchError(ContainSubstring("parse JWK")))
 	})
 
@@ -215,7 +216,7 @@ func TestJWTTransportOptions(t *testing.T) {
 				JWKPath: writeJWK(t), Iss: "https://issuer.example", Sub: "client-id",
 			}},
 		}}
-		opts, err := jwtTransportOptions(http.DefaultTransport, auth)
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, auth)
 		g.Expect(err).ToNot(HaveOccurred())
 		g.Expect(opts).To(HaveLen(4)) // WithInner + 3 hosts.
 		_, err = cijwt.NewTransport(opts...)

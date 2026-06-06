@@ -343,10 +343,32 @@ func TestValidate_Table(t *testing.T) {
 			errMsg: "host is required",
 		},
 		{
-			name: "auth missing credential",
+			name: "auth missing credential and provider",
 			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
 				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example"}}}},
-			errMsg: "credential is required",
+			errMsg: "one of credential or provider is required",
+		},
+		{
+			name: "auth valid provider ecr",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: RegistryProviderECR,
+				}}}},
+		},
+		{
+			name: "auth invalid provider",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{Host: "h.example", Provider: "dockerhub"}}}},
+			errMsg: "provider \"dockerhub\" must be one of: ecr, acr, gar",
+		},
+		{
+			name: "auth credential and provider mutually exclusive",
+			cfg: Config{APIVersion: APIVersion, Kind: Kind, Artifacts: validArtifact(),
+				Auth: &Auth{Hosts: []AuthHost{{
+					Host: "h.example", Provider: RegistryProviderGAR,
+					Credential: &AuthCredential{FromEnv: "TOKEN"},
+				}}}},
+			errMsg: "credential and provider are mutually exclusive",
 		},
 		{
 			name: "auth duplicate host",

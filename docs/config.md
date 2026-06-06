@@ -63,9 +63,13 @@ way, and the result is undefined. Pick one mechanism per host.
 > their credentials always come from the Helm repositories config
 > (`repositories.yaml` / `$HELM_REPOSITORY_CONFIG`). See [Source scheme](#source-scheme).
 
+Each host configures **either** a `credential` (a JWT-based token, below) **or** a
+cloud registry `provider` — the two are mutually exclusive.
+
 ```yaml
 auth:
   hosts:
+    # Form 1: a per-host credential (JWT-based).
     - host: registry.example.com
       credential:
         # Exactly one of the following four selects how the credential is obtained.
@@ -83,7 +87,24 @@ auth:
 
         # Optional; allowed only with jwkPath. JWT lifetime; defaults to 60s.
         exp: 1h
+
+    # Form 2: a cloud registry provider (ECR/ACR/GAR), via ambient workload identity.
+    - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+      provider: ecr               # one of ecr, acr, gar
 ```
+
+### Registry providers
+
+`provider` authenticates the host using the cloud provider's ambient workload
+identity — the same mechanism the `flux push artifact` family uses — and obtains
+the registry credentials directly (no JWT/`credential` involved). It is mutually
+exclusive with `credential`.
+
+| `provider` | Cloud registry | Identity source |
+|------------|----------------|-----------------|
+| `ecr`      | Amazon ECR (AWS)   | AWS credential chain (IRSA / EC2 / env / SSO, region from the host). |
+| `acr`      | Azure ACR (Azure)  | Default Azure credential chain (managed identity, env, ...).         |
+| `gar`      | Google GAR (GCP)   | Google Application Default Credentials.                              |
 
 ### Token sources
 
@@ -95,10 +116,15 @@ auth:
 
 ### Fields
 
+The fields below are on the `credential` object, except `host` and `provider`
+which are on the host itself. Each host sets exactly one of `credential` or
+`provider`.
+
 | Field      | Type   | Default | Description                                                                                  |
 |------------|--------|---------|---------------------------------------------------------------------------------------------|
 | `host`     | string |         | Registry host to authenticate. Required and unique across `hosts`.                           |
-| `provider` | string |         | Token provider, one of `github`, `forgejo`, `gcp`, `azure`, `aws`. Mutually exclusive with `fromEnv`, `fromPath`, and `jwkPath`. |
+| `provider` (host) | string |  | Cloud registry provider, one of `ecr`, `acr`, `gar`. Mutually exclusive with `credential`. See [Registry providers](#registry-providers). |
+| `credential.provider` | string |  | Token provider, one of `github`, `forgejo`, `gcp`, `azure`, `aws`. Mutually exclusive with `fromEnv`, `fromPath`, and `jwkPath`. |
 | `fromEnv`  | string |         | Environment variable holding a static JWT. Mutually exclusive with `provider` and `jwkPath`. |
 | `jwkPath`  | string |         | Path to a private JSON Web Key, as a bare JWK or a single-key JWK set. Mutually exclusive with `provider` and `fromEnv`. |
 | `iss`      | string |         | Token issuer. Required with `jwkPath`; not allowed otherwise.                                |

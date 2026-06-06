@@ -49,6 +49,15 @@ const (
 	// via a signed header, not an OIDC audience claim.
 	JWTProviderAWS = "aws"
 
+	// RegistryProviderECR, RegistryProviderACR and RegistryProviderGAR select a
+	// cloud registry provider for auth.hosts[].provider. They obtain registry
+	// credentials from the cloud provider's workload identity (the same way the
+	// `flux push artifact` family does), and are mutually exclusive with the
+	// per-host credential. ECR maps to AWS, ACR to Azure, GAR to GCP.
+	RegistryProviderECR = "ecr"
+	RegistryProviderACR = "acr"
+	RegistryProviderGAR = "gar"
+
 	defaultChartVersion = "*"
 	defaultLimit        = 1
 
@@ -79,6 +88,10 @@ type Auth struct {
 type AuthHost struct {
 	Host       string          `json:"host"`
 	Credential *AuthCredential `json:"credential,omitempty"`
+	// Provider authenticates the host with a cloud registry provider's workload
+	// identity, one of RegistryProviderECR, RegistryProviderACR or
+	// RegistryProviderGAR. Mutually exclusive with Credential.
+	Provider string `json:"provider,omitempty"`
 }
 
 // AuthCredential configures a per-host credential. Exactly one of Provider,
@@ -289,11 +302,23 @@ func (h AuthHost) validate() error {
 	if strings.TrimSpace(h.Host) == "" {
 		return fmt.Errorf("host is required")
 	}
-	if h.Credential == nil {
-		return fmt.Errorf("credential is required")
-	}
-	if err := h.Credential.validate(); err != nil {
-		return fmt.Errorf("credential: %w", err)
+	provider := strings.TrimSpace(h.Provider)
+	switch {
+	case h.Credential != nil && provider != "":
+		return fmt.Errorf("credential and provider are mutually exclusive")
+	case h.Credential != nil:
+		if err := h.Credential.validate(); err != nil {
+			return fmt.Errorf("credential: %w", err)
+		}
+	case provider != "":
+		switch provider {
+		case RegistryProviderECR, RegistryProviderACR, RegistryProviderGAR:
+		default:
+			return fmt.Errorf("provider %q must be one of: %s, %s, %s",
+				provider, RegistryProviderECR, RegistryProviderACR, RegistryProviderGAR)
+		}
+	default:
+		return fmt.Errorf("one of credential or provider is required")
 	}
 	return nil
 }
