@@ -83,16 +83,16 @@ func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (res Result, er
 			// but keep going so the rest of the config gets exercised. This is
 			// the only path that sets EntryFailed; per-tag failures live as
 			// StatusFailed rows on an EntryCompleted entry.
-			r.Logger.Error("plan failed", "entry", entryRes.Name, "err", err)
+			r.Logger.Error("plan failed", "entry", entryRes.Source, "err", err)
 			entryRes.Status = EntryFailed
 			entryRes.Error = err.Error()
 			if r.OnPlanError != nil {
-				r.OnPlanError(entryRes.Name, err)
+				r.OnPlanError(entryRes.Source, err)
 			}
 		}
 		res.Entries = append(res.Entries, entryRes)
 		if r.OnEntryFinished != nil {
-			r.OnEntryFinished(entryRes.Name)
+			r.OnEntryFinished(entryRes.Source)
 		}
 	}
 	return res, nil
@@ -101,20 +101,21 @@ func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (res Result, er
 func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (EntryResult, error) {
 	plan, err := m.Plan(ctx)
 	if err != nil {
-		return EntryResult{Name: plan.Name, Status: EntryFailed, Tags: []TagResult{}}, err
+		return EntryResult{Source: plan.Source, Destination: plan.Destination, Status: EntryFailed, Tags: []TagResult{}}, err
 	}
 	// Pre-size the rows slice so each job writes to its own plan-order index
 	// regardless of completion order — output is deterministic even under
 	// concurrency. Trimmed below to the number of jobs actually launched.
 	out := EntryResult{
-		Name:   plan.Name,
-		Status: EntryCompleted,
-		Tags:   make([]TagResult, len(plan.Jobs)),
+		Source:      plan.Source,
+		Destination: plan.Destination,
+		Status:      EntryCompleted,
+		Tags:        make([]TagResult, len(plan.Jobs)),
 	}
-	r.Logger.Info("entry started", "name", plan.Name, "jobs", len(plan.Jobs))
+	r.Logger.Info("entry started", "source", plan.Source, "jobs", len(plan.Jobs))
 	defer func(start time.Time) {
 		r.Logger.Info("entry finished",
-			"name", plan.Name,
+			"source", plan.Source,
 			"wall", time.Since(start).Round(time.Millisecond),
 			"jobs", len(plan.Jobs),
 			"failures", out.failedCount())
@@ -164,7 +165,7 @@ func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (EntryResult, erro
 				}
 			}
 			if r.OnJobFinished != nil {
-				r.OnJobFinished(plan.Name, job.ID, job.Dst, res.Status, err)
+				r.OnJobFinished(plan.Source, job.ID, job.Dst, res.Status, err)
 			}
 			record(i, job, res, err)
 			// Never propagate the error — failures are recorded per-tag and

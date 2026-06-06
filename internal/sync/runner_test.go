@@ -23,7 +23,7 @@ type stubMirror struct {
 }
 
 func (s *stubMirror) Plan(_ context.Context) (Plan, error) {
-	return Plan{Name: s.name, Jobs: s.jobs}, s.err
+	return Plan{Source: s.name, Destination: s.name + "/dst", Jobs: s.jobs}, s.err
 }
 
 func okJob(tag string, st Status) Job {
@@ -266,8 +266,9 @@ func TestReport_Render(t *testing.T) {
 	res := Result{
 		Entries: []EntryResult{
 			{
-				Name:   "ghcr.io/foo/bar",
-				Status: EntryCompleted,
+				Source:      "ghcr.io/foo/bar",
+				Destination: "localhost:5050/bar",
+				Status:      EntryCompleted,
 				Tags: []TagResult{
 					{
 						Tag:    "v1",
@@ -347,8 +348,9 @@ func TestResult_LogSummary(t *testing.T) {
 	res := Result{
 		Entries: []EntryResult{
 			{
-				Name:   "ghcr.io/foo/bar",
-				Status: EntryCompleted,
+				Source:      "ghcr.io/foo/bar",
+				Destination: "localhost:5050/bar",
+				Status:      EntryCompleted,
 				Tags: []TagResult{
 					{Tag: "v1", Status: StatusCopied},
 					{Tag: "v2", Status: StatusCopied},
@@ -357,8 +359,9 @@ func TestResult_LogSummary(t *testing.T) {
 				},
 			},
 			{
-				Name:   "ghcr.io/foo/baz",
-				Status: EntryCompleted,
+				Source:      "ghcr.io/foo/baz",
+				Destination: "localhost:5050/baz",
+				Status:      EntryCompleted,
 				Tags: []TagResult{
 					{Tag: "v1", Status: StatusWouldCopy},
 					{Tag: "v2", Status: StatusWouldCopy},
@@ -376,11 +379,11 @@ func TestResult_LogSummary(t *testing.T) {
 	out := buf.String()
 
 	g.Expect(out).To(ContainSubstring(`msg="entry summary"`))
-	g.Expect(out).To(ContainSubstring("name=ghcr.io/foo/bar"))
+	g.Expect(out).To(ContainSubstring("source=ghcr.io/foo/bar"))
 	g.Expect(out).To(ContainSubstring("copied=2"))
 	g.Expect(out).To(ContainSubstring("skipped=1"))
 	g.Expect(out).To(ContainSubstring("drifted=1"))
-	g.Expect(out).To(ContainSubstring("name=ghcr.io/foo/baz"))
+	g.Expect(out).To(ContainSubstring("source=ghcr.io/foo/baz"))
 	g.Expect(out).To(ContainSubstring("would-copy=4"))
 	g.Expect(out).To(ContainSubstring("failed=1"))
 

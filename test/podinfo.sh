@@ -70,14 +70,17 @@ echo ""
 echo "==> Re-running sync (idempotency check)"
 SYNC_OUT=$("${BIN}" sync "${CONFIG}" --insecure -o json)
 
-NON_SKIPPED=$(echo "${SYNC_OUT}" | jq '[.entries[] | .outcomes | to_entries[] | select(.key != "skipped")] | length')
-if [[ "${NON_SKIPPED}" -ne 0 ]]; then
-  echo "FAIL: expected all outcomes to be skipped on re-sync" >&2
+# Every entry must have completed at plan time, and every tag and referrer row
+# must be skipped (nothing copied/overwritten/drifted/failed on the re-run).
+NOT_COMPLETED=$(echo "${SYNC_OUT}" | jq '[.report.results[] | select(.status != "completed")] | length')
+NON_SKIPPED=$(echo "${SYNC_OUT}" | jq '[.report.results[].tags[] | .status, (.referrers[]? | .status) | select(. != "skipped")] | length')
+if [[ "${NOT_COMPLETED}" -ne 0 || "${NON_SKIPPED}" -ne 0 ]]; then
+  echo "FAIL: expected all rows to be skipped on re-sync" >&2
   echo "${SYNC_OUT}" | jq . >&2
   exit 1
 fi
 
-SKIPPED=$(echo "${SYNC_OUT}" | jq '[.entries[].outcomes.skipped[]] | length')
+SKIPPED=$(echo "${SYNC_OUT}" | jq '[.report.results[].tags[] | select(.status == "skipped")] | length')
 echo "  all ${SKIPPED} tags skipped"
 
 echo ""

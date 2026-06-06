@@ -41,10 +41,11 @@ const (
 // side channel. Status disambiguates an empty Tags array (nothing matched vs
 // plan failed).
 type EntryResult struct {
-	Name   string      `json:"name"`
-	Status EntryStatus `json:"status"`
-	Error  string      `json:"error,omitempty"`
-	Tags   []TagResult `json:"tags"`
+	Source      string      `json:"source"`
+	Destination string      `json:"destination"`
+	Status      EntryStatus `json:"status"`
+	Error       string      `json:"error,omitempty"`
+	Tags        []TagResult `json:"tags"`
 }
 
 // TagResult is one tag's row in the report. Optional fields follow the wire
@@ -241,7 +242,7 @@ var prettyPrintOrder = []Status{
 
 func entryAttrs(e EntryResult) []any {
 	counts := e.statusCounts()
-	attrs := []any{"name", e.Name}
+	attrs := []any{"source", e.Source}
 	for _, st := range summaryOrder {
 		attrs = append(attrs, string(st), counts[st])
 	}

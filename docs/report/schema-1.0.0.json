@@ -88,10 +88,14 @@
       "description": "One config entry (artifact or chart source).",
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "status", "tags"],
+      "required": ["source", "destination", "status", "tags"],
       "properties": {
-        "name": {
-          "description": "Entry identifier (the source repository/reference).",
+        "source": {
+          "description": "Source repository/reference being mirrored.",
+          "type": "string"
+        },
+        "destination": {
+          "description": "Destination repository the entry mirrors into.",
           "type": "string"
         },
         "status": {

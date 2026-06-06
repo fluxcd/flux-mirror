@@ -75,10 +75,11 @@ type versionJob struct {
 }
 
 // Plan resolves matching chart versions and emits one Job per version.
-// Plan.Name uses "<source>/<chartName>" so logs and summary lines disambiguate
-// when multiple charts share a source URL.
+// Plan.Source uses "<source>/<chartName>" so logs and report rows disambiguate
+// when multiple charts share a source URL; Plan.Destination is the OCI repo the
+// chart lands in (destination base + chart name).
 func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
-	plan := sync.Plan{Name: m.planName()}
+	plan := sync.Plan{Source: m.planName(), Destination: m.dstRepo()}
 
 	versions, err := m.source.ListVersions(ctx, m.entry.Name)
 	if err != nil {

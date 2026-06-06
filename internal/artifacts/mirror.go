@@ -78,7 +78,7 @@ type tagJob struct {
 }
 
 func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
-	plan := sync.Plan{Name: m.entry.Source}
+	plan := sync.Plan{Source: m.entry.Source, Destination: m.entry.Destination}
 
 	tags, err := m.client.ListTags(ctx, m.entry.Source)
 	if err != nil {

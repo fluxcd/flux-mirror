@@ -18,8 +18,12 @@ type EntryMirror interface {
 
 // Plan is the schedulable form of an EntryMirror.
 type Plan struct {
-	// Name identifies this entry in logs and summaries (e.g. the source repo).
-	Name string
+	// Source identifies the entry's source in logs and reports (e.g. the source
+	// repo, or "<repo>/<chart>" for charts). Used as the entry's display label.
+	Source string
+	// Destination is the entry's destination repository, surfaced alongside
+	// Source in the structured report.
+	Destination string
 	// Jobs is the set of work units to execute, all bound to this entry.
 	Jobs []Job
 }
