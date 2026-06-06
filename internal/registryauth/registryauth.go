@@ -18,10 +18,13 @@ import (
 	"github.com/fluxcd/flux-mirror/internal/jwkio"
 )
 
-// HostAuth is a resolved username/password pair for a registry host.
+// HostAuth is a resolved credential for a registry host. Either RegistryToken is
+// set (a bearer token, for credential hosts without a username), or Username and
+// Password are set (provider hosts, and credential hosts with a username).
 type HostAuth struct {
-	Username string
-	Password string
+	Username      string
+	Password      string
+	RegistryToken string
 }
 
 // SelectAuthHosts returns the auth hosts to act on: the ones named in filter
@@ -48,9 +51,12 @@ func SelectAuthHosts(cfg *config.Config, filter []string) ([]config.AuthHost, er
 	return out, nil
 }
 
-// ResolveHostAuth resolves the username and password for any auth host: a
-// provider host yields the cloud registry credentials; a credential host yields
-// the placeholder username and the minted/static credential as the password.
+// ResolveHostAuth resolves the credential for any auth host:
+//   - a provider host yields the cloud registry username/password;
+//   - a credential host with a username yields that username and the
+//     minted/static credential as the password;
+//   - a credential host without a username yields the credential as a bearer
+//     RegistryToken.
 func ResolveHostAuth(ctx context.Context, h config.AuthHost) (HostAuth, error) {
 	if h.Provider != "" {
 		a, err := providerAuthenticator(ctx, h)
@@ -67,7 +73,10 @@ func ResolveHostAuth(ctx context.Context, h config.AuthHost) (HostAuth, error) {
 	if err != nil {
 		return HostAuth{}, err
 	}
-	return HostAuth{Username: Username, Password: cred}, nil
+	if h.Credential.Username != "" {
+		return HostAuth{Username: h.Credential.Username, Password: cred}, nil
+	}
+	return HostAuth{RegistryToken: cred}, nil
 }
 
 // pkgAuthProviderName maps a flux-mirror registry provider (ecr/acr/gar) to the
@@ -115,23 +124,48 @@ func (k providerKeychain) Resolve(res authn.Resource) (authn.Authenticator, erro
 	return k.inner.Resolve(res)
 }
 
-// BuildProviderKeychain pre-fetches credentials for every provider host and
-// returns a keychain serving them over the ambient Docker config. It returns
-// nil when no host uses a provider, so callers keep the default keychain.
-func BuildProviderKeychain(ctx context.Context, auth *config.Auth) (authn.Keychain, error) {
+// mintingAuthenticator resolves a credential host's username/password on each
+// call, so go-containerregistry re-mints (e.g. a fresh jwkPath JWT) whenever it
+// refreshes the registry token. Used for credential hosts that set a username.
+type mintingAuthenticator struct {
+	host config.AuthHost
+}
+
+// Authorization implements authn.Authenticator.
+func (m mintingAuthenticator) Authorization() (*authn.AuthConfig, error) {
+	return m.AuthorizationContext(context.Background())
+}
+
+// AuthorizationContext implements authn.ContextAuthenticator.
+func (m mintingAuthenticator) AuthorizationContext(ctx context.Context) (*authn.AuthConfig, error) {
+	cred, err := resolveCredential(ctx, m.host)
+	if err != nil {
+		return nil, err
+	}
+	return &authn.AuthConfig{Username: m.host.Credential.Username, Password: cred}, nil
+}
+
+// BuildKeychain returns a keychain that serves the hosts which authenticate
+// through the standard registry auth challenge — cloud provider hosts and
+// credential hosts with a username — over the ambient Docker config. Provider
+// credentials are pre-fetched; username credentials are minted on demand.
+// Returns nil when no such host exists, so callers keep the default keychain.
+func BuildKeychain(ctx context.Context, auth *config.Auth) (authn.Keychain, error) {
 	if auth == nil {
 		return nil, nil
 	}
 	auths := make(map[string]authn.Authenticator)
 	for _, h := range auth.Hosts {
-		if h.Provider == "" {
-			continue
+		switch {
+		case h.Provider != "":
+			a, err := providerAuthenticator(ctx, h)
+			if err != nil {
+				return nil, err
+			}
+			auths[h.Host] = a
+		case h.Credential != nil && h.Credential.Username != "":
+			auths[h.Host] = mintingAuthenticator{host: h}
 		}
-		a, err := providerAuthenticator(ctx, h)
-		if err != nil {
-			return nil, err
-		}
-		auths[h.Host] = a
 	}
 	if len(auths) == 0 {
 		return nil, nil
@@ -139,14 +173,16 @@ func BuildProviderKeychain(ctx context.Context, auth *config.Auth) (authn.Keycha
 	return providerKeychain{auths: auths, inner: authn.DefaultKeychain}, nil
 }
 
-// HasCredentialHosts reports whether any host uses a JWT credential (as opposed
-// to a cloud provider), i.e. whether the cijwt transport is needed.
-func HasCredentialHosts(auth *config.Auth) bool {
+// NeedsCredentialTransport reports whether the cijwt bearer-stamp transport is
+// needed: true when any credential host has no username (a bearer token stamped
+// directly). Credential hosts with a username and provider hosts go through the
+// keychain instead.
+func NeedsCredentialTransport(auth *config.Auth) bool {
 	if auth == nil {
 		return false
 	}
 	for _, h := range auth.Hosts {
-		if h.Credential != nil {
+		if h.Credential != nil && h.Credential.Username == "" {
 			return true
 		}
 	}
@@ -174,8 +210,9 @@ func JWTTransportOptions(inner http.RoundTripper, auth *config.Auth) ([]cijwt.Op
 	opts := []cijwt.Option{cijwt.WithInner(inner)}
 
 	for _, h := range auth.Hosts {
-		if h.Credential == nil {
-			// Provider host: authenticated via the keychain, not cijwt.
+		if h.Credential == nil || h.Credential.Username != "" {
+			// Provider hosts and username credentials authenticate via the
+			// keychain (standard challenge), not the cijwt bearer-stamp.
 			continue
 		}
 		j := h.Credential

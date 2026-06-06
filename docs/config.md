@@ -88,10 +88,32 @@ auth:
         # Optional; allowed only with jwkPath. JWT lifetime; defaults to 60s.
         exp: 1h
 
+        # Optional. Changes how the credential is presented (see below).
+        username: robot
+
     # Form 2: a cloud registry provider (ECR/ACR/GAR), via ambient workload identity.
     - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
       provider: ecr               # one of ecr, acr, gar
 ```
+
+### Bearer token vs. username/password (`credential.username`)
+
+`username` controls how the resolved credential is presented to the registry:
+
+- **Unset (default)** — the credential is a **bearer token**. `sync` sends it as
+  `Authorization: Bearer` on every request (no auth challenge), and
+  `login`/`create secret` write it to the Docker config's `registrytoken` field.
+  This suits registries that validate an OIDC token natively. `registrytoken` is
+  non-standard but understood by go-containerregistry (crane, Flux); it is **not**
+  understood by `kubelet` image pulls.
+- **Set** — the credential becomes the **password** of a `username`/`password`
+  pair. `sync` goes through the **standard registry auth challenge** (like the
+  cloud providers — credentials are exchanged at the token endpoint), and
+  `login`/`create secret` write `username`/`password`/`auth`.
+
+> ⚠️ Breaking change: credentials without `username` now default to
+> `registrytoken` in `login`/`create secret` output (previously a placeholder
+> `username`/`password`). Set `username` to restore `username`/`password`/`auth`.
 
 ### Registry providers
 
@@ -131,6 +153,7 @@ which are on the host itself. Each host sets exactly one of `credential` or
 | `sub`      | string |         | Token subject. Required with `jwkPath`; not allowed otherwise.                               |
 | `aud`      | string | `host`  | Token audience. Allowed only with `jwkPath` or `provider`; defaults to `host`.               |
 | `exp`      | duration | `60s` | JWT lifetime (e.g. `1h`). Allowed only with `jwkPath` — the one source whose lifetime flux-mirror controls. Must be positive. Other sources' lifetimes are fixed by their issuer. |
+| `username` | string |   | When unset, the credential is a bearer token (`registrytoken` / `Authorization: Bearer`). When set, the credential is the password of a `username`/`password` pair, using the standard registry auth challenge. See [Bearer token vs. username/password](#bearer-token-vs-usernamepassword-credentialusername). |
 
 ## Artifacts
 

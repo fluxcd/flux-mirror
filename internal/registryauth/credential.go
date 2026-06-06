@@ -35,11 +35,6 @@ import (
 	"github.com/fluxcd/flux-mirror/internal/jwkio"
 )
 
-// Username is the placeholder username stored alongside a credential-host token.
-// The identity is carried entirely by the token (the password), so the username
-// is just a non-empty placeholder; token-auth registries ignore it.
-const Username = "flux-mirror"
-
 // resolveCredential mints or reads the credential for a single credential host,
 // mirroring what jwtTransportOptions wires into the sync transport but returning
 // the value directly. It assumes the config has passed validation (exactly one

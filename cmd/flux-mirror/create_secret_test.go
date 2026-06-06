@@ -20,7 +20,8 @@ import (
 func TestBuildDockerConfigSecret(t *testing.T) {
 	g := NewWithT(t)
 	secret, err := buildDockerConfigSecret("regcreds", "flux-system", map[string]registryauth.HostAuth{
-		"registry.example.com": {Username: registryauth.Username, Password: "token-value"},
+		"user.example.com":  {Username: "robot", Password: "token-value"},
+		"token.example.com": {RegistryToken: "bearer-token"},
 	})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(secret.Name).To(Equal("regcreds"))
@@ -33,13 +34,22 @@ func TestBuildDockerConfigSecret(t *testing.T) {
 		Auths map[string]dockerConfigEntry `json:"auths"`
 	}
 	g.Expect(json.Unmarshal(raw, &parsed)).To(Succeed())
-	entry, ok := parsed.Auths["registry.example.com"]
-	g.Expect(ok).To(BeTrue())
-	g.Expect(entry.Username).To(Equal(registryauth.Username))
-	g.Expect(entry.Password).To(Equal("token-value"))
-	dec, err := base64.StdEncoding.DecodeString(entry.Auth)
+
+	// Username host => username/password/auth, no registrytoken.
+	up := parsed.Auths["user.example.com"]
+	g.Expect(up.Username).To(Equal("robot"))
+	g.Expect(up.Password).To(Equal("token-value"))
+	g.Expect(up.RegistryToken).To(BeEmpty())
+	dec, err := base64.StdEncoding.DecodeString(up.Auth)
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(string(dec)).To(Equal(registryauth.Username + ":token-value"))
+	g.Expect(string(dec)).To(Equal("robot:token-value"))
+
+	// Token host => registrytoken only, no username/password/auth.
+	tok := parsed.Auths["token.example.com"]
+	g.Expect(tok.RegistryToken).To(Equal("bearer-token"))
+	g.Expect(tok.Auth).To(BeEmpty())
+	g.Expect(tok.Username).To(BeEmpty())
+	g.Expect(tok.Password).To(BeEmpty())
 }
 
 func TestApplySecret_CreateThenReplace(t *testing.T) {
@@ -47,14 +57,14 @@ func TestApplySecret_CreateThenReplace(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewClientset()
 
-	s1, err := buildDockerConfigSecret("regcreds", "flux-system", map[string]registryauth.HostAuth{"a.example": {Username: registryauth.Username, Password: "v1"}})
+	s1, err := buildDockerConfigSecret("regcreds", "flux-system", map[string]registryauth.HostAuth{"a.example": {Username: "robot", Password: "v1"}})
 	g.Expect(err).ToNot(HaveOccurred())
 	created, err := applySecret(ctx, client, s1)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(created).To(BeTrue())
 
 	// Second apply with new data replaces the existing secret.
-	s2, err := buildDockerConfigSecret("regcreds", "flux-system", map[string]registryauth.HostAuth{"a.example": {Username: registryauth.Username, Password: "v2"}})
+	s2, err := buildDockerConfigSecret("regcreds", "flux-system", map[string]registryauth.HostAuth{"a.example": {Username: "robot", Password: "v2"}})
 	g.Expect(err).ToNot(HaveOccurred())
 	created, err = applySecret(ctx, client, s2)
 	g.Expect(err).ToNot(HaveOccurred())

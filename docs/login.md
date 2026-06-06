@@ -29,11 +29,19 @@ exactly like `docker login`:
   plaintext fallback `docker login` uses when no helper is available).
 
 The config location follows Docker's own discovery (`--docker-config`, else
-`$DOCKER_CONFIG`, else `~/.docker`). The stored username is a placeholder
-(`flux-mirror`) — the identity is carried entirely by the credential.
+`$DOCKER_CONFIG`, else `~/.docker`).
+
+What gets written depends on the host:
+- A cloud `provider` host, or a `credential` host with `username` set, writes
+  `username`/`password`/`auth`.
+- A `credential` host **without** `username` writes the bearer `registrytoken`
+  field instead. Because credential helpers only store username/secret pairs, a
+  `registrytoken` always goes to the config **file** (never a keychain helper).
+  See [`credential.username`](./config.md#bearer-token-vs-usernamepassword-credentialusername).
 
 Pass `--plaintext` to force the base64 `config.json` entry and bypass any
-configured or auto-detected credential helper.
+configured or auto-detected credential helper (applies to the username/password
+case; registrytoken is always file-based).
 
 ## What the credential is
 

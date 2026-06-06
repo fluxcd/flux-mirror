@@ -113,6 +113,13 @@ type AuthHost struct {
 // whose lifetime flux-mirror controls; it defaults to a short 60s. Every other
 // source's lifetime is fixed by an external issuer or is an opaque static
 // token, so Exp is rejected for them.
+//
+// Username changes how the credential is presented. When unset, the credential
+// is a bearer token: sync stamps it as Authorization: Bearer (no auth
+// challenge), and login/create write it to the Docker config's registrytoken
+// field. When set, the credential becomes the password of a username/password
+// pair: sync goes through the standard registry auth challenge (like the cloud
+// providers), and login/create write username/password/auth.
 type AuthCredential struct {
 	Provider string `json:"provider,omitempty"`
 	FromEnv  string `json:"fromEnv,omitempty"`
@@ -122,8 +129,9 @@ type AuthCredential struct {
 	Iss string `json:"iss,omitempty"`
 	Sub string `json:"sub,omitempty"`
 
-	Aud string           `json:"aud,omitempty"`
-	Exp *metav1.Duration `json:"exp,omitempty"`
+	Aud      string           `json:"aud,omitempty"`
+	Exp      *metav1.Duration `json:"exp,omitempty"`
+	Username string           `json:"username,omitempty"`
 }
 
 // EffectiveExp returns the jwkPath JWT lifetime with the documented default

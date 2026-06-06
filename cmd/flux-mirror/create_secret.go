@@ -118,12 +118,15 @@ func createSecretCmdRun(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// dockerConfigEntry is one registry's credentials in a dockerconfigjson, base64
-// auth and all, matching what 'kubectl create secret docker-registry' writes.
+// dockerConfigEntry is one registry's credentials in a dockerconfigjson. A
+// username/password pair (with the base64 auth) matches what 'kubectl create
+// secret docker-registry' writes; registrytoken is the non-standard bearer-token
+// field understood by go-containerregistry (crane, Flux).
 type dockerConfigEntry struct {
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
-	Auth     string `json:"auth,omitempty"`
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	Auth          string `json:"auth,omitempty"`
+	RegistryToken string `json:"registrytoken,omitempty"`
 }
 
 // buildDockerConfigSecret assembles a kubernetes.io/dockerconfigjson Secret from
@@ -131,6 +134,10 @@ type dockerConfigEntry struct {
 func buildDockerConfigSecret(name, namespace string, creds map[string]registryauth.HostAuth) (*corev1.Secret, error) {
 	auths := make(map[string]dockerConfigEntry, len(creds))
 	for host, ha := range creds {
+		if ha.RegistryToken != "" {
+			auths[host] = dockerConfigEntry{RegistryToken: ha.RegistryToken}
+			continue
+		}
 		auths[host] = dockerConfigEntry{
 			Username: ha.Username,
 			Password: ha.Password,
