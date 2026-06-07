@@ -48,8 +48,9 @@ CronJob. Pass --create to instead fail if the Secret already exists, matching
 'kubectl create secret docker-registry'.
 
 By default every host in the config is included; restrict with one or more
---host flags. The config is read from --config (default ~/.flux-mirror/config.yaml,
-or '-' for stdin). The cluster, namespace, and credentials are resolved from the
+--host flags. The config is read from --config, else $FLUX_MIRROR_CONFIG,
+else a path derived from the executable location ('-' reads the config from
+stdin). The cluster, namespace, and credentials are resolved from the
 standard kubectl flags and env vars, working both with a local kubeconfig and
 in-cluster.`,
 	Example: `  # Upsert a Secret for all hosts in the default config, in the current namespace

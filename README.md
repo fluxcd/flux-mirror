@@ -150,7 +150,7 @@ flux-mirror sync flux-mirror.yaml --no-progress --drift-exit-code=0
 For downstream tooling, emit a structured report:
 
 ```shell
-flux-mirror sync flux-mirror.yaml -o json | jq '.entries[].outcomes'
+flux-mirror sync flux-mirror.yaml -o json | jq '.report.results[].tags'
 ```
 
 ### GitHub Actions
