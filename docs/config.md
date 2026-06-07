@@ -134,7 +134,7 @@ exclusive with `credential`.
 
 | Source     | Behavior                                                                                                                                                                                                  |
 |------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `provider` | Mints a per-request credential for `aud`. `github`/`forgejo` use the Actions endpoint (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`); `gcp` uses Google Application Default Credentials (GKE/GCE metadata server, service account key, workload identity federation); `azure` uses the default Azure credential chain (AKS/managed identity, workload identity federation, environment credentials) and requests the `<aud>/.default` scope. `aws` is not OIDC: it signs an `sts:GetCallerIdentity` request with the ambient role credentials (IMDS, env, ...) and wraps it in a JWT-shaped envelope, with `aud` sent as a signed `X-Audience` header pinning the target registry. The registry verifies it by replaying the signed request to AWS STS and reading the caller's account/ARN — so the destination must understand this scheme (a generic OIDC registry will not). The envelope is tagged with the JOSE header `{"alg":"none","typ":"aws-sigv4-getcalleridentity"}` so the registry can route it away from JWKS validation; it must derive identity only from the STS response, never from the envelope's own claims. `jwt-svid` fetches a JWT-SVID for `aud` from the ambient SPIFFE Workload API (`SPIFFE_ENDPOINT_SOCKET`); it is the HTTP-layer counterpart to the transport-layer SPIFFE X.509-SVID mTLS under [`tls`](#tls), and the two are independent. Cached and refreshed on demand. |
+| `provider` | Mints a fresh, per-request token for `aud` using the named provider's ambient credentials, cached and refreshed on demand. One of `github`, `forgejo`, `gcp`, `azure`, `aws`, or `jwt-svid` — see [Token providers](#token-providers) for what each uses. |
 | `fromEnv`  | Sends the JWT read from the named environment variable as-is (e.g. a GitLab CI `id_token`). Errors at runtime if the variable is unset or empty.                                                          |
 | `fromPath` | Sends the JWT read from the file at the path, with surrounding whitespace trimmed. The file is re-read on every request.                                                                                   |
 | `jwkPath`  | Signs a fresh JWT with the private Ed25519/ECDSA key in the JWK file at this path. By default each request gets a new 60-second token; set `exp` to issue longer-lived tokens (then cached and reminted at half-life). The file may be a bare JWK or a JWK set (`{"keys":[...]}`) containing exactly one key. The key id is set in the `kid` header. Generate a key pair with [`flux-mirror keygen`](./keygen.md). |
@@ -145,6 +145,32 @@ exclusive with `credential`.
 > symlinks cannot escape it — a config can only reference files under its own
 > directory tree. When the config is read from stdin (`-f -`), the process working
 > directory is used as the confinement root instead.
+
+### Token providers
+
+When `credential.provider` is set, the token is minted from the provider's ambient
+credentials for the audience (`aud`, defaulting to the host), then cached and
+refreshed on demand. Each provider obtains it differently — consult the linked
+platform docs for setup:
+
+- `github`, `forgejo` — request an OIDC ID token from the CI Actions endpoint
+  (`ACTIONS_ID_TOKEN_REQUEST_URL` / `ACTIONS_ID_TOKEN_REQUEST_TOKEN`).
+- `gcp` — Google Application Default Credentials (GKE/GCE metadata server,
+  service account key, or workload identity federation).
+- `azure` — the default Azure credential chain (AKS/managed identity, workload
+  identity federation, environment credentials), requesting the `<aud>/.default`
+  scope.
+- `aws` — not an OIDC token. It signs an `sts:GetCallerIdentity` request with the
+  ambient role credentials (IMDS, environment, ...) and wraps it in a JWT-shaped
+  envelope; `aud` is carried as a signed `X-Audience` header that pins the target
+  registry. The registry verifies the caller by replaying the signed request to
+  AWS STS, so the destination must understand this scheme — a generic OIDC
+  registry will not. The envelope uses the JOSE header
+  `{"alg":"none","typ":"aws-sigv4-getcalleridentity"}` so the registry routes it
+  away from JWKS validation and derives identity only from the STS response.
+- `jwt-svid` — fetches a JWT-SVID for `aud` from the SPIFFE Workload API
+  (`SPIFFE_ENDPOINT_SOCKET`). This is the HTTP-layer counterpart to the
+  transport-layer SPIFFE X.509-SVID mTLS under [`tls`](#tls).
 
 ### Fields
 
