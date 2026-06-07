@@ -151,8 +151,9 @@ but is not allowed with `provider`. At least one of `credential`, `provider`, or
 | `host`     | string |         | Registry host to authenticate. Required and unique across `hosts`.                           |
 | `provider` (host) | string |  | Cloud registry provider, one of `ecr`, `acr`, `gar`. Mutually exclusive with `credential`. See [Registry providers](#registry-providers). |
 | `credential.provider` | string |  | Token provider, one of `github`, `forgejo`, `gcp`, `azure`, `aws`, `jwt-svid`. Mutually exclusive with `fromEnv`, `fromPath`, and `jwkPath`. |
-| `fromEnv`  | string |         | Environment variable holding a static JWT. Mutually exclusive with `provider` and `jwkPath`. |
-| `jwkPath`  | string |         | Path to a private JSON Web Key, as a bare JWK or a single-key JWK set. Mutually exclusive with `provider` and `fromEnv`. |
+| `fromEnv`  | string |         | Environment variable holding a static JWT. Mutually exclusive with `provider`, `fromPath`, and `jwkPath`. |
+| `fromPath` | string |         | Path to a file holding a static JWT. Mutually exclusive with `provider`, `fromEnv`, and `jwkPath`. |
+| `jwkPath`  | string |         | Path to a private JSON Web Key, as a bare JWK or a single-key JWK set. Mutually exclusive with `provider`, `fromEnv`, and `fromPath`. |
 | `iss`      | string |         | Token issuer. Required with `jwkPath`; not allowed otherwise.                                |
 | `sub`      | string |         | Token subject. Required with `jwkPath`; not allowed otherwise.                               |
 | `aud`      | string | `host`  | Token audience. Allowed only with `jwkPath` or `provider`; defaults to `host`.               |
