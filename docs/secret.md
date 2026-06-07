@@ -9,10 +9,10 @@ selected host and write them into a Kubernetes Secret of type
 `kubernetes.io/dockerconfigjson` — the same shape `kubectl create secret
 docker-registry` produces.
 
-By default the Secret is **upserted**: if one with the same name already exists it
-is **replaced** in place. This is the right semantic for the command's main use
+By default the Secret is upserted: if one with the same name already exists it
+is replaced in place. This is the right semantic for the command's main use
 case — rotating short-lived pull Secrets from a `CronJob`. Pass `--create` to
-instead **fail** if the Secret already exists, matching `kubectl create secret
+instead fail if the Secret already exists, matching `kubectl create secret
 docker-registry`.
 
 These are the *same* credentials `flux-mirror sync` and `flux-mirror login`
@@ -29,7 +29,7 @@ configured identity.
 | Flag             | Description                                                                                |
 |------------------|-------------------------------------------------------------------------------------------|
 | `-f`, `--config` | Path to the flux-mirror config, or `-` for stdin. Defaults to `$FLUX_MIRROR_CONFIG`, else a path derived from the executable location. |
-| `--host`         | Registry host from the config to include. Repeatable; defaults to **all** hosts.          |
+| `--host`         | Registry host from the config to include. Repeatable; defaults to all hosts.          |
 | `--create`       | Fail if the Secret already exists instead of replacing it (like `kubectl create secret docker-registry`). |
 
 In addition, the command accepts the standard `kubectl` connection flags and
@@ -41,7 +41,7 @@ in-cluster service-account namespace).
 
 ## Behavior
 
-- Works both **locally** (kubeconfig) and **in-cluster** (falls back to the
+- Works both locally (kubeconfig) and in-cluster (falls back to the
   in-cluster config and service-account namespace).
 - By default the Secret is upserted (created, or replaced if it exists). With
   `--create`, an existing Secret of the same name is an error.
@@ -49,7 +49,7 @@ in-cluster service-account namespace).
   not present in the config is an error.
 - The Secret's `.dockerconfigjson` holds one `auths` entry per host. A cloud
   `provider` host, and a `credential` host with `username` set, write
-  `username`/`password`/`auth`. A `credential` host **without** `username` writes
+  `username`/`password`/`auth`. A `credential` host without `username` writes
   the bearer `registrytoken` field (understood by go-containerregistry/Flux, not
   by `kubelet`). See [`credential.username`](./config.md#bearer-token-vs-usernamepassword-credentialusername).
 - Credentials are short-lived (provider tokens, freshly signed JWTs). Re-run the

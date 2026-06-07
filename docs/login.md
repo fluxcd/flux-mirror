@@ -12,7 +12,7 @@ flux-mirror login [flags]
 | Flag              | Description                                                                                          |
 |-------------------|-----------------------------------------------------------------------------------------------------|
 | `-f`, `--config`  | Path to the flux-mirror config, or `-` for stdin. Defaults to `$FLUX_MIRROR_CONFIG`, else a path derived from the executable location. |
-| `--host`          | Registry host from the config to log in. Repeatable; defaults to **all** hosts.                     |
+| `--host`          | Registry host from the config to log in. Repeatable; defaults to all hosts.                     |
 | `--docker-config` | Docker config directory, like `docker --config` (default `$DOCKER_CONFIG`, else `~/.docker`).       |
 | `--plaintext`     | Store the credential base64-encoded in `config.json`, bypassing any OS keychain helper.             |
 
@@ -24,7 +24,7 @@ exactly like `docker login`:
 - If a credential helper is configured (`credsStore`/`credHelpers`) — or, on a
   fresh config, one is auto-detected for the platform (`docker-credential-*` on
   `PATH`, e.g. `osxkeychain`, `secretservice`, `pass`, `wincred`) — the secret
-  goes to the **OS keychain**, not the config file.
+  goes to the OS keychain, not the config file.
 - Otherwise it falls back to a base64-encoded entry in `config.json` (the same
   plaintext fallback `docker login` uses when no helper is available).
 
@@ -34,9 +34,9 @@ The config location follows Docker's own discovery (`--docker-config`, else
 What gets written depends on the host:
 - A cloud `provider` host, or a `credential` host with `username` set, writes
   `username`/`password`/`auth`.
-- A `credential` host **without** `username` writes the bearer `registrytoken`
+- A `credential` host without `username` writes the bearer `registrytoken`
   field instead. Because credential helpers only store username/secret pairs, a
-  `registrytoken` always goes to the config **file** (never a keychain helper).
+  `registrytoken` always goes to the config file (never a keychain helper).
   See [`credential.username`](./config.md#bearer-token-vs-usernamepassword-credentialusername).
 
 Pass `--plaintext` to force the base64 `config.json` entry and bypass any
@@ -52,7 +52,7 @@ Exactly one source is set per host (enforced by config validation):
 | `provider` | A freshly minted token for the provider (`github`/`forgejo`/`gcp`/`azure`, the `aws` SigV4 envelope, or a `jwt-svid` from the SPIFFE Workload API). Carries its own expiry. |
 | `fromEnv`  | The value of the named environment variable, as-is.                                            |
 | `fromPath` | The contents of the file at the path, with surrounding whitespace trimmed.                     |
-| `jwkPath`  | A freshly signed JWT (`iss`/`sub`/`aud` from the config), valid for the credential's `exp` (default **60s**). Set `exp` in the config for a longer-lived login token. |
+| `jwkPath`  | A freshly signed JWT (`iss`/`sub`/`aud` from the config), valid for the credential's `exp` (default 60s). Set `exp` in the config for a longer-lived login token. |
 
 ## Hosts-only config
 

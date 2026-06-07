@@ -48,7 +48,7 @@ accepts a `hosts`-only config.
 
 The optional `hosts` section attaches a credential to specific OCI registry
 hosts. On each request to a listed host, the credential is sent as the
-`Authorization: Bearer <credential>` value. Requests to hosts that are **not**
+`Authorization: Bearer <credential>` value. Requests to hosts that are not
 listed use the ambient keychain auth (Docker config `~/.docker/config.json` /
 `$DOCKER_CONFIG` and any configured credential helpers) instead.
 
@@ -63,10 +63,10 @@ way, and the result is undefined. Pick one mechanism per host.
 > their credentials always come from the Helm repositories config
 > (`repositories.yaml` / `$HELM_REPOSITORY_CONFIG`). See [Source scheme](#source-scheme).
 
-Each host configures **either** a `credential` (a JWT-based token, below) **or** a
+Each host configures either a `credential` (a JWT-based token, below) or a
 cloud registry `provider` — the two are mutually exclusive. A `credential` host
 (or a host with neither) may also set [`tls`](#tls) for transport-layer TLS/mTLS;
-`tls` is **not** allowed with `provider` (a cloud registry is managed and its
+`tls` is not allowed with `provider` (a cloud registry is managed and its
 transport is not customized). At least one of the three is required.
 
 ```yaml
@@ -102,14 +102,14 @@ hosts:
 
 `username` controls how the resolved credential is presented to the registry:
 
-- **Unset (default)** — the credential is a **bearer token**. `sync` sends it as
+- **Unset (default)** — the credential is a bearer token. `sync` sends it as
   `Authorization: Bearer` on every request (no auth challenge), and
   `login`/`secret` write it to the Docker config's `registrytoken` field.
   This suits registries that validate an OIDC token natively. `registrytoken` is
-  non-standard but understood by go-containerregistry (crane, Flux); it is **not**
+  non-standard but understood by go-containerregistry (crane, Flux); it is not
   understood by `kubelet` image pulls.
-- **Set** — the credential becomes the **password** of a `username`/`password`
-  pair. `sync` goes through the **standard registry auth challenge** (like the
+- **Set** — the credential becomes the password of a `username`/`password`
+  pair. `sync` goes through the standard registry auth challenge (like the
   cloud providers — credentials are exchanged at the token endpoint), and
   `login`/`secret` write `username`/`password`/`auth`.
 
@@ -134,13 +134,13 @@ exclusive with `credential`.
 
 | Source     | Behavior                                                                                                                                                                                                  |
 |------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `provider` | Mints a per-request credential for `aud`. `github`/`forgejo` use the Actions endpoint (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`); `gcp` uses Google Application Default Credentials (GKE/GCE metadata server, service account key, workload identity federation); `azure` uses the default Azure credential chain (AKS/managed identity, workload identity federation, environment credentials) and requests the `<aud>/.default` scope. `aws` is **not OIDC**: it signs an `sts:GetCallerIdentity` request with the ambient role credentials (IMDS, env, ...) and wraps it in a JWT-shaped envelope, with `aud` sent as a signed `X-Audience` header pinning the target registry. The registry verifies it by replaying the signed request to AWS STS and reading the caller's account/ARN — so the destination must understand this scheme (a generic OIDC registry will not). The envelope is tagged with the JOSE header `{"alg":"none","typ":"aws-sigv4-getcalleridentity"}` so the registry can route it away from JWKS validation; it must derive identity only from the STS response, never from the envelope's own claims. `jwt-svid` fetches a JWT-SVID for `aud` from the ambient SPIFFE Workload API (`SPIFFE_ENDPOINT_SOCKET`); it is the HTTP-layer counterpart to the transport-layer SPIFFE X.509-SVID mTLS under [`tls`](#tls), and the two are independent. Cached and refreshed on demand. |
+| `provider` | Mints a per-request credential for `aud`. `github`/`forgejo` use the Actions endpoint (`ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN`); `gcp` uses Google Application Default Credentials (GKE/GCE metadata server, service account key, workload identity federation); `azure` uses the default Azure credential chain (AKS/managed identity, workload identity federation, environment credentials) and requests the `<aud>/.default` scope. `aws` is not OIDC: it signs an `sts:GetCallerIdentity` request with the ambient role credentials (IMDS, env, ...) and wraps it in a JWT-shaped envelope, with `aud` sent as a signed `X-Audience` header pinning the target registry. The registry verifies it by replaying the signed request to AWS STS and reading the caller's account/ARN — so the destination must understand this scheme (a generic OIDC registry will not). The envelope is tagged with the JOSE header `{"alg":"none","typ":"aws-sigv4-getcalleridentity"}` so the registry can route it away from JWKS validation; it must derive identity only from the STS response, never from the envelope's own claims. `jwt-svid` fetches a JWT-SVID for `aud` from the ambient SPIFFE Workload API (`SPIFFE_ENDPOINT_SOCKET`); it is the HTTP-layer counterpart to the transport-layer SPIFFE X.509-SVID mTLS under [`tls`](#tls), and the two are independent. Cached and refreshed on demand. |
 | `fromEnv`  | Sends the JWT read from the named environment variable as-is (e.g. a GitLab CI `id_token`). Errors at runtime if the variable is unset or empty.                                                          |
 | `fromPath` | Sends the JWT read from the file at the path, with surrounding whitespace trimmed. The file is re-read on every request.                                                                                   |
-| `jwkPath`  | Signs a fresh JWT with the private Ed25519/ECDSA key in the JWK file at this path. By default each request gets a new **60-second** token; set `exp` to issue longer-lived tokens (then cached and reminted at half-life). The file may be a bare JWK or a JWK set (`{"keys":[...]}`) containing exactly one key. The key id is set in the `kid` header. Generate a key pair with [`flux-mirror keygen`](./keygen.md). |
+| `jwkPath`  | Signs a fresh JWT with the private Ed25519/ECDSA key in the JWK file at this path. By default each request gets a new 60-second token; set `exp` to issue longer-lived tokens (then cached and reminted at half-life). The file may be a bare JWK or a JWK set (`{"keys":[...]}`) containing exactly one key. The key id is set in the `kid` header. Generate a key pair with [`flux-mirror keygen`](./keygen.md). |
 
 > Path values (`fromPath`, `jwkPath`, and the `tls` path fields) are resolved
-> **within the config file's directory** (via `SecureJoin`): relative paths,
+> within the config file's directory (via `SecureJoin`): relative paths,
 > absolute paths, and `../` segments are all confined to that directory, and
 > symlinks cannot escape it — a config can only reference files under its own
 > directory tree. When the config is read from stdin (`-f -`), the process working
@@ -171,7 +171,7 @@ but is not allowed with `provider`. At least one of `credential`, `provider`, or
 ### TLS
 
 `tls` configures the transport-layer TLS for a host's registry requests, separate
-from the HTTP-layer `credential` above — a host may set both. It is **not** allowed
+from the HTTP-layer `credential` above — a host may set both. It is not allowed
 on a `provider` host (a cloud registry is managed and its transport is not
 customized). It is
 applied by `sync` (which connects to the registry); the `login` and `secret`
@@ -179,16 +179,16 @@ commands do not open registry connections and ignore it.
 
 `tls` has two independent halves — `serverAuth` (how the registry's server
 certificate is verified) and `clientAuth` (the client certificate presented for
-mTLS) — and **at least one** must be set. Each half independently chooses SPIFFE
+mTLS) — and at least one must be set. Each half independently chooses SPIFFE
 or non-SPIFFE, so SPIFFE can authenticate the client while a normal/custom CA
 verifies the server, or vice versa.
 
 - **`serverAuth`** — exactly one of `fromPath`/`fromEnv`/`fromBytes` (a custom CA
-  bundle, possibly multiple concatenated PEM certs) **or** `spiffe` (verify the
+  bundle, possibly multiple concatenated PEM certs) or `spiffe` (verify the
   server's X.509-SVID against the SPIFFE trust bundle). When `serverAuth` is
   omitted, the system trust pool is used.
 - **`clientAuth`** — exactly one of `provider: x509-svid` (present a SPIFFE
-  X.509-SVID from the Workload API) **or** the static `certificate` + `key` pair.
+  X.509-SVID from the Workload API) or the static `certificate` + `key` pair.
 
 ```yaml
 hosts:

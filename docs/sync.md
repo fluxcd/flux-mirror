@@ -67,7 +67,7 @@ matching HTTP/S repository credentials automatically.
 | `--dry-run`                     | `false` | Run the plan and comparison pipeline without performing any writes. Reported as `would-copy` / `would-overwrite` in the output.                    |
 | `--verbose`                     | `false` | Emit a structured log line per operation (entry started, mirroring tag, tag done, entry summary, sync complete) on stderr. Suppresses the spinner. |
 | `--no-progress`                 | `false` | Disable the live progress spinner. Per-job lines and the Summary still print.                                                                      |
-| `--insecure`                    | `false` | Allow plaintext HTTP and skip TLS verification. **Test/dev only.**                                                                                 |
+| `--insecure`                    | `false` | Allow plaintext HTTP and skip TLS verification. Test/dev only.                                                                                 |
 | `--timeout DURATION`            | `5m`    | Per-job total budget covering all retry attempts.                                                                                                  |
 
 ## Output
