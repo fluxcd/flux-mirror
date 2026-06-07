@@ -108,3 +108,12 @@ func TestApplySecret_CreateOnlyConflict(t *testing.T) {
 	g.Expect(json.Unmarshal(got.Data[corev1.DockerConfigJsonKey], &parsed)).To(Succeed())
 	g.Expect(parsed.Auths["a.example"].Password).To(Equal("v1"))
 }
+
+func TestSecretHelp_UsesSharedConfigDefault(t *testing.T) {
+	g := NewWithT(t)
+
+	out, err := executeCommand([]string{"secret", "--help"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(out).To(ContainSubstring("else $FLUX_MIRROR_CONFIG"))
+	g.Expect(out).ToNot(ContainSubstring("~/.flux-mirror/config.yaml"))
+}

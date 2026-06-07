@@ -52,6 +52,7 @@ func resetCmdArgs() {
 	versionArgs = versionFlags{output: "text"}
 	syncArgs = syncFlags{output: "text", concurrency: 4, retries: 3, driftExitCode: syncDefaultDriftExitCode}
 	loginArgs = loginFlags{}
+	secretArgs = secretFlags{}
 
 	// pflag.Flag.Changed persists across Execute calls on the shared rootCmd,
 	// which breaks MarkFlagRequired validation in subsequent tests. Clear it
