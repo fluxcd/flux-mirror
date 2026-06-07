@@ -37,7 +37,10 @@ type tlsDispatchTransport struct {
 
 // RoundTrip implements http.RoundTripper.
 func (t tlsDispatchTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if rt, ok := t.byHost[req.URL.Hostname()]; ok {
+	// Match on the full host (including any port) so a host configured as
+	// "registry.example.com:8443" keeps its TLS config. This mirrors the cijwt
+	// transport, which also keys on req.URL.Host.
+	if rt, ok := t.byHost[req.URL.Host]; ok {
 		return rt.RoundTrip(req)
 	}
 	return t.inner.RoundTrip(req)

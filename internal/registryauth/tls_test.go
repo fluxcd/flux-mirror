@@ -112,7 +112,7 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 	srv.StartTLS()
 	defer srv.Close()
 
-	host := mustHostname(t, srv.URL) // "127.0.0.1"
+	host := mustHost(t, srv.URL) // e.g. "127.0.0.1:NNNNN" (with port)
 
 	t.Run("serverAuth + clientAuth succeeds", func(t *testing.T) {
 		g := NewWithT(t)
@@ -168,12 +168,14 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 	})
 }
 
-func mustHostname(t *testing.T, rawURL string) string {
+// mustHost returns the URL's host including any port — the form a config `host`
+// takes and that the TLS dispatch matches on.
+func mustHost(t *testing.T, rawURL string) string {
 	t.Helper()
 	g := NewWithT(t)
 	u, err := url.Parse(rawURL)
 	g.Expect(err).ToNot(HaveOccurred())
-	return u.Hostname()
+	return u.Host
 }
 
 func mustGet(t *testing.T, rawURL string) *http.Request {

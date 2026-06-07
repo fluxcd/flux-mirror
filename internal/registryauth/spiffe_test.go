@@ -151,7 +151,7 @@ func TestSPIFFE_MTLSEndToEnd(t *testing.T) {
 	}
 	srv.StartTLS()
 	defer srv.Close()
-	host := mustHostname(t, srv.URL)
+	host := mustHost(t, srv.URL)
 
 	cases := []struct {
 		name   string
@@ -209,7 +209,7 @@ func TestSPIFFE_ClientOnly(t *testing.T) {
 	}
 	srv.StartTLS()
 	defer srv.Close()
-	host := mustHostname(t, srv.URL)
+	host := mustHost(t, srv.URL)
 
 	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []config.AuthHost{{
 		Host: host,
