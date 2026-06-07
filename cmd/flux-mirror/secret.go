@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	corev1 "k8s.io/api/core/v1"
@@ -47,12 +48,11 @@ replaced in place. This is the right semantic for rotating pull Secrets from a
 CronJob. Pass --create to instead fail if the Secret already exists, matching
 'kubectl create secret docker-registry'.
 
-By default every host in the config is included; restrict with one or more
---host flags. The config is read from --config, else $FLUX_MIRROR_CONFIG,
-else a path derived from the executable location ('-' reads the config from
-stdin). The cluster, namespace, and credentials are resolved from the
-standard kubectl flags and env vars, working both with a local kubeconfig and
-in-cluster.`,
+--host flags. The config is read from --config, else $FLUX_MIRROR_CONFIG, else
+{{CONFIG_DEFAULT}}
+('-' reads the config from stdin). The cluster, namespace, and credentials are
+resolved from the standard kubectl flags and env vars, working both with a local
+kubeconfig and in-cluster.`,
 	Example: `  # Upsert a Secret for all hosts in the default config, in the current namespace
   flux-mirror secret regcreds
 
@@ -183,6 +183,7 @@ func applySecret(ctx context.Context, client kubernetes.Interface, secret *corev
 }
 
 func init() {
+	secretCmd.Long = strings.ReplaceAll(secretCmd.Long, configDefaultPlaceholder, defaultConfigDescription())
 	secretCmd.Flags().StringVarP(&secretArgs.config, "config", "f", "", configFlagUsage())
 	secretCmd.Flags().StringArrayVar(&secretArgs.hosts, "host", nil,
 		"Registry host from the config to include; repeatable, defaults to all hosts")

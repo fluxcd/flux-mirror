@@ -28,7 +28,7 @@ configured identity.
 
 | Flag             | Description                                                                                |
 |------------------|-------------------------------------------------------------------------------------------|
-| `-f`, `--config` | Path to the flux-mirror config, or `-` for stdin. Defaults to `$FLUX_MIRROR_CONFIG`, else a path next to the binary (`<binary>.config`). |
+| `-f`, `--config` | Path to the flux-mirror config, or `-` for stdin. Defaults to `$FLUX_MIRROR_CONFIG`, else a path derived from the executable location. |
 | `--host`         | Registry host from the config to include. Repeatable; defaults to **all** hosts.          |
 | `--create`       | Fail if the Secret already exists instead of replacing it (like `kubectl create secret docker-registry`). |
 
