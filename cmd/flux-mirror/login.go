@@ -92,6 +92,12 @@ func loginCmdRun(cmd *cobra.Command, _ []string) error {
 	}
 
 	for _, h := range hosts {
+		// A TLS-only host (only transport settings, no credential) has nothing to
+		// store; skip it.
+		if !registryauth.HasCredential(h) {
+			cmd.Printf("• skipping %s: no credential configured (TLS-only host)\n", h.Host)
+			continue
+		}
 		ha, err := registryauth.ResolveHostAuth(cmd.Context(), h)
 		if err != nil {
 			return fmt.Errorf("host %q: %w", h.Host, err)

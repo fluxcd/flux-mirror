@@ -99,6 +99,12 @@ func secretCmdRun(cmd *cobra.Command, args []string) error {
 
 	creds := make(map[string]registryauth.HostAuth, len(hosts))
 	for _, h := range hosts {
+		// A TLS-only host (only transport settings, no credential) has nothing to
+		// put in the Secret; skip it.
+		if !registryauth.HasCredential(h) {
+			cmd.Printf("• skipping %s: no credential configured (TLS-only host)\n", h.Host)
+			continue
+		}
 		ha, err := registryauth.ResolveHostAuth(cmd.Context(), h)
 		if err != nil {
 			return fmt.Errorf("host %q: %w", h.Host, err)

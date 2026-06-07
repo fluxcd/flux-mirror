@@ -51,13 +51,26 @@ func SelectAuthHosts(cfg *config.Config, filter []string) ([]config.AuthHost, er
 	return out, nil
 }
 
+// HasCredential reports whether the host yields a registry credential — i.e. it
+// sets a provider or a credential. A TLS-only host (only tls configured) does
+// not, so the login/secret commands skip it.
+func HasCredential(h config.AuthHost) bool {
+	return h.Provider != "" || h.Credential != nil
+}
+
 // ResolveHostAuth resolves the credential for any auth host:
 //   - a provider host yields the cloud registry username/password;
 //   - a credential host with a username yields that username and the
 //     minted/static credential as the password;
 //   - a credential host without a username yields the credential as a bearer
 //     RegistryToken.
+//
+// It errors on a host that configures neither (a TLS-only host); callers that
+// iterate all hosts should skip those via HasCredential first.
 func ResolveHostAuth(ctx context.Context, h config.AuthHost) (HostAuth, error) {
+	if !HasCredential(h) {
+		return HostAuth{}, fmt.Errorf("host %q has no credential or provider configured", h.Host)
+	}
 	if h.Provider != "" {
 		a, err := providerAuthenticator(ctx, h)
 		if err != nil {

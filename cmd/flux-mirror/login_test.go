@@ -349,3 +349,24 @@ func TestLogin_FromEnvUnset(t *testing.T) {
 	_, err := executeCommand([]string{"login", "--config", cfg})
 	g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
 }
+
+func TestLogin_SkipsTLSOnlyHost(t *testing.T) {
+	g := NewWithT(t)
+	// A TLS-only host has no credential to store: login skips it without error
+	// (and without panicking).
+	src := `apiVersion: mirror.fluxcd.io/v1alpha1
+kind: Config
+hosts:
+  - host: tls.example.com
+    tls:
+      serverAuth:
+        fromBytes: dummy
+`
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
+	dockerDir := t.TempDir()
+
+	out, err := executeCommand([]string{"login", "--config", path, "--docker-config", dockerDir, "--plaintext"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(out).To(ContainSubstring("skipping tls.example.com"))
+}

@@ -95,3 +95,21 @@ func TestPkgAuthProviderName(t *testing.T) {
 	_, err := pkgAuthProviderName("dockerhub")
 	g.Expect(err).To(MatchError(ContainSubstring("unknown registry provider")))
 }
+
+func TestHasCredentialAndTLSOnly(t *testing.T) {
+	g := NewWithT(t)
+
+	tlsOnly := config.AuthHost{Host: "tls.example", TLS: &config.TLS{
+		ServerAuth: &config.TLSServerAuth{FromBytes: "x"},
+	}}
+	withCred := config.AuthHost{Host: "c.example", Credential: &config.AuthCredential{FromEnv: "X"}}
+	withProvider := config.AuthHost{Host: "p.example", Provider: config.RegistryProviderECR}
+
+	g.Expect(HasCredential(tlsOnly)).To(BeFalse())
+	g.Expect(HasCredential(withCred)).To(BeTrue())
+	g.Expect(HasCredential(withProvider)).To(BeTrue())
+
+	// A TLS-only host returns a clear error instead of panicking.
+	_, err := ResolveHostAuth(context.Background(), tlsOnly)
+	g.Expect(err).To(MatchError(ContainSubstring("no credential or provider configured")))
+}
