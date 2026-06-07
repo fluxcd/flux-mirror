@@ -44,12 +44,10 @@ on upstream chart repositories.
   copy only what's missing or drifted.
 - **Drift gating** — destination drift (different content under the same tag) is reported
   as a distinct outcome and exit code, so audit pipelines can differentiate "out of date" from "mutated tags".
-- **Ambient auth** — OCI credentials come from `~/.docker/config.json` and the
-  configured credential helpers (ACR, ECR, GAR, etc.); Helm HTTP/S repository
-  credentials come from Helm's `repositories.yaml`. Running `helm repo add` and
-  `docker login` covers source and destination auth. Per-host JWT auth
-  (GitHub/Forgejo OIDC or signed JWKs) is also available via the config's `auth`
-  section — see [config docs](docs/config.md#auth).
+- **Registry auth** — OCI auth supports Docker config and credential helpers,
+  cloud workload identity for ECR/ACR/GAR, and per-host bearer credentials from
+  GitHub/Forgejo OIDC, GCP, Azure, AWS STS, env vars, files, or JWK-signed JWTs.
+  Helm HTTP/S credentials come from Helm's repositories config.
 - **Structured output** — `text` and `yaml`/`json` for downstream
   tooling, plus a verbose mode that streams every blob and manifest digest
   for diagnosing TLS, auth, or push failures.
@@ -181,14 +179,10 @@ jobs:
         uses: actions/checkout@v6
       - name: Setup Flux Mirror CLI
         uses: fluxcd/flux-mirror/actions/setup@main
-      - name: Login to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Sync Kubernetes SIGs Charts
         run: flux-mirror sync kubernetes-sigs.yaml --no-progress
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 
 ### Docker
@@ -213,14 +207,14 @@ destination registry credentials from a `Secret` created via
 
 ## Commands
 
-| Command                     | Description                                                      |
-|-----------------------------|------------------------------------------------------------------|
-| `flux-mirror sync [CONFIG]` | Mirror Helm charts and OCI artifacts described by a YAML config. |
-| `flux-mirror login`         | Store configured credentials in the Docker config (or OS keychain). |
+| Command                     | Description                                                                               |
+|-----------------------------|-------------------------------------------------------------------------------------------|
+| `flux-mirror sync [CONFIG]` | Mirror Helm charts and OCI artifacts described by a YAML config.                          |
+| `flux-mirror login`         | Store configured credentials in the Docker config (or OS keychain).                       |
 | `flux-mirror secret <name>` | Create/replace (upsert) a `dockerconfigjson` Kubernetes Secret with per-host credentials. |
-| `flux-mirror keygen`        | Generate an EdDSA JWK pair for JWK-based registry auth.          |
-| `flux-mirror version`       | Print the CLI version.                                           |
-| `flux-mirror completion`    | Generate shell completion for bash, fish, powershell and zsh.    |
+| `flux-mirror keygen`        | Generate an EdDSA JWK pair for JWK-based registry auth.                                   |
+| `flux-mirror version`       | Print the CLI version.                                                                    |
+| `flux-mirror completion`    | Generate shell completion for bash, fish, powershell and zsh.                             |
 
 Run `flux-mirror <command> --help` for the full flag list.
 

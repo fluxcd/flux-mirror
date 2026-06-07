@@ -6,6 +6,7 @@ package oci
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -27,6 +28,19 @@ const (
 	minBundleVersion              = "v0.3"
 	sigstoreBundleMediaTypePrefix = "application/vnd.dev.sigstore.bundle"
 )
+
+// VerificationInfo carries the metadata of a confirmed cosign signature, so
+// the report can record who signed it and when. Only Provider is guaranteed;
+// the rest is best-effort: Issuer/Identity are populated from the keyless
+// certificate identity, and IntegratedTime only when the bundle carries a
+// verified transparency-log timestamp (otherwise it is the zero time).
+type VerificationInfo struct {
+	Provider       string
+	Issuer         string
+	Identity       string
+	Digest         string
+	IntegratedTime time.Time
+}
 
 // SignatureTooNewError reports a valid signature that has not aged past the
 // configured minimum transparency-log integration age.
@@ -59,54 +73,59 @@ func NewVerifier(client *Client) *Verifier {
 	return &Verifier{client: client}
 }
 
-// Verify checks the cosign signature for ref against the configured OIDC identities.
-func (v *Verifier) Verify(ctx context.Context, ref string, cfg config.ArtifactVerification) error {
+// Verify checks the cosign signature for ref against the configured OIDC
+// identities. On success it returns the confirmed VerificationInfo (provider,
+// keyless identity/issuer, source digest, and the Tlog integrated time when
+// present). When the signature is valid but younger than cfg.MinAge it returns
+// both the info and a *SignatureTooNewError so the caller can record the
+// deferral with its metadata; any other failure returns (nil, err).
+func (v *Verifier) Verify(ctx context.Context, ref string, cfg config.ArtifactVerification) (*VerificationInfo, error) {
 	if strings.TrimSpace(cfg.Provider) != config.VerifyProviderCosign {
-		return fmt.Errorf("unsupported verification provider %q", cfg.Provider)
+		return nil, fmt.Errorf("unsupported verification provider %q", cfg.Provider)
 	}
 	if len(cfg.MatchOIDCIdentity) == 0 {
-		return fmt.Errorf("at least one OIDC identity matcher is required")
+		return nil, fmt.Errorf("at least one OIDC identity matcher is required")
 	}
 
 	ref = strings.TrimPrefix(ref, "oci://")
 	parsed, err := name.ParseReference(ref, v.client.staticNameOpts...)
 	if err != nil {
-		return fmt.Errorf("parse reference %q: %w", ref, err)
+		return nil, fmt.Errorf("parse reference %q: %w", ref, err)
 	}
 
 	opts := v.remoteOptions(ctx)
 	desc, err := remote.Get(parsed, opts...)
 	if err != nil {
-		return fmt.Errorf("fetch descriptor for %q: %w", ref, err)
+		return nil, fmt.Errorf("fetch descriptor for %q: %w", ref, err)
 	}
 
 	repo := parsed.Context()
 	digestRef := repo.Digest(desc.Digest.String())
 	idx, err := remote.Referrers(digestRef, opts...)
 	if err != nil {
-		return fmt.Errorf("list referrers for %s: %w", digestRef, err)
+		return nil, fmt.Errorf("list referrers for %s: %w", digestRef, err)
 	}
 	manifest, err := idx.IndexManifest()
 	if err != nil {
-		return fmt.Errorf("read referrers index for %s: %w", digestRef, err)
+		return nil, fmt.Errorf("read referrers index for %s: %w", digestRef, err)
 	}
 
 	bundleBytes, err := findSigstoreBundle(repo, manifest, opts...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var b bundle.Bundle
 	if err := b.UnmarshalJSON(bundleBytes); err != nil {
-		return fmt.Errorf("parse sigstore bundle: %w", err)
+		return nil, fmt.Errorf("parse sigstore bundle: %w", err)
 	}
 	if !b.MinVersion(minBundleVersion) {
-		return fmt.Errorf("unsupported sigstore bundle version: minimum %s required", minBundleVersion)
+		return nil, fmt.Errorf("unsupported sigstore bundle version: minimum %s required", minBundleVersion)
 	}
 
 	trustedRoot, err := v.getTrustedRoot()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sigVerifier, err := verify.NewVerifier(trustedRoot,
 		verify.WithSignedCertificateTimestamps(1),
@@ -114,16 +133,16 @@ func (v *Verifier) Verify(ctx context.Context, ref string, cfg config.ArtifactVe
 		verify.WithTransparencyLog(1),
 	)
 	if err != nil {
-		return fmt.Errorf("create signature verifier: %w", err)
+		return nil, fmt.Errorf("create signature verifier: %w", err)
 	}
 
 	identityOptions, err := certificateIdentityOptions(cfg.MatchOIDCIdentity)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	digestBytes, err := hex.DecodeString(desc.Digest.Hex)
 	if err != nil {
-		return fmt.Errorf("decode digest %s: %w", desc.Digest.String(), err)
+		return nil, fmt.Errorf("decode digest %s: %w", desc.Digest.String(), err)
 	}
 
 	policyOptions := append([]verify.PolicyOption(nil), identityOptions...)
@@ -133,17 +152,47 @@ func (v *Verifier) Verify(ctx context.Context, ref string, cfg config.ArtifactVe
 	)
 	result, err := sigVerifier.Verify(&b, policy)
 	if err != nil {
-		return fmt.Errorf("signature verification failed: %w", err)
+		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}
+
+	info := &VerificationInfo{
+		Provider: config.VerifyProviderCosign,
+		Digest:   desc.Digest.String(),
+	}
+	// Read the actual signed identity off the verified certificate summary, not
+	// result.VerifiedIdentity — the latter echoes the configured matcher (whose
+	// SAN is empty when a regex matcher is used and whose issuer is only the
+	// configured value), whereas the certificate summary carries the real SAN
+	// and the OIDC issuer extension recorded at signing time.
+	if result.Signature != nil && result.Signature.Certificate != nil {
+		cert := result.Signature.Certificate
+		info.Identity = cert.SubjectAlternativeName
+		info.Issuer = cert.Extensions.Issuer
+	}
+	// IntegratedTime is best-effort: present only when the bundle carries a
+	// verified Tlog timestamp. Left zero (omitted in the report) otherwise.
+	if t, ok := signatureIntegratedTime(result); ok {
+		info.IntegratedTime = t
+	}
+
+	// On a too-new signature, hand back both the metadata and the typed signal
+	// so the caller can record the deferral with its verification block; any
+	// other minAge error (no Tlog timestamp) is a hard failure.
 	if cfg.MinAge != nil && cfg.MinAge.Duration > 0 {
 		if err := enforceMinAge(result, cfg.MinAge.Duration, time.Now()); err != nil {
-			return err
+			var tooNew *SignatureTooNewError
+			if errors.As(err, &tooNew) {
+				return info, err
+			}
+			return nil, err
 		}
 	}
-	return nil
+	return info, nil
 }
 
-func enforceMinAge(result *verify.VerificationResult, minAge time.Duration, now time.Time) error {
+// signatureIntegratedTime returns the oldest verified transparency-log (Tlog)
+// integration timestamp in the result, and whether one was found.
+func signatureIntegratedTime(result *verify.VerificationResult) (time.Time, bool) {
 	var signatureTime time.Time
 	for _, ts := range result.VerifiedTimestamps {
 		if ts.Type != "Tlog" || ts.Timestamp.IsZero() {
@@ -153,7 +202,16 @@ func enforceMinAge(result *verify.VerificationResult, minAge time.Duration, now 
 			signatureTime = ts.Timestamp
 		}
 	}
-	if signatureTime.IsZero() {
+	return signatureTime, !signatureTime.IsZero()
+}
+
+// enforceMinAge checks the signature's transparency-log age against minAge. It
+// returns a *SignatureTooNewError when the signature is valid but too young, a
+// plain error when no Tlog timestamp is available, and nil when old enough.
+// now is injectable so the age math is unit-testable.
+func enforceMinAge(result *verify.VerificationResult, minAge time.Duration, now time.Time) error {
+	signatureTime, ok := signatureIntegratedTime(result)
+	if !ok {
 		return fmt.Errorf("cannot enforce minAge: no verified transparency log integrated timestamps found in signature bundle")
 	}
 	signatureAge := now.Sub(signatureTime)

@@ -18,8 +18,12 @@ type EntryMirror interface {
 
 // Plan is the schedulable form of an EntryMirror.
 type Plan struct {
-	// Name identifies this entry in logs and summaries (e.g. the source repo).
-	Name string
+	// Source identifies the entry's source in logs and reports (e.g. the source
+	// repo, or "<repo>/<chart>" for charts). Used as the entry's display label.
+	Source string
+	// Destination is the entry's destination repository, surfaced alongside
+	// Source in the structured report.
+	Destination string
 	// Jobs is the set of work units to execute, all bound to this entry.
 	Jobs []Job
 }
@@ -37,38 +41,80 @@ type Job struct {
 	// this unit of work. Surfaced verbatim to OnJobFinished so the cmd
 	// layer can display the "-> dst" line without re-deriving it.
 	Dst string
+	// Verification carries the signature verification metadata confirmed at
+	// plan time (cosign keyless identity, issuer, integrated time). Nil when
+	// the entry has no verify: block. Attached to the tag row at record time
+	// so a verified copy is distinguishable from an unverified one.
+	Verification *Verification
+	// PlanError, when non-nil, marks a work unit the plan already determined
+	// has failed (e.g. signature verification failed at plan time). The runner
+	// records it as a StatusFailed row carrying this error and invokes neither
+	// Run nor any retry budget — Run is ignored when PlanError is set.
+	PlanError error
 	// Run performs the work. Must be safe to invoke multiple times — the
 	// runner may retry on transient errors. crane.Copy is content-addressed
 	// and idempotent at the blob level, so retrying a partially-copied tag
 	// does not corrupt anything.
-	Run func(ctx context.Context) (Outcome, error)
+	Run func(ctx context.Context) (JobResult, error)
 }
 
-// Outcome is the result of one Job.Run.
-type Outcome string
+// JobResult is the successful result of one Job.Run. It carries the per-tag
+// metadata the report records as a row: the status, the resolved source
+// digest, the skip reason (when skipped), and any mirrored referrers.
+type JobResult struct {
+	// Status is the outcome of the job (copied, skipped, drifted, …). Must be
+	// one of the Run-returnable values (Valid reports this); StatusFailed is
+	// runner-assigned on error and never returned here.
+	Status Status
+	// Digest is the source artifact digest, when the job resolved it. Present
+	// for every status whose path computed it (including the too-new skip).
+	Digest string
+	// Reason explains a skip (up-to-date or signature-too-new). Set only when
+	// Status is StatusSkipped; empty otherwise.
+	Reason string
+	// Referrers lists the mirrored sub-artifacts (signatures, SBOMs,
+	// attestations), in snapshot order. Empty unless includeReferrers is set.
+	Referrers []ReferrerResult
+}
+
+// Status is the result of one Job.Run, or runner-assigned on failure.
+type Status string
 
 const (
-	OutcomeCopied         Outcome = "copied"
-	OutcomeOverwritten    Outcome = "overwritten"
-	OutcomeSkipped        Outcome = "skipped" // nothing was copied
-	OutcomeDrifted        Outcome = "drifted" // dst had a different digest, overwrite=false
-	OutcomeWouldCopy      Outcome = "would-copy"
-	OutcomeWouldOverwrite Outcome = "would-overwrite"
+	StatusCopied         Status = "copied"
+	StatusOverwritten    Status = "overwritten"
+	StatusSkipped        Status = "skipped" // nothing was copied; see Reason
+	StatusDrifted        Status = "drifted" // dst had a different digest, overwrite=false
+	StatusWouldCopy      Status = "would-copy"
+	StatusWouldOverwrite Status = "would-overwrite"
+	// StatusFailed marks a failed mirror. The runner assigns it as a job's own
+	// status when the job errors (or carries a Job.PlanError); a Job never
+	// returns it as JobResult.Status, so it is excluded from validStatuses.
+	// Nested ReferrerResult rows may carry it directly when a referrer fails.
+	StatusFailed Status = "failed"
 )
 
-var validOutcomes = map[Outcome]struct{}{
-	OutcomeCopied:         {},
-	OutcomeOverwritten:    {},
-	OutcomeSkipped:        {},
-	OutcomeDrifted:        {},
-	OutcomeWouldCopy:      {},
-	OutcomeWouldOverwrite: {},
+// Reason values explain why a skipped tag or referrer was skipped. Always set
+// on a StatusSkipped result, absent otherwise.
+const (
+	ReasonUpToDate        = "up-to-date"
+	ReasonSignatureTooNew = "signature-too-new"
+)
+
+var validStatuses = map[Status]struct{}{
+	StatusCopied:         {},
+	StatusOverwritten:    {},
+	StatusSkipped:        {},
+	StatusDrifted:        {},
+	StatusWouldCopy:      {},
+	StatusWouldOverwrite: {},
 }
 
-// Valid reports whether o is one of the documented outcomes. Catches typos
-// in entry implementations (a `return "coppied"` would otherwise compile and
-// produce an unmatched outcome that's silently ignored by Render).
-func (o Outcome) Valid() bool {
-	_, ok := validOutcomes[o]
+// Valid reports whether s is one of the documented Run-returnable statuses.
+// Catches typos in entry implementations (a `return "coppied"` would otherwise
+// compile and produce an unmatched status that's silently ignored by Render).
+// StatusFailed is excluded by design: it is runner-assigned, not returned.
+func (s Status) Valid() bool {
+	_, ok := validStatuses[s]
 	return ok
 }

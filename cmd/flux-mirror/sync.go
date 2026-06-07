@@ -231,7 +231,8 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 			}
 		}
 	default:
-		if err := res.Render(cmd.OutOrStdout(), syncArgs.output.String()); err != nil {
+		report := sync.NewReport("flux-mirror/"+VERSION, time.Now(), res)
+		if err := report.Render(cmd.OutOrStdout(), syncArgs.output.String()); err != nil {
 			return err
 		}
 	}

@@ -282,8 +282,8 @@ func TestSync_ConfigViaEnv(t *testing.T) {
 
 	out, err := executeCommand([]string{"sync", "--insecure", "-o", "json"})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(out).To(ContainSubstring(`"copied": [`))
-	g.Expect(out).To(ContainSubstring(`"1.0.0"`))
+	g.Expect(out).To(ContainSubstring(`"status": "copied"`))
+	g.Expect(out).To(ContainSubstring(`"tag": "1.0.0"`))
 }
 
 func TestSync_ConfigViaStdin(t *testing.T) {
@@ -297,8 +297,8 @@ func TestSync_ConfigViaStdin(t *testing.T) {
 
 	out, err := executeCommandWithInput([]string{"sync", "-", "--insecure", "-o", "json"}, configBody(src, dst))
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(out).To(ContainSubstring(`"copied": [`))
-	g.Expect(out).To(ContainSubstring(`"1.0.0"`))
+	g.Expect(out).To(ContainSubstring(`"status": "copied"`))
+	g.Expect(out).To(ContainSubstring(`"tag": "1.0.0"`))
 }
 
 func TestSync_ArgOverridesEnv(t *testing.T) {
@@ -363,7 +363,8 @@ func TestSync_DryRun(t *testing.T) {
 
 	out, err := executeCommand([]string{"sync", cfgPath, "--insecure", "--dry-run", "-o", "yaml"})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(out).To(MatchRegexp(`would-copy:\s*\n\s*- 1\.0\.0`))
+	g.Expect(out).To(ContainSubstring("status: would-copy"))
+	g.Expect(out).To(ContainSubstring("tag: 1.0.0"))
 }
 
 func TestSync_BadOutputFormat(t *testing.T) {

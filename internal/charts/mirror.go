@@ -75,10 +75,11 @@ type versionJob struct {
 }
 
 // Plan resolves matching chart versions and emits one Job per version.
-// Plan.Name uses "<source>/<chartName>" so logs and summary lines disambiguate
-// when multiple charts share a source URL.
+// Plan.Source uses "<source>/<chartName>" so logs and report rows disambiguate
+// when multiple charts share a source URL; Plan.Destination is the OCI repo the
+// chart lands in (destination base + chart name).
 func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
-	plan := sync.Plan{Name: m.planName()}
+	plan := sync.Plan{Source: m.planName(), Destination: m.dstRepo()}
 
 	versions, err := m.source.ListVersions(ctx, m.entry.Name)
 	if err != nil {
@@ -112,7 +113,7 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 		plan.Jobs = append(plan.Jobs, sync.Job{
 			ID:  version,
 			Dst: job.dst,
-			Run: func(jctx context.Context) (sync.Outcome, error) { return m.runVersion(jctx, job) },
+			Run: func(jctx context.Context) (sync.JobResult, error) { return m.runVersion(jctx, job) },
 		})
 	}
 	return plan, nil
@@ -120,30 +121,30 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 
 // runVersion mirrors one chart version. Idempotent — safe to retry under
 // the runner's per-tag budget.
-func (m *mirror) runVersion(ctx context.Context, j versionJob) (sync.Outcome, error) {
+func (m *mirror) runVersion(ctx context.Context, j versionJob) (sync.JobResult, error) {
 	start := time.Now()
 	chartRef := m.entry.Name + "@" + j.version
 	m.opts.Logger.Info("mirroring chart", "chart", chartRef, "dst", j.dst)
 
-	oc, err := m.mirrorVersion(ctx, j)
+	res, err := m.mirrorVersion(ctx, j)
 	if err != nil {
-		return "", err
+		return res, err
 	}
 	m.opts.Logger.Info("chart done",
 		"chart", chartRef,
 		"dst", j.dst,
-		"outcome", string(oc),
+		"status", string(res.Status),
 		"elapsed", time.Since(start).Round(time.Millisecond))
-	return oc, nil
+	return res, nil
 }
 
-func (m *mirror) mirrorVersion(ctx context.Context, j versionJob) (sync.Outcome, error) {
+func (m *mirror) mirrorVersion(ctx context.Context, j versionJob) (sync.JobResult, error) {
 	// Download src .tgz once. Bytes are pushed verbatim as the chart layer,
 	// so sha256(tgz) is also the chart-layer digest at the destination if
 	// our push goes through.
 	tgz, err := m.source.Download(ctx, m.entry.Name, j.version)
 	if err != nil {
-		return "", err
+		return sync.JobResult{}, err
 	}
 	srcLayerDigest := digestSHA256(tgz)
 
@@ -153,34 +154,34 @@ func (m *mirror) mirrorVersion(ctx context.Context, j versionJob) (sync.Outcome,
 	// layer digests are content-addressed and stable.
 	dstLayerDigest, err := m.client.HelmChartLayerDigest(ctx, j.dst)
 	if err != nil {
-		return "", err
+		return sync.JobResult{Digest: srcLayerDigest}, err
 	}
 
 	switch dstLayerDigest {
 	case "":
 		if m.opts.DryRun {
-			return sync.OutcomeWouldCopy, nil
+			return sync.JobResult{Status: sync.StatusWouldCopy, Digest: srcLayerDigest}, nil
 		}
 		if err := m.push(ctx, j.dst, tgz); err != nil {
-			return "", err
+			return sync.JobResult{Digest: srcLayerDigest}, err
 		}
-		return sync.OutcomeCopied, nil
+		return sync.JobResult{Status: sync.StatusCopied, Digest: srcLayerDigest}, nil
 	case srcLayerDigest:
-		return sync.OutcomeSkipped, nil
+		return sync.JobResult{Status: sync.StatusSkipped, Digest: srcLayerDigest, Reason: sync.ReasonUpToDate}, nil
 	default:
 		if !j.overwrite {
 			m.opts.Logger.Warn("destination chart drifted from source; skipping (overwrite=false)",
 				"chart", m.entry.Name, "version", j.version,
 				"src_digest", srcLayerDigest, "dst_digest", dstLayerDigest)
-			return sync.OutcomeDrifted, nil
+			return sync.JobResult{Status: sync.StatusDrifted, Digest: srcLayerDigest}, nil
 		}
 		if m.opts.DryRun {
-			return sync.OutcomeWouldOverwrite, nil
+			return sync.JobResult{Status: sync.StatusWouldOverwrite, Digest: srcLayerDigest}, nil
 		}
 		if err := m.push(ctx, j.dst, tgz); err != nil {
-			return "", err
+			return sync.JobResult{Digest: srcLayerDigest}, err
 		}
-		return sync.OutcomeOverwritten, nil
+		return sync.JobResult{Status: sync.StatusOverwritten, Digest: srcLayerDigest}, nil
 	}
 }
 

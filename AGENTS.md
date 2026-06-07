@@ -11,9 +11,9 @@ These rules come from [`fluxcd/flux2/CONTRIBUTING.md`](https://github.com/fluxcd
   ```sh
   git commit -s -m "Add feature X" --trailer "Assisted-by: <agent-name>/<model-id>"
   ```
-  The `-s` flag adds the human's `Signed-off-by` from their git config - do not remove it.
+  Use this only when explicitly asked to commit. The `-s` flag adds the human's `Signed-off-by` from their git config - do not remove it.
 - **Commit message format:** Subject in imperative mood ("Add feature X" instead of "Adding feature X"), capitalized, no trailing period, <=50 characters.
-- **Commit body:** Add a succinct explanation explaining what and why, wrap at 72 characters.
+- **Commit body:** Add a succinct explanation of what changed and why, wrap at 72 characters.
 - **Trim verbiage:** in PR descriptions, commit messages, and code comments. No marketing prose, no restating the diff, no emojis.
 - **Rebase, don't merge:** Never merge `main` into the feature branch; rebase onto the latest `main` and push with `--force-with-lease`. Squash before merge when asked.
 - **Tests:** New features, improvements and fixes must have test coverage.
@@ -26,7 +26,7 @@ Read the [README](README.md) for an overview of the project and its features.
 
 ### Code Structure
 
-- `cmd/flux-mirror/` - the `main` package. One file per cobra command or command concern (`sync.go`, `version.go`, `completion.go`, `progress.go`, `logging.go`). `main.VERSION` is overridden at build time by the Makefile.
+- `cmd/flux-mirror/` - the `main` package. One file per cobra command or command concern (`sync.go`, `login.go`, `create_secret.go`, `keygen.go`, `version.go`, `completion.go`, `progress.go`, `logging.go`). `main.VERSION` is overridden at build time by the Makefile.
 - `cmd/flux-mirror/main_test.go` - hosts `TestMain`, shared `executeCommand(...)` helpers, and `resetCmdArgs()`, which restores global cobra flag state between tests. New commands or flags must update this reset path so tests do not leak state across subtests.
 - `internal/config/` - YAML config model and validation for `apiVersion: mirror.fluxcd.io/v1alpha1`, `kind: Config`, `artifacts`, `charts`, selector defaults, overwrite behavior, and cosign verification options.
 - `internal/selector/` - tag selection pipeline for OCI artifacts: regex prefilter, semver filter, sort strategy (`semver`, `alphabetical`, `numerical`), then top-N limit.
@@ -35,6 +35,7 @@ Read the [README](README.md) for an overview of the project and its features.
 - `internal/charts/` - Helm chart mirroring to OCI destinations, including version selection, deterministic Helm-OCI publication, drift handling, and dry-run outcomes.
 - `internal/oci/` - OCI client wrapper, auth/keychain setup, transport customization, digest checks, blob copy, Helm artifact helpers, referrers, and cosign verification.
 - `internal/helmrepo/` - HTTP/S and OCI Helm repository access, index/chart resolution, and ambient Helm credential handling.
+- `internal/registryauth/`, `internal/jwkio/`, `internal/keygen/` - per-host registry auth, JWT/JWK loading and signing, and JWK key generation.
 - `internal/flags/` - reusable `pflag.Value` implementations for CLI flags with constrained values, such as output format.
 - `internal/testregistry/` - test helpers for registry-backed mirror tests.
 - `actions/setup/` - composite GitHub Action for installing the CLI on CI runners.
@@ -50,8 +51,10 @@ All development goes through the Makefile - do not invoke `go build` directly, b
 - `make run GO_RUN_ARGS="version -o json"` - build then run the CLI with args
 - `make docker-build` - build the container image
 - `make registry-up` / `make registry-down` - start/stop the local `registry:3` instance used by smoke and integration-style testing
+- `make e2e` - run the podinfo end-to-end test (requires a built binary and local registry)
+- `make govulncheck` - run Go vulnerability checks
 
-CI (`.github/workflows/test.yaml`) runs `make test` and `make lint` and fails if generated formatting or module files leave the working tree dirty, so always run `make test` before committing.
+CI (`.github/workflows/test.yaml`) runs `make test`, `make lint`, `make build`, `make e2e`, and `make docker-build`, then fails if generated formatting or module files leave the working tree dirty.
 
 ### Code Conventions
 
@@ -71,6 +74,7 @@ User-facing changes (flags, commands, config fields, report shape, GitHub Action
 - `README.md` - features list, install, quickstart, CI usage, GitHub Action example, and doc links.
 - `docs/config.md` - YAML config specification, defaults, selectors, overwrite behavior, referrers, and signature verification.
 - `docs/sync.md` - `sync` command reference, config source resolution, authentication, flags, output, outcomes, exit codes, and dry-run behavior.
+- `docs/login.md`, `docs/create.md`, `docs/keygen.md` - auth login, Kubernetes Secret generation, and JWK key generation command references.
 - `actions/setup/README.md` + `actions/setup/action.yaml` - GitHub Action inputs and example workflows.
 - `examples/` - runnable config examples that should stay aligned with supported config fields and defaults.
 
@@ -79,6 +83,7 @@ Apply these rules:
 - New or changed CLI flag: update the flag table in `docs/sync.md` and any relevant examples in `README.md`.
 - New or changed config field: update `internal/config` tests, `docs/config.md`, and examples when appropriate.
 - New command: add or update README command guidance and create a dedicated reference doc under `docs/` if the command has meaningful flags or output.
+- Auth command changes: update `docs/login.md`, `docs/create.md`, or `docs/keygen.md` as applicable.
 - Output or outcome shape change: update `docs/sync.md`, README examples, and tests that assert text/YAML/JSON output.
 - GitHub Action change: when `actions/setup/action.yaml` inputs or behavior change, refresh `actions/setup/README.md`.
 - Registry auth, Helm auth, OIDC/JWT, or cosign verification behavior changes must be documented in the authentication or verification sections, not only in flag help.

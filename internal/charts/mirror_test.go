@@ -50,6 +50,28 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// versionsWithStatus returns the chart versions (tag IDs) of the entry's rows
+// that landed in the given status.
+func versionsWithStatus(e sync.EntryResult, st sync.Status) []string {
+	var out []string
+	for _, t := range e.Tags {
+		if t.Status == st {
+			out = append(out, t.Tag)
+		}
+	}
+	return out
+}
+
+// rowByTag returns the entry's row for the given version.
+func rowByTag(e sync.EntryResult, tag string) (sync.TagResult, bool) {
+	for _, t := range e.Tags {
+		if t.Tag == tag {
+			return t, true
+		}
+	}
+	return sync.TagResult{}, false
+}
+
 func newHTTPHelmRepo(t *testing.T, versions ...string) string {
 	t.Helper()
 	testregistry.UseEmptyDockerConfig(t)
@@ -102,7 +124,11 @@ func TestChartsMirror_CopiesTopN(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res.HasFailures()).To(BeFalse())
 	// Top-2 of {0.1.0, 0.2.0, 1.0.0, 1.1.0} by semver = 1.0.0 and 1.1.0.
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeCopied]).To(ConsistOf("1.0.0", "1.1.0"))
+	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusCopied)).To(ConsistOf("1.0.0", "1.1.0"))
+	// The chart-layer digest is recorded on every row.
+	row, ok := rowByTag(res.Entries[0], "1.1.0")
+	g.Expect(ok).To(BeTrue())
+	g.Expect(row.Digest).To(HavePrefix("sha256:"))
 
 	tags, err := c.ListTags(context.Background(), dst+"/podinfo")
 	g.Expect(err).ToNot(HaveOccurred())
@@ -127,7 +153,7 @@ func TestChartsMirror_VersionConstraint(t *testing.T) {
 
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeCopied]).To(ConsistOf("1.0.0", "1.1.0"))
+	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusCopied)).To(ConsistOf("1.0.0", "1.1.0"))
 }
 
 func TestChartsMirror_SkipsExisting(t *testing.T) {
@@ -152,8 +178,12 @@ func TestChartsMirror_SkipsExisting(t *testing.T) {
 	// Re-run: same source bytes → same chart-layer digest → skipped.
 	res, err := runner.Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeSkipped]).To(Equal([]string{"1.0.0"}))
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeCopied]).To(BeEmpty())
+	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusSkipped)).To(Equal([]string{"1.0.0"}))
+	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusCopied)).To(BeEmpty())
+	// An up-to-date skip always carries its reason.
+	row, ok := rowByTag(res.Entries[0], "1.0.0")
+	g.Expect(ok).To(BeTrue())
+	g.Expect(row.Reason).To(Equal(sync.ReasonUpToDate))
 }
 
 func TestChartsMirror_DriftWithoutOverwrite(t *testing.T) {
@@ -177,7 +207,7 @@ func TestChartsMirror_DriftWithoutOverwrite(t *testing.T) {
 
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeDrifted]).To(Equal([]string{"1.0.0"}))
+	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusDrifted)).To(Equal([]string{"1.0.0"}))
 	g.Expect(res.HasDrift()).To(BeTrue())
 	g.Expect(res.HasFailures()).To(BeFalse())
 	g.Expect(res.ExitCode()).To(Equal(2))
@@ -202,12 +232,12 @@ func TestChartsMirror_DriftWithOverwrite(t *testing.T) {
 
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeOverwritten]).To(Equal([]string{"1.0.0"}))
+	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusOverwritten)).To(Equal([]string{"1.0.0"}))
 
 	// Re-run with overwrite still on: dst now matches src → skipped.
 	res2, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res2.Entries[0].Outcomes[sync.OutcomeSkipped]).To(Equal([]string{"1.0.0"}))
+	g.Expect(versionsWithStatus(res2.Entries[0], sync.StatusSkipped)).To(Equal([]string{"1.0.0"}))
 }
 
 func TestChartsMirror_DryRun(t *testing.T) {
@@ -227,7 +257,7 @@ func TestChartsMirror_DryRun(t *testing.T) {
 
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeWouldCopy]).To(ConsistOf("1.0.0", "2.0.0"))
+	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusWouldCopy)).To(ConsistOf("1.0.0", "2.0.0"))
 	g.Expect(res.HasFailures()).To(BeFalse())
 
 	// Destination must remain empty.
@@ -255,7 +285,7 @@ func TestChartsMirror_OCISourceToOCIDest(t *testing.T) {
 
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(res.Entries[0].Outcomes[sync.OutcomeCopied]).To(ConsistOf("1.0.0", "1.1.0"))
+	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusCopied)).To(ConsistOf("1.0.0", "1.1.0"))
 
 	tags, err := c.ListTags(context.Background(), dstBase+"/podinfo")
 	g.Expect(err).ToNot(HaveOccurred())
