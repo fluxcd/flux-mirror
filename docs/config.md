@@ -139,6 +139,13 @@ exclusive with `credential`.
 | `fromPath` | Sends the JWT read from the file at the path, with surrounding whitespace trimmed. The file is re-read on every request.                                                                                   |
 | `jwkPath`  | Signs a fresh JWT with the private Ed25519/ECDSA key in the JWK file at this path. By default each request gets a new **60-second** token; set `exp` to issue longer-lived tokens (then cached and reminted at half-life). The file may be a bare JWK or a JWK set (`{"keys":[...]}`) containing exactly one key. The key id is set in the `kid` header. Generate a key pair with [`flux-mirror keygen`](./keygen.md). |
 
+> Path values (`fromPath`, `jwkPath`, and the `tls` path fields) are resolved
+> **within the config file's directory** (via `SecureJoin`): relative paths,
+> absolute paths, and `../` segments are all confined to that directory, and
+> symlinks cannot escape it — a config can only reference files under its own
+> directory tree. When the config is read from stdin (`-f -`), the process working
+> directory is used as the confinement root instead.
+
 ### Fields
 
 The fields below are on the `credential` object, except `host` and `provider`

@@ -84,6 +84,44 @@ func TestDefaults(t *testing.T) {
 	g.Expect(s.EffectiveLimit()).To(Equal(0)) // 0 = unlimited (selector enforces this)
 }
 
+func TestResolvePaths(t *testing.T) {
+	g := NewWithT(t)
+
+	mkCfg := func() *Config {
+		return &Config{Hosts: []AuthHost{{
+			Host: "h.example",
+			Credential: &AuthCredential{
+				FromPath: "tokens/jwt",
+				JWKPath:  "/abs/keys/jwk.json", // absolute: clamped within baseDir
+			},
+			TLS: &TLS{
+				ServerAuth: &TLSServerAuth{FromPath: "../../etc/shadow"}, // traversal: clamped
+				ClientAuth: &TLSClientAuth{
+					Certificate: &TLSData{FromPath: "certs/client.crt"},
+					Key:         &TLSKey{FromEnv: "CLIENT_KEY"}, // not a path: untouched
+				},
+			},
+		}}}
+	}
+
+	// SecureJoin confines every path within baseDir — relative, absolute, and
+	// "../" escapes alike. Non-path fields are untouched.
+	cfg := mkCfg()
+	g.Expect(cfg.ResolvePaths("/etc/flux-mirror")).To(Succeed())
+	h := cfg.Hosts[0]
+	g.Expect(h.Credential.FromPath).To(Equal("/etc/flux-mirror/tokens/jwt"))
+	g.Expect(h.Credential.JWKPath).To(Equal("/etc/flux-mirror/abs/keys/jwk.json"))
+	g.Expect(h.TLS.ServerAuth.FromPath).To(Equal("/etc/flux-mirror/etc/shadow")) // escape clamped
+	g.Expect(h.TLS.ClientAuth.Certificate.FromPath).To(Equal("/etc/flux-mirror/certs/client.crt"))
+	g.Expect(h.TLS.ClientAuth.Key.FromEnv).To(Equal("CLIENT_KEY"))
+
+	// Empty baseDir is a no-op: paths stay as written.
+	cfg = mkCfg()
+	g.Expect(cfg.ResolvePaths("")).To(Succeed())
+	g.Expect(cfg.Hosts[0].Credential.FromPath).To(Equal("tokens/jwt"))
+	g.Expect(cfg.Hosts[0].TLS.ServerAuth.FromPath).To(Equal("../../etc/shadow"))
+}
+
 func TestValidate_Table(t *testing.T) {
 	negOne := -1
 	tests := []struct {

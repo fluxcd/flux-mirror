@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
+	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -326,6 +327,54 @@ func Decode(r io.Reader) (*Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	return &cfg, nil
+}
+
+// ResolvePaths resolves every file-path field (credential fromPath and jwkPath,
+// and the tls path fields) against baseDir — the directory of the config file —
+// using SecureJoin, so the result is always confined within baseDir: relative
+// paths, absolute paths, "../" segments, and symlinks cannot escape it. Empty
+// values are left empty. A baseDir of "" is a no-op (paths stay as written).
+func (c *Config) ResolvePaths(baseDir string) error {
+	if baseDir == "" {
+		return nil
+	}
+	for i := range c.Hosts {
+		h := &c.Hosts[i]
+		paths := hostPathFields(h)
+		for _, p := range paths {
+			if *p == "" {
+				continue
+			}
+			joined, err := securejoin.SecureJoin(baseDir, *p)
+			if err != nil {
+				return fmt.Errorf("hosts[%d] %q: resolve path: %w", i, h.Host, err)
+			}
+			*p = joined
+		}
+	}
+	return nil
+}
+
+// hostPathFields returns pointers to the file-path string fields set on a host.
+func hostPathFields(h *AuthHost) []*string {
+	var ps []*string
+	if h.Credential != nil {
+		ps = append(ps, &h.Credential.FromPath, &h.Credential.JWKPath)
+	}
+	if h.TLS != nil {
+		if h.TLS.ServerAuth != nil {
+			ps = append(ps, &h.TLS.ServerAuth.FromPath)
+		}
+		if h.TLS.ClientAuth != nil {
+			if h.TLS.ClientAuth.Certificate != nil {
+				ps = append(ps, &h.TLS.ClientAuth.Certificate.FromPath)
+			}
+			if h.TLS.ClientAuth.Key != nil {
+				ps = append(ps, &h.TLS.ClientAuth.Key.FromPath)
+			}
+		}
+	}
+	return ps
 }
 
 // Validate checks the config for semantic correctness. It does not perform any

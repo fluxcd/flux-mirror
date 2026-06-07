@@ -22,6 +22,13 @@ import (
 // returns its path.
 func writeLoginConfig(t *testing.T, credBlock string) string {
 	t.Helper()
+	return writeLoginConfigIn(t, t.TempDir(), credBlock)
+}
+
+// writeLoginConfigIn writes the config into dir, so path fields in credBlock
+// (resolved within the config's directory) can reference files placed in dir.
+func writeLoginConfigIn(t *testing.T, dir, credBlock string) string {
+	t.Helper()
 	g := NewWithT(t)
 	src := `apiVersion: mirror.fluxcd.io/v1alpha1
 kind: Config
@@ -35,9 +42,31 @@ hosts:
   - host: registry.example.com
     credential:
 ` + credBlock
-	path := filepath.Join(t.TempDir(), "config.yaml")
+	path := filepath.Join(dir, "config.yaml")
 	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
 	return path
+}
+
+// writeJWKIn writes a fresh private JWK into dir and returns its base name, for
+// use as a config-relative jwkPath.
+func writeJWKIn(t *testing.T, dir string) string {
+	t.Helper()
+	g := NewWithT(t)
+	g.Expect(os.WriteFile(filepath.Join(dir, "jwk.json"), mustMarshalJWK(t), 0o600)).To(Succeed())
+	return "jwk.json"
+}
+
+// jwkLoginConfig writes a JWK and a login config referencing it (config-relative)
+// in the same dir, returning the config path. extra appends extra credential
+// lines (already indented two levels under `credential:`).
+func jwkLoginConfig(t *testing.T, extra string) string {
+	t.Helper()
+	dir := t.TempDir()
+	jwk := writeJWKIn(t, dir)
+	return writeLoginConfigIn(t, dir,
+		"      jwkPath: "+jwk+"\n"+
+			"      iss: https://issuer.example\n"+
+			"      sub: client-id\n"+extra)
 }
 
 func parseUnverified(t *testing.T, token string) gojwt.MapClaims {
@@ -104,9 +133,9 @@ func TestLogin_FromEnv(t *testing.T) {
 
 func TestLogin_FromPath(t *testing.T) {
 	g := NewWithT(t)
-	tokenPath := filepath.Join(t.TempDir(), "token")
-	g.Expect(os.WriteFile(tokenPath, []byte("  file-token\n"), 0o600)).To(Succeed())
-	cfg := writeLoginConfig(t, "      fromPath: "+tokenPath+"\n")
+	dir := t.TempDir()
+	g.Expect(os.WriteFile(filepath.Join(dir, "token"), []byte("  file-token\n"), 0o600)).To(Succeed())
+	cfg := writeLoginConfigIn(t, dir, "      fromPath: token\n")
 
 	cred, err := loginStore(t, cfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
@@ -115,12 +144,7 @@ func TestLogin_FromPath(t *testing.T) {
 
 func TestLogin_JWKPath(t *testing.T) {
 	g := NewWithT(t)
-	jwkPath := writeJWK(t)
-	cfg := writeLoginConfig(t,
-		"      jwkPath: "+jwkPath+"\n"+
-			"      iss: https://issuer.example\n"+
-			"      sub: client-id\n"+
-			"      aud: custom-aud\n")
+	cfg := jwkLoginConfig(t, "      aud: custom-aud\n")
 
 	cred, err := loginStore(t, cfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
@@ -134,26 +158,16 @@ func TestLogin_JWKPath(t *testing.T) {
 
 func TestLogin_JWKPathExp(t *testing.T) {
 	g := NewWithT(t)
-	jwkPath := writeJWK(t)
 
 	// Default exp (~60s): exp claim is within a couple minutes of now.
-	defCfg := writeLoginConfig(t,
-		"      jwkPath: "+jwkPath+"\n"+
-			"      iss: https://issuer.example\n"+
-			"      sub: client-id\n")
-	defCred, err := loginStore(t, defCfg, "")
+	defCred, err := loginStore(t, jwkLoginConfig(t, ""), "")
 	g.Expect(err).ToNot(HaveOccurred())
 	defExp, err := parseUnverified(t, defCred).GetExpirationTime()
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(time.Until(defExp.Time)).To(BeNumerically("<", 5*time.Minute))
 
 	// Explicit exp (1h): exp claim is far in the future.
-	expCfg := writeLoginConfig(t,
-		"      jwkPath: "+jwkPath+"\n"+
-			"      iss: https://issuer.example\n"+
-			"      sub: client-id\n"+
-			"      exp: 1h\n")
-	expCred, err := loginStore(t, expCfg, "")
+	expCred, err := loginStore(t, jwkLoginConfig(t, "      exp: 1h\n"), "")
 	g.Expect(err).ToNot(HaveOccurred())
 	longExp, err := parseUnverified(t, expCred).GetExpirationTime()
 	g.Expect(err).ToNot(HaveOccurred())
@@ -162,13 +176,7 @@ func TestLogin_JWKPathExp(t *testing.T) {
 
 func TestLogin_AudDefaultsToHost(t *testing.T) {
 	g := NewWithT(t)
-	jwkPath := writeJWK(t)
-	cfg := writeLoginConfig(t,
-		"      jwkPath: "+jwkPath+"\n"+
-			"      iss: https://issuer.example\n"+
-			"      sub: client-id\n")
-
-	cred, err := loginStore(t, cfg, "")
+	cred, err := loginStore(t, jwkLoginConfig(t, ""), "")
 	g.Expect(err).ToNot(HaveOccurred())
 
 	claims := parseUnverified(t, cred)

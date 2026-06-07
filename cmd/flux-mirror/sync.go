@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	craneLogs "github.com/google/go-containerregistry/pkg/logs"
@@ -328,7 +329,9 @@ func resolveConfigPath(args []string) (string, error) {
 
 // loadConfig decodes the config from path ('-' reads stdin) and validates it.
 // requireEntries enforces that at least one charts/artifacts entry is present;
-// pass false for commands that consume only the hosts section (login).
+// pass false for commands that consume only the hosts section (login). File-path
+// fields are resolved (via SecureJoin) within the config file's directory, or the
+// process working directory when the config is read from stdin.
 func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*config.Config, error) {
 	cfg, err := decodeConfig(cmd, path)
 	if err != nil {
@@ -342,7 +345,31 @@ func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*config.C
 	if err != nil {
 		return nil, err
 	}
+	baseDir, err := configBaseDir(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.ResolvePaths(baseDir); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// configBaseDir returns the directory that file-path fields are resolved within:
+// the config file's directory, or the process working directory for stdin ('-').
+func configBaseDir(path string) (string, error) {
+	if path == "-" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("resolve working directory: %w", err)
+		}
+		return wd, nil
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve config path: %w", err)
+	}
+	return filepath.Dir(abs), nil
 }
 
 func decodeConfig(cmd *cobra.Command, path string) (*config.Config, error) {
