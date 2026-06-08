@@ -4,7 +4,7 @@ The `flux-mirror sync` command mirrors Helm charts and OCI artifacts between reg
 declarative YAML config. The command is idempotent, re-running against the same config produces
 the same destination state, copying only what's missing or drifted.
 
-See the [config specification](./config.md) for the YAML schema.
+See the [config specification](../config/README.md) for the YAML schema.
 
 ## Synopsis
 
@@ -18,6 +18,7 @@ The config file path is resolved in the following order:
 
 1. First positional argument (`-` reads YAML from stdin).
 2. `FLUX_MIRROR_CONFIG` environment variable.
+3. Config file at the executable path, e.g. `~/.fluxcd/plugins/flux-mirror.config.yaml`.
 
 ```bash
 flux-mirror sync examples/podinfo.yaml
@@ -30,7 +31,7 @@ FLUX_MIRROR_CONFIG=examples/podinfo.yaml flux-mirror sync
 `sync` authenticates OCI registry requests (`artifacts` and `oci://` Helm
 sources) per registry host:
 
-1. Hosts listed in [`hosts`](./config.md#hosts) use their configured auth:
+1. Hosts listed in [`hosts`](../config/README.md#hosts) use their configured auth:
    - `provider: ecr|acr|gar` obtains registry credentials from the cloud
      provider's workload identity.
    - `credential` resolves a per-host secret from GitHub/Forgejo OIDC, GCP,
@@ -41,7 +42,7 @@ sources) per registry host:
 2. Hosts not listed in `hosts` use the Docker config and credential helpers from
    `~/.docker/config.json`, or the `DOCKER_CONFIG` env var if set.
 
-A non-`provider` host may also set [`tls`](./config.md#tls) to configure
+A non-`provider` host may also set [`tls`](../config/README.md#tls) to configure
 transport-layer TLS for its registry connections: a custom CA, a client
 certificate (mTLS), or SPIFFE X.509-SVID mTLS.
 
@@ -59,15 +60,15 @@ matching HTTP/S repository credentials automatically.
 
 | Flag                            | Default | Description                                                                                                                                        |
 |---------------------------------|---------|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| `-o, --output text\|yaml\|json` | `text`  | Output format. `text` is human-friendly; `yaml` and `json` print the structured [sync report](./report/README.md) to stdout.                       |
+| `-o, --output text\|yaml\|json` | `text`  | Output format. `text` is human-friendly; `yaml` and `json` print the structured [sync report](../report/README.md) to stdout.                      |
 | `--concurrency N`               | `4`     | Maximum number of copy operations to run in parallel within a single config entry. Entries themselves are processed sequentially.                  |
 | `--retries N`                   | `3`     | Maximum number of retry attempts per job, bounded by `--timeout`.                                                                                  |
-| `--overwrite`                   | `false` | Force `overwrite: true` on every entry, regardless of per-entry config. See [Overwrite Behavior](./config.md#overwrite-behavior).                  |
+| `--overwrite`                   | `false` | Force `overwrite: true` on every entry, regardless of per-entry config. See [Overwrite Behavior](../config/README.md#overwrite-behavior).          |
 | `--drift-exit-code N`           | `2`     | Exit code to use when drift is detected without failures. Set to `0` for immutable destination registries that should not fail CI on drift.        |
 | `--dry-run`                     | `false` | Run the plan and comparison pipeline without performing any writes. Reported as `would-copy` / `would-overwrite` in the output.                    |
 | `--verbose`                     | `false` | Emit a structured log line per operation (entry started, mirroring tag, tag done, entry summary, sync complete) on stderr. Suppresses the spinner. |
 | `--no-progress`                 | `false` | Disable the live progress spinner. Per-job lines and the Summary still print.                                                                      |
-| `--insecure`                    | `false` | Allow plaintext HTTP and skip TLS verification. Test/dev only.                                                                                 |
+| `--insecure`                    | `false` | Allow plaintext HTTP and skip TLS verification. Test/dev only.                                                                                     |
 | `--timeout DURATION`            | `5m`    | Per-job total budget covering all retry attempts.                                                                                                  |
 
 ## Output
@@ -108,13 +109,13 @@ and registry-side warning is logged. Reach for this when diagnosing TLS, auth, m
 ### Structured output
 
 `-o yaml` and `-o json` print a versioned report to stdout: a top-level envelope
-(`version`, `$schema`, `report`) wrapping run metadata (`reporter`, `timestamp`,
+(`apiVersion`, `kind`, `$schema`, `report`) wrapping run metadata (`reporter`, `timestamp`,
 `durationMs`), an aggregate `summary` of per-status tag counts, and `results[]`
 where each entry carries a `status` (`completed`/`failed`) and a `tags[]` array
 of per-tag rows. Every row has a `status` and, when known, a source `digest`;
 skipped rows always carry a `reason`; verified rows carry a `verification` block;
 and, with `includeReferrers: true`, a `referrers[]` array. The envelope is
-documented by the [sync report schema](./report/README.md).
+documented by the [sync report schema](../report/README.md).
 
 ```bash
 # Status of every tag, per entry
@@ -187,7 +188,7 @@ destination registry is self-sufficient.
 
 ```yaml
 # config.yaml
-apiVersion: mirror.fluxcd.io/v1alpha1
+apiVersion: mirror.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: ghcr.io/stefanprodan/manifests/podinfo
@@ -225,7 +226,7 @@ A single config can mirror both so the destination registry is self-sufficient.
 
 ```yaml
 # config.yaml
-apiVersion: mirror.fluxcd.io/v1alpha1
+apiVersion: mirror.fluxcd.io/v1beta1
 kind: Config
 charts:
   - source: https://kubernetes-sigs.github.io/external-dns/

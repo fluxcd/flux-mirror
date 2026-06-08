@@ -1,9 +1,9 @@
-# flux-mirror sync report
+# Flux Mirror Report
 
 The `flux-mirror sync` command can emit a structured report of the mirror
 results by setting `--output` to `json` or `yaml`. The envelope shape is
 versioned and documented by the JSON Schema in
-[`schema-1.0.0.json`](./schema-1.0.0.json).
+[`report-v1beta1.json`](report-v1beta1.json).
 
 ## Usage
 
@@ -13,7 +13,7 @@ flux-mirror sync config.yaml -o json
 
 Structured output always emits every entry regardless of `--verbose`.
 Filtering belongs downstream (`jq`, `yq`). The process exit code still
-reflects whether any tag failed or drifted (see [exit codes](../sync.md#exit-codes)).
+reflects whether any tag failed or drifted (see [exit codes](../guides/sync.md#exit-codes)).
 
 ## Envelope
 
@@ -21,7 +21,8 @@ Every report is wrapped in a top-level envelope:
 
 | Key                 | Description                                                  |
 |---------------------|--------------------------------------------------------------|
-| `version`           | Wire format version. Currently `"1.0.0"`.                    |
+| `apiVersion`        | Report API version. Currently `mirror.fluxcd.io/v1beta1`.    |
+| `kind`              | Report API kind. Currently `Report`.                         |
 | `$schema`           | URL of the JSON Schema describing the envelope. JSON only.   |
 | `report.reporter`   | Identity of the producer, e.g. `flux-mirror/v0.1.0`.         |
 | `report.timestamp`  | RFC 3339 UTC timestamp of the run.                           |
@@ -53,13 +54,13 @@ stable key set.
 
 Each `results[]` entry describes one config entry (an artifact or chart source).
 
-| Key           | Description                                                          |
-|---------------|----------------------------------------------------------------------|
-| `source`      | Source repository/reference being mirrored.                          |
-| `destination` | Destination repository the entry mirrors into.                       |
-| `status`      | Entry-level outcome: `completed` or `failed`.                        |
+| Key           | Description                                                      |
+|---------------|------------------------------------------------------------------|
+| `source`      | Source repository/reference being mirrored.                      |
+| `destination` | Destination repository the entry mirrors into.                   |
+| `status`      | Entry-level outcome: `completed` or `failed`.                    |
 | `error`       | Plan-time error message. Present only when `status` is `failed`. |
-| `tags[]`      | Per-tag results, in plan order (deterministic). May be empty.        |
+| `tags[]`      | Per-tag results, in plan order (deterministic). May be empty.    |
 
 The entry `status` disambiguates an empty `tags` array:
 
@@ -76,8 +77,8 @@ problems, not an entry-level failure.
 | `tag`          | Tag name (artifacts) or chart version (charts).                                                 |
 | `status`       | Per-tag outcome — see [Status](#status-values).                                                 |
 | `digest`       | Source artifact digest, when resolved. Absent on a verify-failed row.                           |
-| `reason`       | Why a `skipped` tag was skipped — see [Reason](#reason-values). Present only on `skipped`.  |
-| `error`        | Error message. Present only when `status` is `failed`.                                      |
+| `reason`       | Why a `skipped` tag was skipped — see [Reason](#reason-values). Present only on `skipped`.      |
+| `error`        | Error message. Present only when `status` is `failed`.                                          |
 | `referrers[]`  | Mirrored sub-artifacts (signatures, SBOMs, attestations). Present only with `includeReferrers`. |
 | `verification` | Signature verification metadata. Present only when a signature was confirmed (under `verify:`). |
 
@@ -107,11 +108,11 @@ problems, not an entry-level failure.
 Each `referrers[]` entry describes one referrer (e.g. a cosign signature bundle, an
 SBOM, or an attestation) mirrored alongside its parent tag.
 
-| Key            | Description                                                    |
-|----------------|----------------------------------------------------------------|
-| `digest`       | Referrer manifest digest.                                      |
-| `artifactType` | The referrer manifest's `artifactType`, when set.              |
-| `status`       | Same [Status](#status-values) enum as a tag.                   |
+| Key            | Description                                                |
+|----------------|------------------------------------------------------------|
+| `digest`       | Referrer manifest digest.                                  |
+| `artifactType` | The referrer manifest's `artifactType`, when set.          |
+| `status`       | Same [Status](#status-values) enum as a tag.               |
 | `reason`       | Present only on `skipped` (same [Reason](#reason-values)). |
 
 Referrers are reported for any tag whose mirror flow reached the referrer step — every
@@ -158,8 +159,9 @@ second entry failed at plan time because the source repository does not exist.
 
 ```json
 {
-  "version": "1.0.0",
-  "$schema": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report/schema-1.0.0.json",
+  "apiVersion": "mirror.fluxcd.io/v1beta1",
+  "kind": "Report",
+  "$schema": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report/report-v1beta1.json",
   "report": {
     "reporter": "flux-mirror/v0.1.0",
     "timestamp": "2026-06-06T20:12:25Z",

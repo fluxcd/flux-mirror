@@ -18,7 +18,7 @@ metadata:
   namespace: flux-system
 data:
   mirror.yaml: |
-    apiVersion: mirror.fluxcd.io/v1alpha1
+    apiVersion: mirror.fluxcd.io/v1beta1
     kind: Config
     charts:
       - name: podinfo

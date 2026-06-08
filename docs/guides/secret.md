@@ -4,7 +4,7 @@
 flux-mirror secret <name> [flags]
 ```
 
-Resolve the credential configured under [`hosts`](./config.md#hosts) for each
+Resolve the credential configured under [`hosts`](../config/README.md#hosts) for each
 selected host and write them into a Kubernetes Secret of type
 `kubernetes.io/dockerconfigjson` — the same shape `kubectl create secret
 docker-registry` produces.
@@ -26,11 +26,11 @@ configured identity.
 
 ## Flags
 
-| Flag             | Description                                                                                |
-|------------------|-------------------------------------------------------------------------------------------|
+| Flag             | Description                                                                                                                            |
+|------------------|----------------------------------------------------------------------------------------------------------------------------------------|
 | `-f`, `--config` | Path to the flux-mirror config, or `-` for stdin. Defaults to `$FLUX_MIRROR_CONFIG`, else a path derived from the executable location. |
-| `--host`         | Registry host from the config to include. Repeatable; defaults to all hosts.          |
-| `--create`       | Fail if the Secret already exists instead of replacing it (like `kubectl create secret docker-registry`). |
+| `--host`         | Registry host from the config to include. Repeatable; defaults to all hosts.                                                           |
+| `--create`       | Fail if the Secret already exists instead of replacing it (like `kubectl create secret docker-registry`).                              |
 
 In addition, the command accepts the standard `kubectl` connection flags and
 their env vars — `--kubeconfig` (`$KUBECONFIG`), `--context`, `--cluster`,
@@ -43,7 +43,7 @@ in-cluster service-account namespace).
 
 - Works both locally (kubeconfig) and in-cluster (falls back to the
   in-cluster config and service-account namespace).
-- By default the Secret is upserted (created, or replaced if it exists). With
+- By default, the Secret is upserted (created, or replaced if it exists). With
   `--create`, an existing Secret of the same name is an error.
 - With no `--host`, every host in `hosts` is included. A `--host` that is
   not present in the config is an error.
@@ -51,7 +51,7 @@ in-cluster service-account namespace).
   `provider` host, and a `credential` host with `username` set, write
   `username`/`password`/`auth`. A `credential` host without `username` writes
   the bearer `registrytoken` field (understood by go-containerregistry/Flux, not
-  by `kubelet`). See [`credential.username`](./config.md#bearer-token-vs-usernamepassword-credentialusername).
+  by `kubelet`). See [`credential.username`](../config/README.md#bearer-token-vs-usernamepassword-credentialusername).
 - Credentials are short-lived (provider tokens, freshly signed JWTs). Re-run the
   command to refresh the Secret before they expire; by default it replaces the
   existing one in place.
