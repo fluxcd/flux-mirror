@@ -167,6 +167,18 @@ func validateHost(h apiv1.RegistryHost) error {
 	return nil
 }
 
+// countTrue counts how many of the given conditions are true. It is used by the
+// "exactly one of ..." validators below.
+func countTrue(conds ...bool) int {
+	n := 0
+	for _, c := range conds {
+		if c {
+			n++
+		}
+	}
+	return n
+}
+
 // validateTLS checks the TLS settings: at least one of serverAuth or clientAuth
 // must be set, and each (if set) must itself be valid.
 func validateTLS(t apiv1.TLS) error {
@@ -189,18 +201,12 @@ func validateTLS(t apiv1.TLS) error {
 // validateTLSServerAuth checks that exactly one of the CA-bundle sources or
 // spiffe is set.
 func validateTLSServerAuth(s apiv1.TLSServerAuth) error {
-	n := 0
-	for _, set := range []bool{
+	if countTrue(
 		strings.TrimSpace(s.FromPath) != "",
 		strings.TrimSpace(s.FromEnv) != "",
 		strings.TrimSpace(s.FromBytes) != "",
 		s.SPIFFE != nil,
-	} {
-		if set {
-			n++
-		}
-	}
-	if n != 1 {
+	) != 1 {
 		return fmt.Errorf("exactly one of fromPath, fromEnv, fromBytes, or spiffe must be set")
 	}
 	if s.SPIFFE != nil {
@@ -213,17 +219,11 @@ func validateTLSServerAuth(s apiv1.TLSServerAuth) error {
 
 // validateTLSData checks that exactly one source is set.
 func validateTLSData(d apiv1.TLSData) error {
-	n := 0
-	for _, set := range []bool{
+	if countTrue(
 		strings.TrimSpace(d.FromPath) != "",
 		strings.TrimSpace(d.FromEnv) != "",
 		strings.TrimSpace(d.FromBytes) != "",
-	} {
-		if set {
-			n++
-		}
-	}
-	if n != 1 {
+	) != 1 {
 		return fmt.Errorf("exactly one of fromPath, fromEnv, or fromBytes must be set")
 	}
 	return nil
@@ -232,16 +232,10 @@ func validateTLSData(d apiv1.TLSData) error {
 // validateTLSKey checks that exactly one source is set. A private key cannot be
 // inlined.
 func validateTLSKey(k apiv1.TLSKey) error {
-	n := 0
-	for _, set := range []bool{
+	if countTrue(
 		strings.TrimSpace(k.FromPath) != "",
 		strings.TrimSpace(k.FromEnv) != "",
-	} {
-		if set {
-			n++
-		}
-	}
-	if n != 1 {
+	) != 1 {
 		return fmt.Errorf("exactly one of fromPath or fromEnv must be set")
 	}
 	return nil
@@ -281,13 +275,7 @@ func validateSPIFFE(s apiv1.SPIFFETLS) error {
 	serverID := strings.TrimSpace(s.ServerID)
 	trustDomain := strings.TrimSpace(s.TrustDomain)
 
-	n := 0
-	for _, set := range []bool{serverID != "", trustDomain != "", s.AuthorizeAny} {
-		if set {
-			n++
-		}
-	}
-	if n != 1 {
+	if countTrue(serverID != "", trustDomain != "", s.AuthorizeAny) != 1 {
 		return fmt.Errorf("exactly one of serverID, trustDomain, or authorizeAny must be set")
 	}
 	if serverID != "" {
@@ -309,13 +297,7 @@ func validateCredential(j apiv1.RegistryCredential) error {
 	fromPath := strings.TrimSpace(j.FromPath)
 	jwkPath := strings.TrimSpace(j.JWKPath)
 
-	n := 0
-	for _, set := range []bool{provider != "", fromEnv != "", fromPath != "", jwkPath != ""} {
-		if set {
-			n++
-		}
-	}
-	if n != 1 {
+	if countTrue(provider != "", fromEnv != "", fromPath != "", jwkPath != "") != 1 {
 		return fmt.Errorf("exactly one of provider, fromEnv, fromPath, or jwkPath must be set")
 	}
 

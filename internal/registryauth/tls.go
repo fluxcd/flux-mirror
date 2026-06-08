@@ -52,84 +52,83 @@ func (t tlsDispatchTransport) RoundTrip(req *http.Request) (*http.Response, erro
 // unchanged. Returns inner and a no-op closer when no host configures TLS.
 //
 // The returned closer must be called when the transport is no longer needed; it
-// closes any SPIFFE Workload API sources opened for the configured hosts.
+// closes the SPIFFE Workload API source, if one was opened.
 func NewTLSTransport(ctx context.Context, inner http.RoundTripper, hosts []apiv1.RegistryHost) (http.RoundTripper, func() error, error) {
 	if !NeedsTLS(hosts) {
 		return inner, func() error { return nil }, nil
 	}
 
+	// All SPIFFE-using hosts share a single Workload API source: it represents
+	// this workload's own identity and trust bundle, not a per-host one, so one
+	// socket and one rotation goroutine suffice. It is opened lazily, the first
+	// time a host actually needs SPIFFE.
 	byHost := make(map[string]http.RoundTripper)
-	var sources []*workloadapi.X509Source
-	closeSources := func() error {
-		var firstErr error
-		for _, s := range sources {
-			if err := s.Close(); err != nil && firstErr == nil {
-				firstErr = err
-			}
+	var spiffeSrc *workloadapi.X509Source
+	closeSource := func() error {
+		if spiffeSrc != nil {
+			return spiffeSrc.Close()
 		}
-		return firstErr
+		return nil
 	}
 
 	for _, h := range hosts {
 		if h.TLS == nil {
 			continue
 		}
-		tlsCfg, src, err := buildTLSConfig(ctx, h.TLS)
-		if err != nil {
-			_ = closeSources()
-			return nil, nil, fmt.Errorf("host %q: tls: %w", h.Host, err)
+		if spiffeSrc == nil && tlsNeedsSPIFFE(h.TLS) {
+			s, err := workloadapi.NewX509Source(ctx)
+			if err != nil {
+				return nil, nil, fmt.Errorf("host %q: tls: spiffe: create X.509 source: %w", h.Host, err)
+			}
+			spiffeSrc = s
 		}
-		if src != nil {
-			sources = append(sources, src)
+		tlsCfg, err := buildTLSConfig(h.TLS, spiffeSrc)
+		if err != nil {
+			_ = closeSource()
+			return nil, nil, fmt.Errorf("host %q: tls: %w", h.Host, err)
 		}
 		rt := http.DefaultTransport.(*http.Transport).Clone()
 		rt.TLSClientConfig = tlsCfg
 		byHost[h.Host] = rt
 	}
 
-	return tlsDispatchTransport{byHost: byHost, inner: inner}, closeSources, nil
+	return tlsDispatchTransport{byHost: byHost, inner: inner}, closeSource, nil
+}
+
+// tlsNeedsSPIFFE reports whether either half of the TLS config uses SPIFFE and so
+// requires a Workload API source.
+func tlsNeedsSPIFFE(t *apiv1.TLS) bool {
+	clientSPIFFE := t.ClientAuth != nil && t.ClientAuth.Provider == apiv1.TLSClientProviderX509SVID
+	serverSPIFFE := t.ServerAuth != nil && t.ServerAuth.SPIFFE != nil
+	return clientSPIFFE || serverSPIFFE
 }
 
 // buildTLSConfig builds a *tls.Config for a host from its independent server and
 // client settings, each of which may be SPIFFE or static. When either side uses
-// SPIFFE it opens a single Workload API X509Source, returned for the caller to
-// close (nil when no SPIFFE is involved).
-func buildTLSConfig(ctx context.Context, t *apiv1.TLS) (*tls.Config, *workloadapi.X509Source, error) {
+// SPIFFE it draws on src, the shared Workload API source owned by the caller
+// (which must be non-nil whenever the config uses SPIFFE).
+func buildTLSConfig(t *apiv1.TLS, src *workloadapi.X509Source) (*tls.Config, error) {
 	clientSPIFFE := t.ClientAuth != nil && t.ClientAuth.Provider == apiv1.TLSClientProviderX509SVID
 	serverSPIFFE := t.ServerAuth != nil && t.ServerAuth.SPIFFE != nil
 
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
-	var src *workloadapi.X509Source
-	if clientSPIFFE || serverSPIFFE {
-		s, err := workloadapi.NewX509Source(ctx)
-		if err != nil {
-			return nil, nil, fmt.Errorf("spiffe: create X.509 source: %w", err)
-		}
-		src = s
-	}
-	fail := func(err error) (*tls.Config, *workloadapi.X509Source, error) {
-		if src != nil {
-			_ = src.Close()
-		}
-		return nil, nil, err
-	}
 
 	// Server verification: SPIFFE, a custom CA bundle, or (unset) system roots.
 	switch {
 	case serverSPIFFE:
 		authorizer, err := spiffeAuthorizer(src, t.ServerAuth.SPIFFE)
 		if err != nil {
-			return fail(fmt.Errorf("serverAuth: spiffe: %w", err))
+			return nil, fmt.Errorf("serverAuth: spiffe: %w", err)
 		}
 		tlsconfig.HookTLSClientConfig(cfg, src, authorizer)
 	case t.ServerAuth != nil:
 		pemBytes, err := readPEMSource(t.ServerAuth.FromPath, t.ServerAuth.FromEnv, t.ServerAuth.FromBytes)
 		if err != nil {
-			return fail(fmt.Errorf("serverAuth: %w", err))
+			return nil, fmt.Errorf("serverAuth: %w", err)
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(pemBytes) {
-			return fail(fmt.Errorf("serverAuth: no valid certificates in CA bundle"))
+			return nil, fmt.Errorf("serverAuth: no valid certificates in CA bundle")
 		}
 		cfg.RootCAs = pool
 	}
@@ -141,19 +140,19 @@ func buildTLSConfig(ctx context.Context, t *apiv1.TLS) (*tls.Config, *workloadap
 	case t.ClientAuth != nil:
 		certPEM, err := readTLSData(t.ClientAuth.Certificate)
 		if err != nil {
-			return fail(fmt.Errorf("clientAuth: certificate: %w", err))
+			return nil, fmt.Errorf("clientAuth: certificate: %w", err)
 		}
 		keyPEM, err := readPEMSource(t.ClientAuth.Key.FromPath, t.ClientAuth.Key.FromEnv, "")
 		if err != nil {
-			return fail(fmt.Errorf("clientAuth: key: %w", err))
+			return nil, fmt.Errorf("clientAuth: key: %w", err)
 		}
 		cert, err := tls.X509KeyPair(certPEM, keyPEM)
 		if err != nil {
-			return fail(fmt.Errorf("clientAuth: load key pair: %w", err))
+			return nil, fmt.Errorf("clientAuth: load key pair: %w", err)
 		}
 		cfg.Certificates = []tls.Certificate{cert}
 	}
-	return cfg, src, nil
+	return cfg, nil
 }
 
 // spiffeAuthorizer turns the configured authorization rule into a tlsconfig
