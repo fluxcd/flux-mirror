@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
 	. "github.com/onsi/gomega"
@@ -348,6 +349,58 @@ func TestSync_DriftExitCodeValidation(t *testing.T) {
 	_, err := executeCommand([]string{"sync", cfgPath, "--drift-exit-code", "-1"})
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("--drift-exit-code must be between 0 and 255"))
+}
+
+func TestSyncHelp_UsesEffectiveTimeoutDefault(t *testing.T) {
+	g := NewWithT(t)
+
+	out, err := executeCommand([]string{"sync", "--help"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(out).To(ContainSubstring("config's 'hosts' section"))
+	g.Expect(out).ToNot(ContainSubstring("config's 'auth' section"))
+	g.Expect(out).To(ContainSubstring("--timeout duration"))
+	g.Expect(out).To(ContainSubstring("(default 5m0s)"))
+}
+
+func TestResolveSyncTimeout(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(*testing.T)
+		wantTimeout time.Duration
+	}{
+		{
+			name:        "sync default stays at five minutes",
+			wantTimeout: 5 * time.Minute,
+		},
+		{
+			name: "sync local timeout overrides default",
+			setup: func(t *testing.T) {
+				t.Helper()
+				_ = syncCmd.Flags().Set("timeout", "7m")
+			},
+			wantTimeout: 7 * time.Minute,
+		},
+		{
+			name: "root timeout before subcommand is still honored",
+			setup: func(t *testing.T) {
+				t.Helper()
+				_ = rootCmd.PersistentFlags().Set("timeout", "9m")
+			},
+			wantTimeout: 9 * time.Minute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			defer resetCmdArgs()
+
+			if tt.setup != nil {
+				tt.setup(t)
+			}
+			g.Expect(resolveSyncTimeout(syncCmd)).To(Equal(tt.wantTimeout))
+		})
+	}
 }
 
 func TestSync_DryRun(t *testing.T) {

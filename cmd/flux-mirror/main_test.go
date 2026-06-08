@@ -50,20 +50,36 @@ func resetCmdArgs() {
 	rootCmd.SetIn(os.Stdin)
 
 	versionArgs = versionFlags{output: "text"}
-	syncArgs = syncFlags{output: "text", concurrency: 4, retries: 3, driftExitCode: syncDefaultDriftExitCode}
+	syncArgs = syncFlags{
+		output:        "text",
+		concurrency:   4,
+		timeout:       syncDefaultTimeout,
+		retries:       3,
+		driftExitCode: syncDefaultDriftExitCode,
+	}
 	loginArgs = loginFlags{}
 	secretArgs = secretFlags{}
 
 	// pflag.Flag.Changed persists across Execute calls on the shared rootCmd,
-	// which breaks MarkFlagRequired validation in subsequent tests. Clear it
-	// for every flag in the command tree.
-	resetFlagChanged(rootCmd)
+	// and some bool flag values (notably --help=true) also persist. Reset the
+	// bool flags in the command tree to their default state for test isolation;
+	// the command arg structs above handle the non-bool flag values.
+	resetFlags(rootCmd)
 }
 
-func resetFlagChanged(cmd *cobra.Command) {
-	cmd.Flags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
-	cmd.PersistentFlags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
+func resetFlags(cmd *cobra.Command) {
+	resetFlagSet(cmd.Flags())
+	resetFlagSet(cmd.PersistentFlags())
 	for _, sub := range cmd.Commands() {
-		resetFlagChanged(sub)
+		resetFlags(sub)
 	}
+}
+
+func resetFlagSet(fs *pflag.FlagSet) {
+	fs.VisitAll(func(f *pflag.Flag) {
+		if f.Value.Type() == "bool" {
+			_ = f.Value.Set(f.DefValue)
+		}
+		f.Changed = false
+	})
 }
