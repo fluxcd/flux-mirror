@@ -14,7 +14,7 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 	"github.com/fluxcd/flux-mirror/internal/oci"
 	"github.com/fluxcd/flux-mirror/internal/sync"
 	"github.com/fluxcd/flux-mirror/internal/testregistry"
@@ -52,7 +52,7 @@ func discardLogger() *slog.Logger {
 
 // versionsWithStatus returns the chart versions (tag IDs) of the entry's rows
 // that landed in the given status.
-func versionsWithStatus(e sync.EntryResult, st sync.Status) []string {
+func versionsWithStatus(e apiv1.EntryResult, st apiv1.Status) []string {
 	var out []string
 	for _, t := range e.Tags {
 		if t.Status == st {
@@ -63,13 +63,13 @@ func versionsWithStatus(e sync.EntryResult, st sync.Status) []string {
 }
 
 // rowByTag returns the entry's row for the given version.
-func rowByTag(e sync.EntryResult, tag string) (sync.TagResult, bool) {
+func rowByTag(e apiv1.EntryResult, tag string) (apiv1.TagResult, bool) {
 	for _, t := range e.Tags {
 		if t.Tag == tag {
 			return t, true
 		}
 	}
-	return sync.TagResult{}, false
+	return apiv1.TagResult{}, false
 }
 
 func newHTTPHelmRepo(t *testing.T, versions ...string) string {
@@ -111,7 +111,7 @@ func TestChartsMirror_CopiesTopN(t *testing.T) {
 	dst := testregistry.Repo(dockerReg, "charts-copyn")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ChartEntry{
+	entry := apiv1.ChartEntry{
 		Source:      srcURL,
 		Destination: "oci://" + dst,
 		Name:        "podinfo",
@@ -124,7 +124,7 @@ func TestChartsMirror_CopiesTopN(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res.HasFailures()).To(BeFalse())
 	// Top-2 of {0.1.0, 0.2.0, 1.0.0, 1.1.0} by semver = 1.0.0 and 1.1.0.
-	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusCopied)).To(ConsistOf("1.0.0", "1.1.0"))
+	g.Expect(versionsWithStatus(res.Entries[0], apiv1.StatusCopied)).To(ConsistOf("1.0.0", "1.1.0"))
 	// The chart-layer digest is recorded on every row.
 	row, ok := rowByTag(res.Entries[0], "1.1.0")
 	g.Expect(ok).To(BeTrue())
@@ -141,7 +141,7 @@ func TestChartsMirror_VersionConstraint(t *testing.T) {
 	dst := testregistry.Repo(dockerReg, "charts-semver")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ChartEntry{
+	entry := apiv1.ChartEntry{
 		Source:      srcURL,
 		Destination: "oci://" + dst,
 		Name:        "podinfo",
@@ -153,7 +153,7 @@ func TestChartsMirror_VersionConstraint(t *testing.T) {
 
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusCopied)).To(ConsistOf("1.0.0", "1.1.0"))
+	g.Expect(versionsWithStatus(res.Entries[0], apiv1.StatusCopied)).To(ConsistOf("1.0.0", "1.1.0"))
 }
 
 func TestChartsMirror_SkipsExisting(t *testing.T) {
@@ -162,7 +162,7 @@ func TestChartsMirror_SkipsExisting(t *testing.T) {
 	dst := testregistry.Repo(dockerReg, "charts-skip")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ChartEntry{
+	entry := apiv1.ChartEntry{
 		Source:      srcURL,
 		Destination: "oci://" + dst,
 		Name:        "podinfo",
@@ -178,12 +178,12 @@ func TestChartsMirror_SkipsExisting(t *testing.T) {
 	// Re-run: same source bytes → same chart-layer digest → skipped.
 	res, err := runner.Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusSkipped)).To(Equal([]string{"1.0.0"}))
-	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusCopied)).To(BeEmpty())
+	g.Expect(versionsWithStatus(res.Entries[0], apiv1.StatusSkipped)).To(Equal([]string{"1.0.0"}))
+	g.Expect(versionsWithStatus(res.Entries[0], apiv1.StatusCopied)).To(BeEmpty())
 	// An up-to-date skip always carries its reason.
 	row, ok := rowByTag(res.Entries[0], "1.0.0")
 	g.Expect(ok).To(BeTrue())
-	g.Expect(row.Reason).To(Equal(sync.ReasonUpToDate))
+	g.Expect(row.Reason).To(Equal(apiv1.ReasonUpToDate))
 }
 
 func TestChartsMirror_DriftWithoutOverwrite(t *testing.T) {
@@ -196,7 +196,7 @@ func TestChartsMirror_DriftWithoutOverwrite(t *testing.T) {
 	// bytes — that's drift.
 	pushHelmFixture(t, c, dst+"/podinfo:1.0.0", "9.9.9")
 
-	entry := config.ChartEntry{
+	entry := apiv1.ChartEntry{
 		Source:      srcURL,
 		Destination: "oci://" + dst,
 		Name:        "podinfo",
@@ -207,7 +207,7 @@ func TestChartsMirror_DriftWithoutOverwrite(t *testing.T) {
 
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusDrifted)).To(Equal([]string{"1.0.0"}))
+	g.Expect(versionsWithStatus(res.Entries[0], apiv1.StatusDrifted)).To(Equal([]string{"1.0.0"}))
 	g.Expect(res.HasDrift()).To(BeTrue())
 	g.Expect(res.HasFailures()).To(BeFalse())
 	g.Expect(res.ExitCode()).To(Equal(2))
@@ -221,7 +221,7 @@ func TestChartsMirror_DriftWithOverwrite(t *testing.T) {
 	c := oci.NewClient(oci.Insecure())
 	pushHelmFixture(t, c, dst+"/podinfo:1.0.0", "9.9.9")
 
-	entry := config.ChartEntry{
+	entry := apiv1.ChartEntry{
 		Source:      srcURL,
 		Destination: "oci://" + dst,
 		Name:        "podinfo",
@@ -232,12 +232,12 @@ func TestChartsMirror_DriftWithOverwrite(t *testing.T) {
 
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusOverwritten)).To(Equal([]string{"1.0.0"}))
+	g.Expect(versionsWithStatus(res.Entries[0], apiv1.StatusOverwritten)).To(Equal([]string{"1.0.0"}))
 
 	// Re-run with overwrite still on: dst now matches src → skipped.
 	res2, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(versionsWithStatus(res2.Entries[0], sync.StatusSkipped)).To(Equal([]string{"1.0.0"}))
+	g.Expect(versionsWithStatus(res2.Entries[0], apiv1.StatusSkipped)).To(Equal([]string{"1.0.0"}))
 }
 
 func TestChartsMirror_DryRun(t *testing.T) {
@@ -246,7 +246,7 @@ func TestChartsMirror_DryRun(t *testing.T) {
 	dst := testregistry.Repo(dockerReg, "charts-dry")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ChartEntry{
+	entry := apiv1.ChartEntry{
 		Source:      srcURL,
 		Destination: "oci://" + dst,
 		Name:        "podinfo",
@@ -257,7 +257,7 @@ func TestChartsMirror_DryRun(t *testing.T) {
 
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusWouldCopy)).To(ConsistOf("1.0.0", "2.0.0"))
+	g.Expect(versionsWithStatus(res.Entries[0], apiv1.StatusWouldCopy)).To(ConsistOf("1.0.0", "2.0.0"))
 	g.Expect(res.HasFailures()).To(BeFalse())
 
 	// Destination must remain empty.
@@ -274,7 +274,7 @@ func TestChartsMirror_OCISourceToOCIDest(t *testing.T) {
 	pushHelmFixture(t, c, srcBase+"/podinfo:1.0.0", "1.0.0")
 	pushHelmFixture(t, c, srcBase+"/podinfo:1.1.0", "1.1.0")
 
-	entry := config.ChartEntry{
+	entry := apiv1.ChartEntry{
 		Source:      "oci://" + srcBase,
 		Destination: "oci://" + dstBase,
 		Name:        "podinfo",
@@ -285,7 +285,7 @@ func TestChartsMirror_OCISourceToOCIDest(t *testing.T) {
 
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(versionsWithStatus(res.Entries[0], sync.StatusCopied)).To(ConsistOf("1.0.0", "1.1.0"))
+	g.Expect(versionsWithStatus(res.Entries[0], apiv1.StatusCopied)).To(ConsistOf("1.0.0", "1.1.0"))
 
 	tags, err := c.ListTags(context.Background(), dstBase+"/podinfo")
 	g.Expect(err).ToNot(HaveOccurred())

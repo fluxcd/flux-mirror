@@ -17,6 +17,7 @@ import (
 	craneLogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/spf13/cobra"
 
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 	"github.com/fluxcd/flux-mirror/internal/artifacts"
 	"github.com/fluxcd/flux-mirror/internal/charts"
 	"github.com/fluxcd/flux-mirror/internal/config"
@@ -37,7 +38,7 @@ var syncCmd = &cobra.Command{
 	Use:   "sync [CONFIG|-]",
 	Short: "Mirror Helm charts and OCI artifacts to a destination registry",
 	Long: `Mirror Helm charts and OCI artifacts between registries based on a
-declarative YAML config (apiVersion: mirror.fluxcd.io/v1alpha1, kind: Config).
+declarative YAML config (apiVersion: mirror.fluxcd.io/v1beta1, kind: Config).
 OCI registry auth is read from the ambient Docker config (~/.docker/config.json,
 $DOCKER_CONFIG, and configured credential helpers), or, for hosts listed in the
 config's 'hosts' section, from a per-host JWT. Helm HTTP/S repository auth is read
@@ -236,7 +237,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 		}
 	default:
 		report := sync.NewReport("flux-mirror/"+VERSION, time.Now(), res)
-		if err := report.Render(cmd.OutOrStdout(), syncArgs.output.String()); err != nil {
+		if err := sync.RenderReport(cmd.OutOrStdout(), syncArgs.output.String(), report); err != nil {
 			return err
 		}
 	}
@@ -291,7 +292,7 @@ func classifyExit(r sync.Result, driftExitCode int) error {
 // per-request token minting works per chunk; chunking is the outer wrapper so
 // split chunks each get freshly stamped auth from the JWT layer. The returned
 // closer releases any SPIFFE Workload API sources and must be called when done.
-func buildClientTransport(ctx context.Context, hosts []config.AuthHost) (http.RoundTripper, func() error, error) {
+func buildClientTransport(ctx context.Context, hosts []apiv1.AuthHost) (http.RoundTripper, func() error, error) {
 	noop := func() error { return nil }
 
 	// Only credential hosts use the cijwt transport; provider hosts authenticate
@@ -341,15 +342,15 @@ func resolveConfigPath(args []string) (string, error) {
 // pass false for commands that consume only the hosts section (login). File-path
 // fields are resolved (via SecureJoin) within the config file's directory, or the
 // process working directory when the config is read from stdin.
-func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*config.Config, error) {
+func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*apiv1.Config, error) {
 	cfg, err := decodeConfig(cmd, path)
 	if err != nil {
 		return nil, err
 	}
 	if requireEntries {
-		err = cfg.Validate()
+		err = config.Validate(cfg)
 	} else {
-		err = cfg.ValidateNoEntriesOK()
+		err = config.ValidateNoEntriesOK(cfg)
 	}
 	if err != nil {
 		return nil, err
@@ -358,7 +359,7 @@ func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*config.C
 	if err != nil {
 		return nil, err
 	}
-	if err := cfg.ResolvePaths(baseDir); err != nil {
+	if err := config.ResolvePaths(cfg, baseDir); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -381,7 +382,7 @@ func configBaseDir(path string) (string, error) {
 	return filepath.Dir(abs), nil
 }
 
-func decodeConfig(cmd *cobra.Command, path string) (*config.Config, error) {
+func decodeConfig(cmd *cobra.Command, path string) (*apiv1.Config, error) {
 	if path == "-" {
 		return config.Decode(cmd.InOrStdin())
 	}

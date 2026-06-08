@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
 // Result is the aggregate output of Runner.Run. Duration is the total wall
@@ -17,73 +19,8 @@ import (
 // plain millisecond integer instead, since a Go time.Duration would marshal
 // as opaque nanoseconds.
 type Result struct {
-	Entries  []EntryResult `json:"entries"`
-	Duration time.Duration `json:"-"`
-}
-
-// EntryStatus is the entry-level outcome. It answers "was the entry planned
-// and run, or did it abort at plan time" — distinct from the per-tag Status.
-type EntryStatus string
-
-const (
-	// EntryCompleted means the entry produced a plan and ran. Its Tags may be
-	// empty (nothing matched the selector) or contain StatusFailed rows
-	// (per-tag problems) — neither makes the entry itself a failure.
-	EntryCompleted EntryStatus = "completed"
-	// EntryFailed means the entry could not be planned (e.g. ListTags
-	// rejected). Error carries the plan-time message and Tags is empty.
-	EntryFailed EntryStatus = "failed"
-)
-
-// EntryResult is the per-entry slice of a Result. Each tag job becomes a
-// TagResult row carrying its own status, digest, skip reason, error, and
-// referrers — so verification and per-tag detail are expressible without a
-// side channel. Status disambiguates an empty Tags array (nothing matched vs
-// plan failed).
-type EntryResult struct {
-	Source      string      `json:"source"`
-	Destination string      `json:"destination"`
-	Status      EntryStatus `json:"status"`
-	Error       string      `json:"error,omitempty"`
-	Tags        []TagResult `json:"tags"`
-}
-
-// TagResult is one tag's row in the report. Optional fields follow the wire
-// contract: digest when resolved; reason only on skipped; error only on
-// failed; referrers only when includeReferrers surfaced any; verification only
-// when a signature was confirmed.
-type TagResult struct {
-	Tag          string           `json:"tag"`
-	Status       Status           `json:"status"`
-	Digest       string           `json:"digest,omitempty"`
-	Reason       string           `json:"reason,omitempty"`
-	Error        string           `json:"error,omitempty"`
-	Referrers    []ReferrerResult `json:"referrers,omitempty"`
-	Verification *Verification    `json:"verification,omitempty"`
-}
-
-// ReferrerResult is one mirrored referrer (cosign signature bundle, SBOM,
-// attestation) of a tag. It reuses the per-tag Status enum; Reason is set to
-// up-to-date on a skipped referrer (same always-on-skip rule as tags).
-type ReferrerResult struct {
-	Digest       string `json:"digest"`
-	ArtifactType string `json:"artifactType,omitempty"`
-	Status       Status `json:"status"`
-	Reason       string `json:"reason,omitempty"`
-}
-
-// Verification is the signature verification metadata recorded on a tag row.
-// Only Provider is guaranteed; everything else is best-effort and omitted when
-// empty: Issuer/Identity are set when the keyless cert identity is recovered;
-// IntegratedTime only when the bundle carries a verified transparency-log
-// timestamp; Age/MinAge only on the signature-too-new skip.
-type Verification struct {
-	Provider       string `json:"provider"`
-	Issuer         string `json:"issuer,omitempty"`
-	Identity       string `json:"identity,omitempty"`
-	IntegratedTime string `json:"integratedTime,omitempty"`
-	Age            string `json:"age,omitempty"`
-	MinAge         string `json:"minAge,omitempty"`
+	Entries  []apiv1.EntryResult `json:"entries"`
+	Duration time.Duration       `json:"-"`
 }
 
 // HasFailures reports whether any tag job failed across all entries.
@@ -95,7 +32,7 @@ func (r Result) HasFailures() bool {
 func (r Result) TotalFailures() int {
 	n := 0
 	for _, e := range r.Entries {
-		n += e.failedCount()
+		n += entryFailedCount(e)
 	}
 	return n
 }
@@ -105,7 +42,7 @@ func (r Result) TotalDrifted() int {
 	n := 0
 	for _, e := range r.Entries {
 		for _, t := range e.Tags {
-			if t.Status == StatusDrifted {
+			if t.Status == apiv1.StatusDrifted {
 				n++
 			}
 		}
@@ -173,11 +110,11 @@ func (r Result) PrettyPrint(w io.Writer) error {
 // "sync complete" total, all through the supplied logger so they share
 // the same timestamp/format as the per-tag progress logs above them.
 func (r Result) LogSummary(logger *slog.Logger) {
-	totals := map[Status]int{}
+	totals := map[apiv1.Status]int{}
 	for _, e := range r.Entries {
 		logger.Info("entry summary", entryAttrs(e)...)
-		for st, n := range e.statusCounts() {
-			if st == StatusFailed {
+		for st, n := range entryStatusCounts(e) {
+			if st == apiv1.StatusFailed {
 				continue
 			}
 			totals[st] += n
@@ -187,11 +124,11 @@ func (r Result) LogSummary(logger *slog.Logger) {
 }
 
 // statusCounts tallies non-failed tag rows by status across the whole result.
-func (r Result) statusCounts() map[Status]int {
-	out := map[Status]int{}
+func (r Result) statusCounts() map[apiv1.Status]int {
+	out := map[apiv1.Status]int{}
 	for _, e := range r.Entries {
-		for st, n := range e.statusCounts() {
-			if st == StatusFailed {
+		for st, n := range entryStatusCounts(e) {
+			if st == apiv1.StatusFailed {
 				continue
 			}
 			out[st] += n
@@ -200,20 +137,20 @@ func (r Result) statusCounts() map[Status]int {
 	return out
 }
 
-// statusCounts tallies this entry's tag rows by status (including StatusFailed).
-func (e EntryResult) statusCounts() map[Status]int {
-	counts := map[Status]int{}
+// entryStatusCounts tallies an entry's tag rows by status (including StatusFailed).
+func entryStatusCounts(e apiv1.EntryResult) map[apiv1.Status]int {
+	counts := map[apiv1.Status]int{}
 	for _, t := range e.Tags {
 		counts[t.Status]++
 	}
 	return counts
 }
 
-// failedCount is the entry's contribution to the failure total: its
+// entryFailedCount is the entry's contribution to the failure total: its
 // StatusFailed tag rows, plus one when the entry itself failed at plan time.
-func (e EntryResult) failedCount() int {
-	n := e.statusCounts()[StatusFailed]
-	if e.Status == EntryFailed {
+func entryFailedCount(e apiv1.EntryResult) int {
+	n := entryStatusCounts(e)[apiv1.StatusFailed]
+	if e.Status == apiv1.EntryFailed {
 		n++
 	}
 	return n
@@ -221,51 +158,51 @@ func (e EntryResult) failedCount() int {
 
 // summaryOrder pins the key order so log lines are stable for grep/diff.
 // would-* keys are appended only when present (dry-run only).
-var summaryOrder = []Status{
-	StatusCopied,
-	StatusOverwritten,
-	StatusSkipped,
-	StatusDrifted,
+var summaryOrder = []apiv1.Status{
+	apiv1.StatusCopied,
+	apiv1.StatusOverwritten,
+	apiv1.StatusSkipped,
+	apiv1.StatusDrifted,
 }
 
 // prettyPrintOrder controls the order statuses appear in the Summary
 // block of PrettyPrint: action-y statuses first, drift last, dry-run
 // forecasts appended.
-var prettyPrintOrder = []Status{
-	StatusCopied,
-	StatusOverwritten,
-	StatusSkipped,
-	StatusDrifted,
-	StatusWouldCopy,
-	StatusWouldOverwrite,
+var prettyPrintOrder = []apiv1.Status{
+	apiv1.StatusCopied,
+	apiv1.StatusOverwritten,
+	apiv1.StatusSkipped,
+	apiv1.StatusDrifted,
+	apiv1.StatusWouldCopy,
+	apiv1.StatusWouldOverwrite,
 }
 
-func entryAttrs(e EntryResult) []any {
-	counts := e.statusCounts()
+func entryAttrs(e apiv1.EntryResult) []any {
+	counts := entryStatusCounts(e)
 	attrs := []any{"source", e.Source}
 	for _, st := range summaryOrder {
 		attrs = append(attrs, string(st), counts[st])
 	}
-	if n := counts[StatusWouldCopy]; n > 0 {
-		attrs = append(attrs, string(StatusWouldCopy), n)
+	if n := counts[apiv1.StatusWouldCopy]; n > 0 {
+		attrs = append(attrs, string(apiv1.StatusWouldCopy), n)
 	}
-	if n := counts[StatusWouldOverwrite]; n > 0 {
-		attrs = append(attrs, string(StatusWouldOverwrite), n)
+	if n := counts[apiv1.StatusWouldOverwrite]; n > 0 {
+		attrs = append(attrs, string(apiv1.StatusWouldOverwrite), n)
 	}
-	attrs = append(attrs, "failed", e.failedCount())
+	attrs = append(attrs, "failed", entryFailedCount(e))
 	return attrs
 }
 
-func totalAttrs(entries int, totals map[Status]int, failed int, duration time.Duration) []any {
+func totalAttrs(entries int, totals map[apiv1.Status]int, failed int, duration time.Duration) []any {
 	attrs := []any{"entries", entries}
 	for _, st := range summaryOrder {
 		attrs = append(attrs, string(st), totals[st])
 	}
-	if n := totals[StatusWouldCopy]; n > 0 {
-		attrs = append(attrs, string(StatusWouldCopy), n)
+	if n := totals[apiv1.StatusWouldCopy]; n > 0 {
+		attrs = append(attrs, string(apiv1.StatusWouldCopy), n)
 	}
-	if n := totals[StatusWouldOverwrite]; n > 0 {
-		attrs = append(attrs, string(StatusWouldOverwrite), n)
+	if n := totals[apiv1.StatusWouldOverwrite]; n > 0 {
+		attrs = append(attrs, string(apiv1.StatusWouldOverwrite), n)
 	}
 	attrs = append(attrs, "failed", failed)
 	if duration > 0 {

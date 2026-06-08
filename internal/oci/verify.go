@@ -21,7 +21,7 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/tuf"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
 const (
@@ -79,8 +79,8 @@ func NewVerifier(client *Client) *Verifier {
 // present). When the signature is valid but younger than cfg.MinAge it returns
 // both the info and a *SignatureTooNewError so the caller can record the
 // deferral with its metadata; any other failure returns (nil, err).
-func (v *Verifier) Verify(ctx context.Context, ref string, cfg config.ArtifactVerification) (*VerificationInfo, error) {
-	if strings.TrimSpace(cfg.Provider) != config.VerifyProviderCosign {
+func (v *Verifier) Verify(ctx context.Context, ref string, cfg apiv1.ArtifactVerification) (*VerificationInfo, error) {
+	if strings.TrimSpace(cfg.Provider) != apiv1.VerifyProviderCosign {
 		return nil, fmt.Errorf("unsupported verification provider %q", cfg.Provider)
 	}
 	if len(cfg.MatchOIDCIdentity) == 0 {
@@ -156,7 +156,7 @@ func (v *Verifier) Verify(ctx context.Context, ref string, cfg config.ArtifactVe
 	}
 
 	info := &VerificationInfo{
-		Provider: config.VerifyProviderCosign,
+		Provider: apiv1.VerifyProviderCosign,
 		Digest:   desc.Digest.String(),
 	}
 	// Read the actual signed identity off the verified certificate summary, not
@@ -259,7 +259,7 @@ func (v *Verifier) getTrustedRoot() (*root.TrustedRoot, error) {
 	return trustedRoot, nil
 }
 
-func certificateIdentityOptions(identities []config.OIDCIdentity) ([]verify.PolicyOption, error) {
+func certificateIdentityOptions(identities []apiv1.OIDCIdentity) ([]verify.PolicyOption, error) {
 	opts := make([]verify.PolicyOption, 0, len(identities))
 	for i, id := range identities {
 		certID, err := verify.NewShortCertificateIdentity(id.Issuer, "", "", id.Subject)

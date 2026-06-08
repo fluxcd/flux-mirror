@@ -24,7 +24,7 @@ import (
 
 	"helm.sh/helm/v4/pkg/chart/v2/loader"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 	"github.com/fluxcd/flux-mirror/internal/helmrepo"
 	"github.com/fluxcd/flux-mirror/internal/oci"
 	"github.com/fluxcd/flux-mirror/internal/selector"
@@ -48,7 +48,7 @@ type Options struct {
 
 // New builds an EntryMirror for the given chart entry. The Source
 // implementation is picked from entry.Source's URL scheme.
-func New(client *oci.Client, entry config.ChartEntry, opts Options) (sync.EntryMirror, error) {
+func New(client *oci.Client, entry apiv1.ChartEntry, opts Options) (sync.EntryMirror, error) {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
@@ -61,7 +61,7 @@ func New(client *oci.Client, entry config.ChartEntry, opts Options) (sync.EntryM
 
 type mirror struct {
 	client *oci.Client
-	entry  config.ChartEntry
+	entry  apiv1.ChartEntry
 	source helmrepo.Source
 	opts   Options
 }
@@ -87,7 +87,7 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 	}
 
 	// Versions feed the selector as opaque strings — same shape as artifact tags.
-	sel := config.Selector{
+	sel := apiv1.Selector{
 		Semver: m.entry.EffectiveVersion(),
 		Limit:  new(m.entry.EffectiveLimit()),
 	}
@@ -160,28 +160,28 @@ func (m *mirror) mirrorVersion(ctx context.Context, j versionJob) (sync.JobResul
 	switch dstLayerDigest {
 	case "":
 		if m.opts.DryRun {
-			return sync.JobResult{Status: sync.StatusWouldCopy, Digest: srcLayerDigest}, nil
+			return sync.JobResult{Status: apiv1.StatusWouldCopy, Digest: srcLayerDigest}, nil
 		}
 		if err := m.push(ctx, j.dst, tgz); err != nil {
 			return sync.JobResult{Digest: srcLayerDigest}, err
 		}
-		return sync.JobResult{Status: sync.StatusCopied, Digest: srcLayerDigest}, nil
+		return sync.JobResult{Status: apiv1.StatusCopied, Digest: srcLayerDigest}, nil
 	case srcLayerDigest:
-		return sync.JobResult{Status: sync.StatusSkipped, Digest: srcLayerDigest, Reason: sync.ReasonUpToDate}, nil
+		return sync.JobResult{Status: apiv1.StatusSkipped, Digest: srcLayerDigest, Reason: apiv1.ReasonUpToDate}, nil
 	default:
 		if !j.overwrite {
 			m.opts.Logger.Warn("destination chart drifted from source; skipping (overwrite=false)",
 				"chart", m.entry.Name, "version", j.version,
 				"src_digest", srcLayerDigest, "dst_digest", dstLayerDigest)
-			return sync.JobResult{Status: sync.StatusDrifted, Digest: srcLayerDigest}, nil
+			return sync.JobResult{Status: apiv1.StatusDrifted, Digest: srcLayerDigest}, nil
 		}
 		if m.opts.DryRun {
-			return sync.JobResult{Status: sync.StatusWouldOverwrite, Digest: srcLayerDigest}, nil
+			return sync.JobResult{Status: apiv1.StatusWouldOverwrite, Digest: srcLayerDigest}, nil
 		}
 		if err := m.push(ctx, j.dst, tgz); err != nil {
 			return sync.JobResult{Digest: srcLayerDigest}, err
 		}
-		return sync.JobResult{Status: sync.StatusOverwritten, Digest: srcLayerDigest}, nil
+		return sync.JobResult{Status: apiv1.StatusOverwritten, Digest: srcLayerDigest}, nil
 	}
 }
 

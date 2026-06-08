@@ -9,15 +9,15 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
-func authHostsConfig(hosts ...string) *config.Config {
-	cfg := &config.Config{}
+func authHostsConfig(hosts ...string) *apiv1.Config {
+	cfg := &apiv1.Config{}
 	for _, h := range hosts {
-		cfg.Hosts = append(cfg.Hosts, config.AuthHost{
+		cfg.Hosts = append(cfg.Hosts, apiv1.AuthHost{
 			Host:       h,
-			Credential: &config.AuthCredential{FromEnv: "X"},
+			Credential: &apiv1.AuthCredential{FromEnv: "X"},
 		})
 	}
 	return cfg
@@ -48,18 +48,18 @@ func TestSelectAuthHosts_UnknownHost(t *testing.T) {
 
 func TestSelectAuthHosts_NoAuth(t *testing.T) {
 	g := NewWithT(t)
-	_, err := SelectAuthHosts(&config.Config{}, nil)
+	_, err := SelectAuthHosts(&apiv1.Config{}, nil)
 	g.Expect(err).To(MatchError(ContainSubstring("no hosts")))
 }
 
 func TestUsernameSwitch(t *testing.T) {
 	g := NewWithT(t)
 
-	bearer := []config.AuthHost{{
-		Host: "bearer.example", Credential: &config.AuthCredential{FromEnv: "X"},
+	bearer := []apiv1.AuthHost{{
+		Host: "bearer.example", Credential: &apiv1.AuthCredential{FromEnv: "X"},
 	}}
-	userpass := []config.AuthHost{{
-		Host: "userpass.example", Credential: &config.AuthCredential{FromEnv: "X", Username: "robot"},
+	userpass := []apiv1.AuthHost{{
+		Host: "userpass.example", Credential: &apiv1.AuthCredential{FromEnv: "X", Username: "robot"},
 	}}
 
 	// cijwt (bearer-stamp) transport is needed only when a credential host has
@@ -82,9 +82,9 @@ func TestUsernameSwitch(t *testing.T) {
 func TestPkgAuthProviderName(t *testing.T) {
 	g := NewWithT(t)
 	cases := map[string]string{
-		config.RegistryProviderECR: "aws",
-		config.RegistryProviderACR: "azure",
-		config.RegistryProviderGAR: "gcp",
+		apiv1.RegistryProviderECR: "aws",
+		apiv1.RegistryProviderACR: "azure",
+		apiv1.RegistryProviderGAR: "gcp",
 	}
 	for in, want := range cases {
 		got, err := pkgAuthProviderName(in)
@@ -99,11 +99,11 @@ func TestPkgAuthProviderName(t *testing.T) {
 func TestHasCredentialAndTLSOnly(t *testing.T) {
 	g := NewWithT(t)
 
-	tlsOnly := config.AuthHost{Host: "tls.example", TLS: &config.TLS{
-		ServerAuth: &config.TLSServerAuth{FromBytes: "x"},
+	tlsOnly := apiv1.AuthHost{Host: "tls.example", TLS: &apiv1.TLS{
+		ServerAuth: &apiv1.TLSServerAuth{FromBytes: "x"},
 	}}
-	withCred := config.AuthHost{Host: "c.example", Credential: &config.AuthCredential{FromEnv: "X"}}
-	withProvider := config.AuthHost{Host: "p.example", Provider: config.RegistryProviderECR}
+	withCred := apiv1.AuthHost{Host: "c.example", Credential: &apiv1.AuthCredential{FromEnv: "X"}}
+	withProvider := apiv1.AuthHost{Host: "p.example", Provider: apiv1.RegistryProviderECR}
 
 	g.Expect(HasCredential(tlsOnly)).To(BeFalse())
 	g.Expect(HasCredential(withCred)).To(BeTrue())

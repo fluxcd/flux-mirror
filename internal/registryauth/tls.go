@@ -15,11 +15,11 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
 // NeedsTLS reports whether any host configures transport-layer TLS.
-func NeedsTLS(hosts []config.AuthHost) bool {
+func NeedsTLS(hosts []apiv1.AuthHost) bool {
 	for _, h := range hosts {
 		if h.TLS != nil {
 			return true
@@ -53,7 +53,7 @@ func (t tlsDispatchTransport) RoundTrip(req *http.Request) (*http.Response, erro
 //
 // The returned closer must be called when the transport is no longer needed; it
 // closes any SPIFFE Workload API sources opened for the configured hosts.
-func NewTLSTransport(ctx context.Context, inner http.RoundTripper, hosts []config.AuthHost) (http.RoundTripper, func() error, error) {
+func NewTLSTransport(ctx context.Context, inner http.RoundTripper, hosts []apiv1.AuthHost) (http.RoundTripper, func() error, error) {
 	if !NeedsTLS(hosts) {
 		return inner, func() error { return nil }, nil
 	}
@@ -94,8 +94,8 @@ func NewTLSTransport(ctx context.Context, inner http.RoundTripper, hosts []confi
 // client settings, each of which may be SPIFFE or static. When either side uses
 // SPIFFE it opens a single Workload API X509Source, returned for the caller to
 // close (nil when no SPIFFE is involved).
-func buildTLSConfig(ctx context.Context, t *config.TLS) (*tls.Config, *workloadapi.X509Source, error) {
-	clientSPIFFE := t.ClientAuth != nil && t.ClientAuth.Provider == config.TLSClientProviderX509SVID
+func buildTLSConfig(ctx context.Context, t *apiv1.TLS) (*tls.Config, *workloadapi.X509Source, error) {
+	clientSPIFFE := t.ClientAuth != nil && t.ClientAuth.Provider == apiv1.TLSClientProviderX509SVID
 	serverSPIFFE := t.ServerAuth != nil && t.ServerAuth.SPIFFE != nil
 
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
@@ -158,7 +158,7 @@ func buildTLSConfig(ctx context.Context, t *config.TLS) (*tls.Config, *workloada
 
 // spiffeAuthorizer turns the configured authorization rule into a tlsconfig
 // Authorizer. trustDomain "self" resolves to the client's own trust domain.
-func spiffeAuthorizer(src *workloadapi.X509Source, s *config.SPIFFETLS) (tlsconfig.Authorizer, error) {
+func spiffeAuthorizer(src *workloadapi.X509Source, s *apiv1.SPIFFETLS) (tlsconfig.Authorizer, error) {
 	switch {
 	case s.AuthorizeAny:
 		return tlsconfig.AuthorizeAny(), nil
@@ -170,7 +170,7 @@ func spiffeAuthorizer(src *workloadapi.X509Source, s *config.SPIFFETLS) (tlsconf
 		return tlsconfig.AuthorizeID(id), nil
 	case s.TrustDomain != "":
 		var td spiffeid.TrustDomain
-		if s.TrustDomain == config.TrustDomainSelf {
+		if s.TrustDomain == apiv1.TrustDomainSelf {
 			svid, err := src.GetX509SVID()
 			if err != nil {
 				return nil, fmt.Errorf("read own SVID for trustDomain self: %w", err)
@@ -189,7 +189,7 @@ func spiffeAuthorizer(src *workloadapi.X509Source, s *config.SPIFFETLS) (tlsconf
 }
 
 // readTLSData reads a single PEM value from the one configured source.
-func readTLSData(d *config.TLSData) ([]byte, error) {
+func readTLSData(d *apiv1.TLSData) ([]byte, error) {
 	return readPEMSource(d.FromPath, d.FromEnv, d.FromBytes)
 }
 

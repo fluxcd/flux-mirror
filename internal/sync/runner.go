@@ -4,6 +4,8 @@
 package sync
 
 import (
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+
 	"context"
 	"errors"
 	"fmt"
@@ -28,7 +30,7 @@ type Runner struct {
 	// possible — the callback must be safe to call from multiple goroutines)
 	// before the per-tag row is recorded, but after retries and status
 	// validation. Used by the cmd layer to drive a progress spinner.
-	OnJobFinished func(entry, id, dst string, st Status, err error)
+	OnJobFinished func(entry, id, dst string, st apiv1.Status, err error)
 
 	// OnEntryFinished, if non-nil, is invoked from the main goroutine once
 	// per entry, after all of that entry's jobs have completed (or its plan
@@ -81,10 +83,10 @@ func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (res Result, er
 		if err != nil {
 			// Plan-time error (couldn't list tags etc.) — mark the entry failed
 			// but keep going so the rest of the config gets exercised. This is
-			// the only path that sets EntryFailed; per-tag failures live as
-			// StatusFailed rows on an EntryCompleted entry.
+			// the only path that sets apiv1.EntryFailed; per-tag failures live as
+			// apiv1.StatusFailed rows on an apiv1.EntryCompleted entry.
 			r.Logger.Error("plan failed", "entry", entryRes.Source, "err", err)
-			entryRes.Status = EntryFailed
+			entryRes.Status = apiv1.EntryFailed
 			entryRes.Error = err.Error()
 			if r.OnPlanError != nil {
 				r.OnPlanError(entryRes.Source, err)
@@ -98,19 +100,19 @@ func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (res Result, er
 	return res, nil
 }
 
-func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (EntryResult, error) {
+func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (apiv1.EntryResult, error) {
 	plan, err := m.Plan(ctx)
 	if err != nil {
-		return EntryResult{Source: plan.Source, Destination: plan.Destination, Status: EntryFailed, Tags: []TagResult{}}, err
+		return apiv1.EntryResult{Source: plan.Source, Destination: plan.Destination, Status: apiv1.EntryFailed, Tags: []apiv1.TagResult{}}, err
 	}
 	// Pre-size the rows slice so each job writes to its own plan-order index
 	// regardless of completion order — output is deterministic even under
 	// concurrency. Trimmed below to the number of jobs actually launched.
-	out := EntryResult{
+	out := apiv1.EntryResult{
 		Source:      plan.Source,
 		Destination: plan.Destination,
-		Status:      EntryCompleted,
-		Tags:        make([]TagResult, len(plan.Jobs)),
+		Status:      apiv1.EntryCompleted,
+		Tags:        make([]apiv1.TagResult, len(plan.Jobs)),
 	}
 	r.Logger.Info("entry started", "source", plan.Source, "jobs", len(plan.Jobs))
 	defer func(start time.Time) {
@@ -118,7 +120,7 @@ func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (EntryResult, erro
 			"source", plan.Source,
 			"wall", time.Since(start).Round(time.Millisecond),
 			"jobs", len(plan.Jobs),
-			"failures", out.failedCount())
+			"failures", entryFailedCount(out))
 	}(time.Now())
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -132,14 +134,14 @@ func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (EntryResult, erro
 		// copy-failed row keeps the compare digest and any referrers mirrored
 		// before the failure; a plan-failed/verify-failed row leaves both empty
 		// (zero JobResult), so the error stands alone.
-		row := TagResult{
+		row := apiv1.TagResult{
 			Tag:          job.ID,
 			Verification: job.Verification,
 			Digest:       res.Digest,
 			Referrers:    res.Referrers,
 		}
 		if err != nil {
-			row.Status = StatusFailed
+			row.Status = apiv1.StatusFailed
 			row.Error = err.Error()
 		} else {
 			row.Status = res.Status

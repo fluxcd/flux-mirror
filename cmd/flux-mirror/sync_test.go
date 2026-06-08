@@ -21,7 +21,7 @@ import (
 
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 	"github.com/fluxcd/flux-mirror/internal/registryauth"
 	"github.com/fluxcd/flux-mirror/internal/testregistry"
 )
@@ -69,9 +69,9 @@ func writeJWKFile(t *testing.T, data []byte) string {
 func TestJWTTransportOptions(t *testing.T) {
 	t.Run("provider audience builds a transport with host as default aud", func(t *testing.T) {
 		g := NewWithT(t)
-		hosts := []config.AuthHost{{
+		hosts := []apiv1.AuthHost{{
 			Host:       "mint.example",
-			Credential: &config.AuthCredential{Provider: config.JWTProviderForgejo},
+			Credential: &apiv1.AuthCredential{Provider: apiv1.JWTProviderForgejo},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -83,9 +83,9 @@ func TestJWTTransportOptions(t *testing.T) {
 	t.Run("fromEnv reads the named env var", func(t *testing.T) {
 		g := NewWithT(t)
 		t.Setenv("MY_CI_TOKEN", "env-token")
-		hosts := []config.AuthHost{{
+		hosts := []apiv1.AuthHost{{
 			Host:       "static.example",
-			Credential: &config.AuthCredential{FromEnv: "MY_CI_TOKEN"},
+			Credential: &apiv1.AuthCredential{FromEnv: "MY_CI_TOKEN"},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -96,9 +96,9 @@ func TestJWTTransportOptions(t *testing.T) {
 	t.Run("fromEnv with unset env var errors", func(t *testing.T) {
 		g := NewWithT(t)
 		t.Setenv("MY_CI_TOKEN", "")
-		hosts := []config.AuthHost{{
+		hosts := []apiv1.AuthHost{{
 			Host:       "static.example",
-			Credential: &config.AuthCredential{FromEnv: "MY_CI_TOKEN"},
+			Credential: &apiv1.AuthCredential{FromEnv: "MY_CI_TOKEN"},
 		}}
 		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
@@ -106,9 +106,9 @@ func TestJWTTransportOptions(t *testing.T) {
 
 	t.Run("fromPath builds a token-file transport", func(t *testing.T) {
 		g := NewWithT(t)
-		hosts := []config.AuthHost{{
+		hosts := []apiv1.AuthHost{{
 			Host:       "static.example",
-			Credential: &config.AuthCredential{FromPath: "/run/secrets/token"},
+			Credential: &apiv1.AuthCredential{FromPath: "/run/secrets/token"},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -118,9 +118,9 @@ func TestJWTTransportOptions(t *testing.T) {
 
 	t.Run("jwkPath signs from the key file", func(t *testing.T) {
 		g := NewWithT(t)
-		hosts := []config.AuthHost{{
+		hosts := []apiv1.AuthHost{{
 			Host: "registry.example",
-			Credential: &config.AuthCredential{
+			Credential: &apiv1.AuthCredential{
 				JWKPath: writeJWK(t),
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -135,9 +135,9 @@ func TestJWTTransportOptions(t *testing.T) {
 
 	t.Run("jwkPath with unreadable file errors", func(t *testing.T) {
 		g := NewWithT(t)
-		hosts := []config.AuthHost{{
+		hosts := []apiv1.AuthHost{{
 			Host: "registry.example",
-			Credential: &config.AuthCredential{
+			Credential: &apiv1.AuthCredential{
 				JWKPath: filepath.Join(t.TempDir(), "missing.json"),
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -149,9 +149,9 @@ func TestJWTTransportOptions(t *testing.T) {
 
 	t.Run("jwkPath accepts a JWK set with exactly one key", func(t *testing.T) {
 		g := NewWithT(t)
-		hosts := []config.AuthHost{{
+		hosts := []apiv1.AuthHost{{
 			Host: "registry.example",
-			Credential: &config.AuthCredential{
+			Credential: &apiv1.AuthCredential{
 				JWKPath: writeJWKS(t, 1),
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -165,9 +165,9 @@ func TestJWTTransportOptions(t *testing.T) {
 
 	t.Run("jwkPath rejects a JWK set with more than one key", func(t *testing.T) {
 		g := NewWithT(t)
-		hosts := []config.AuthHost{{
+		hosts := []apiv1.AuthHost{{
 			Host: "registry.example",
-			Credential: &config.AuthCredential{
+			Credential: &apiv1.AuthCredential{
 				JWKPath: writeJWKS(t, 2),
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -180,9 +180,9 @@ func TestJWTTransportOptions(t *testing.T) {
 	t.Run("jwkPath rejects an empty JWK set", func(t *testing.T) {
 		g := NewWithT(t)
 		path := writeJWKFile(t, []byte(`{"keys":[]}`))
-		hosts := []config.AuthHost{{
+		hosts := []apiv1.AuthHost{{
 			Host: "registry.example",
-			Credential: &config.AuthCredential{
+			Credential: &apiv1.AuthCredential{
 				JWKPath: path,
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -195,9 +195,9 @@ func TestJWTTransportOptions(t *testing.T) {
 	t.Run("jwkPath rejects malformed JSON", func(t *testing.T) {
 		g := NewWithT(t)
 		path := writeJWKFile(t, []byte("not json"))
-		hosts := []config.AuthHost{{
+		hosts := []apiv1.AuthHost{{
 			Host: "registry.example",
-			Credential: &config.AuthCredential{
+			Credential: &apiv1.AuthCredential{
 				JWKPath: path,
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
@@ -210,10 +210,10 @@ func TestJWTTransportOptions(t *testing.T) {
 	t.Run("multiple hosts of mixed kinds build one transport", func(t *testing.T) {
 		g := NewWithT(t)
 		t.Setenv("MY_CI_TOKEN", "env-token")
-		hosts := []config.AuthHost{
-			{Host: "static.example", Credential: &config.AuthCredential{FromEnv: "MY_CI_TOKEN"}},
-			{Host: "mint.example", Credential: &config.AuthCredential{Provider: config.JWTProviderGitHub}},
-			{Host: "registry.example", Credential: &config.AuthCredential{
+		hosts := []apiv1.AuthHost{
+			{Host: "static.example", Credential: &apiv1.AuthCredential{FromEnv: "MY_CI_TOKEN"}},
+			{Host: "mint.example", Credential: &apiv1.AuthCredential{Provider: apiv1.JWTProviderGitHub}},
+			{Host: "registry.example", Credential: &apiv1.AuthCredential{
 				JWKPath: writeJWK(t), Iss: "https://issuer.example", Sub: "client-id",
 			}},
 		}
@@ -250,7 +250,7 @@ func writeConfig(t *testing.T, src, dst string) string {
 }
 
 func configBody(src, dst string) string {
-	return fmt.Sprintf(`apiVersion: mirror.fluxcd.io/v1alpha1
+	return fmt.Sprintf(`apiVersion: mirror.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: %s

@@ -8,13 +8,13 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
 func TestSelect_SemverDefault(t *testing.T) {
 	g := NewWithT(t)
 	tags := []string{"1.0.0", "2.5.1", "1.9.0", "2.5.0", "not-a-version"}
-	sel := config.Selector{Limit: new(2)}
+	sel := apiv1.Selector{Limit: new(2)}
 
 	res, err := Select(tags, sel, Options{})
 	g.Expect(err).ToNot(HaveOccurred())
@@ -24,7 +24,7 @@ func TestSelect_SemverDefault(t *testing.T) {
 func TestSelect_SemverConstraint(t *testing.T) {
 	g := NewWithT(t)
 	tags := []string{"2.40.0", "2.41.0", "3.0.0", "1.99.0"}
-	sel := config.Selector{Semver: ">=2.40.0 <3.0.0", Limit: new(5)}
+	sel := apiv1.Selector{Semver: ">=2.40.0 <3.0.0", Limit: new(5)}
 
 	res, err := Select(tags, sel, Options{})
 	g.Expect(err).ToNot(HaveOccurred())
@@ -34,7 +34,7 @@ func TestSelect_SemverConstraint(t *testing.T) {
 func TestSelect_LimitUnlimited(t *testing.T) {
 	g := NewWithT(t)
 	tags := []string{"1.0.0", "1.1.0", "1.2.0", "0.9.0"}
-	sel := config.Selector{Limit: new(0)} // 0 = no cap, NOT zero results
+	sel := apiv1.Selector{Limit: new(0)} // 0 = no cap, NOT zero results
 
 	res, err := Select(tags, sel, Options{})
 	g.Expect(err).ToNot(HaveOccurred())
@@ -44,7 +44,7 @@ func TestSelect_LimitUnlimited(t *testing.T) {
 func TestSelect_LimitGreaterThanResults(t *testing.T) {
 	g := NewWithT(t)
 	tags := []string{"1.0.0", "1.1.0"}
-	sel := config.Selector{Limit: new(99)}
+	sel := apiv1.Selector{Limit: new(99)}
 	res, err := Select(tags, sel, Options{})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res.Tags).To(Equal([]string{"1.1.0", "1.0.0"}))
@@ -53,7 +53,7 @@ func TestSelect_LimitGreaterThanResults(t *testing.T) {
 func TestSelect_DefaultLimitIsOne(t *testing.T) {
 	g := NewWithT(t)
 	tags := []string{"1.0.0", "1.1.0", "1.2.0"}
-	res, err := Select(tags, config.Selector{}, Options{})
+	res, err := Select(tags, apiv1.Selector{}, Options{})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res.Tags).To(Equal([]string{"1.2.0"}))
 }
@@ -65,7 +65,7 @@ func TestSelect_Alphabetical(t *testing.T) {
 		"RELEASE.2024-12-01T10-00-00Z",
 		"RELEASE.2024-10-01T05-00-00Z",
 	}
-	sel := config.Selector{SortBy: config.SortByAlphabetical, Limit: new(2)}
+	sel := apiv1.Selector{SortBy: apiv1.SortByAlphabetical, Limit: new(2)}
 
 	res, err := Select(tags, sel, Options{})
 	g.Expect(err).ToNot(HaveOccurred())
@@ -78,7 +78,7 @@ func TestSelect_Alphabetical(t *testing.T) {
 func TestSelect_Numerical(t *testing.T) {
 	g := NewWithT(t)
 	tags := []string{"100", "50", "200", "150"}
-	sel := config.Selector{SortBy: config.SortByNumerical, Limit: new(2)}
+	sel := apiv1.Selector{SortBy: apiv1.SortByNumerical, Limit: new(2)}
 
 	res, err := Select(tags, sel, Options{})
 	g.Expect(err).ToNot(HaveOccurred())
@@ -95,9 +95,9 @@ func TestSelect_RegexExtractNumerical(t *testing.T) {
 		"1.2.3",                 // dropped by regex (no -ts suffix)
 		"1.2.3-not-a-timestamp", // dropped by regex
 	}
-	sel := config.Selector{
-		Regex:  &config.RegexFilter{Pattern: `^\d+\.\d+\.\d+-(?P<ts>\d+)$`, Extract: "$ts"},
-		SortBy: config.SortByNumerical,
+	sel := apiv1.Selector{
+		Regex:  &apiv1.RegexFilter{Pattern: `^\d+\.\d+\.\d+-(?P<ts>\d+)$`, Extract: "$ts"},
+		SortBy: apiv1.SortByNumerical,
 		Limit:  new(2),
 	}
 
@@ -109,8 +109,8 @@ func TestSelect_RegexExtractNumerical(t *testing.T) {
 func TestSelect_RegexNoExtract(t *testing.T) {
 	g := NewWithT(t)
 	tags := []string{"v1.0.0", "v2.0.0", "1.0.0", "rc-1.0.0"}
-	sel := config.Selector{
-		Regex: &config.RegexFilter{Pattern: `^v\d+\.\d+\.\d+$`},
+	sel := apiv1.Selector{
+		Regex: &apiv1.RegexFilter{Pattern: `^v\d+\.\d+\.\d+$`},
 		Limit: new(5),
 	}
 
@@ -123,7 +123,7 @@ func TestSelect_RegexNoExtract(t *testing.T) {
 func TestSelect_VerboseRecordsExcluded(t *testing.T) {
 	g := NewWithT(t)
 	tags := []string{"1.0.0", "weird"}
-	sel := config.Selector{Limit: new(5)}
+	sel := apiv1.Selector{Limit: new(5)}
 
 	res, err := Select(tags, sel, Options{Verbose: true})
 	g.Expect(err).ToNot(HaveOccurred())
@@ -135,7 +135,7 @@ func TestSelect_VerboseRecordsExcluded(t *testing.T) {
 
 func TestSelect_EmptyInput(t *testing.T) {
 	g := NewWithT(t)
-	res, err := Select(nil, config.Selector{Limit: new(5)}, Options{})
+	res, err := Select(nil, apiv1.Selector{Limit: new(5)}, Options{})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res.Tags).To(BeEmpty())
 }
@@ -143,7 +143,7 @@ func TestSelect_EmptyInput(t *testing.T) {
 func TestSelect_AllExcluded(t *testing.T) {
 	g := NewWithT(t)
 	tags := []string{"a", "b", "c"}
-	res, err := Select(tags, config.Selector{Limit: new(5)}, Options{})
+	res, err := Select(tags, apiv1.Selector{Limit: new(5)}, Options{})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res.Tags).To(BeEmpty())
 }
@@ -156,8 +156,8 @@ func TestSelect_RegexAndSemver(t *testing.T) {
 		"v0.9.0",  // dropped by semver
 		"vlatest", // dropped by regex (matches but not semver)? No, regex requires digits — drops.
 	}
-	sel := config.Selector{
-		Regex:  &config.RegexFilter{Pattern: `^v(?P<v>\d+\.\d+\.\d+)$`, Extract: "$v"},
+	sel := apiv1.Selector{
+		Regex:  &apiv1.RegexFilter{Pattern: `^v(?P<v>\d+\.\d+\.\d+)$`, Extract: "$v"},
 		Semver: ">=1.0.0",
 		Limit:  new(5),
 	}

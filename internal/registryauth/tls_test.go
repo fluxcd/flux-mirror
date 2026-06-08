@@ -24,7 +24,7 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
 // testCA is a self-signed CA used to issue server and client certificates for
@@ -116,13 +116,13 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 
 	t.Run("serverAuth + clientAuth succeeds", func(t *testing.T) {
 		g := NewWithT(t)
-		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []config.AuthHost{{
+		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.AuthHost{{
 			Host: host,
-			TLS: &config.TLS{
-				ServerAuth: &config.TLSServerAuth{FromBytes: string(ca.certPEM)},
-				ClientAuth: &config.TLSClientAuth{
-					Certificate: &config.TLSData{FromBytes: string(clientCertPEM)},
-					Key:         &config.TLSKey{FromPath: writeTemp(t, clientKeyPEM)},
+			TLS: &apiv1.TLS{
+				ServerAuth: &apiv1.TLSServerAuth{FromBytes: string(ca.certPEM)},
+				ClientAuth: &apiv1.TLSClientAuth{
+					Certificate: &apiv1.TLSData{FromBytes: string(clientCertPEM)},
+					Key:         &apiv1.TLSKey{FromPath: writeTemp(t, clientKeyPEM)},
 				},
 			},
 		}})
@@ -136,9 +136,9 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 
 	t.Run("missing client cert is rejected by the server", func(t *testing.T) {
 		g := NewWithT(t)
-		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []config.AuthHost{{
+		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.AuthHost{{
 			Host: host,
-			TLS:  &config.TLS{ServerAuth: &config.TLSServerAuth{FromBytes: string(ca.certPEM)}},
+			TLS:  &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{FromBytes: string(ca.certPEM)}},
 		}})
 		g.Expect(err).ToNot(HaveOccurred())
 		defer closeFn()
@@ -150,13 +150,13 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 	t.Run("wrong CA fails server verification", func(t *testing.T) {
 		g := NewWithT(t)
 		otherCA := newTestCA(t)
-		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []config.AuthHost{{
+		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.AuthHost{{
 			Host: host,
-			TLS: &config.TLS{
-				ServerAuth: &config.TLSServerAuth{FromBytes: string(otherCA.certPEM)},
-				ClientAuth: &config.TLSClientAuth{
-					Certificate: &config.TLSData{FromBytes: string(clientCertPEM)},
-					Key:         &config.TLSKey{FromPath: writeTemp(t, clientKeyPEM)},
+			TLS: &apiv1.TLS{
+				ServerAuth: &apiv1.TLSServerAuth{FromBytes: string(otherCA.certPEM)},
+				ClientAuth: &apiv1.TLSClientAuth{
+					Certificate: &apiv1.TLSData{FromBytes: string(clientCertPEM)},
+					Key:         &apiv1.TLSKey{FromPath: writeTemp(t, clientKeyPEM)},
 				},
 			},
 		}})
@@ -218,15 +218,15 @@ func makeCertPEM(t *testing.T) (certPEM, keyPEM []byte) {
 func TestNeedsTLS(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(NeedsTLS(nil)).To(BeFalse())
-	g.Expect(NeedsTLS([]config.AuthHost{{Host: "a", Credential: &config.AuthCredential{FromEnv: "X"}}})).To(BeFalse())
-	g.Expect(NeedsTLS([]config.AuthHost{{Host: "a", TLS: &config.TLS{ServerAuth: &config.TLSServerAuth{FromBytes: "x"}}}})).To(BeTrue())
+	g.Expect(NeedsTLS([]apiv1.AuthHost{{Host: "a", Credential: &apiv1.AuthCredential{FromEnv: "X"}}})).To(BeFalse())
+	g.Expect(NeedsTLS([]apiv1.AuthHost{{Host: "a", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{FromBytes: "x"}}}})).To(BeTrue())
 }
 
 func TestNewTLSTransport_NoTLSReturnsInner(t *testing.T) {
 	g := NewWithT(t)
 	inner := http.DefaultTransport
-	rt, closeFn, err := NewTLSTransport(context.Background(), inner, []config.AuthHost{
-		{Host: "a", Credential: &config.AuthCredential{FromEnv: "X"}},
+	rt, closeFn, err := NewTLSTransport(context.Background(), inner, []apiv1.AuthHost{
+		{Host: "a", Credential: &apiv1.AuthCredential{FromEnv: "X"}},
 	})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(rt).To(BeIdenticalTo(inner))
@@ -238,13 +238,13 @@ func TestNewTLSTransport_StaticDispatch(t *testing.T) {
 	caPEM, _ := makeCertPEM(t)
 	certPEM, keyPEM := makeCertPEM(t)
 
-	hosts := []config.AuthHost{
-		{Host: "ca.example", TLS: &config.TLS{ServerAuth: &config.TLSServerAuth{FromBytes: string(caPEM)}}},
-		{Host: "mtls.example", TLS: &config.TLS{ClientAuth: &config.TLSClientAuth{
-			Certificate: &config.TLSData{FromBytes: string(certPEM)},
-			Key:         &config.TLSKey{FromPath: writeTemp(t, keyPEM)},
+	hosts := []apiv1.AuthHost{
+		{Host: "ca.example", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{FromBytes: string(caPEM)}}},
+		{Host: "mtls.example", TLS: &apiv1.TLS{ClientAuth: &apiv1.TLSClientAuth{
+			Certificate: &apiv1.TLSData{FromBytes: string(certPEM)},
+			Key:         &apiv1.TLSKey{FromPath: writeTemp(t, keyPEM)},
 		}}},
-		{Host: "plain.example", Credential: &config.AuthCredential{FromEnv: "X"}},
+		{Host: "plain.example", Credential: &apiv1.AuthCredential{FromEnv: "X"}},
 	}
 	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, hosts)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -264,8 +264,8 @@ func TestNewTLSTransport_StaticDispatch(t *testing.T) {
 
 func TestNewTLSTransport_BadCABundle(t *testing.T) {
 	g := NewWithT(t)
-	_, _, err := NewTLSTransport(context.Background(), http.DefaultTransport, []config.AuthHost{
-		{Host: "ca.example", TLS: &config.TLS{ServerAuth: &config.TLSServerAuth{FromBytes: "not a pem"}}},
+	_, _, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.AuthHost{
+		{Host: "ca.example", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{FromBytes: "not a pem"}}},
 	})
 	g.Expect(err).To(MatchError(ContainSubstring("no valid certificates in CA bundle")))
 }
@@ -274,25 +274,25 @@ func TestReadTLSData(t *testing.T) {
 	g := NewWithT(t)
 
 	// fromBytes
-	b, err := readTLSData(&config.TLSData{FromBytes: "inline"})
+	b, err := readTLSData(&apiv1.TLSData{FromBytes: "inline"})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(string(b)).To(Equal("inline"))
 
 	// fromEnv
 	t.Setenv("TLS_TEST_VAR", "envval")
-	b, err = readTLSData(&config.TLSData{FromEnv: "TLS_TEST_VAR"})
+	b, err = readTLSData(&apiv1.TLSData{FromEnv: "TLS_TEST_VAR"})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(string(b)).To(Equal("envval"))
 
 	// fromEnv unset
 	t.Setenv("TLS_TEST_VAR", "")
-	_, err = readTLSData(&config.TLSData{FromEnv: "TLS_TEST_VAR"})
+	_, err = readTLSData(&apiv1.TLSData{FromEnv: "TLS_TEST_VAR"})
 	g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
 
 	// fromPath
 	p := filepath.Join(t.TempDir(), "f")
 	g.Expect(os.WriteFile(p, []byte("filedata"), 0o600)).To(Succeed())
-	b, err = readTLSData(&config.TLSData{FromPath: p})
+	b, err = readTLSData(&apiv1.TLSData{FromPath: p})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(string(b)).To(Equal("filedata"))
 }
@@ -301,18 +301,18 @@ func TestSpiffeAuthorizer(t *testing.T) {
 	g := NewWithT(t)
 
 	// AuthorizeAny and ServerID and a concrete trustDomain do not need a source.
-	a, err := spiffeAuthorizer(nil, &config.SPIFFETLS{AuthorizeAny: true})
+	a, err := spiffeAuthorizer(nil, &apiv1.SPIFFETLS{AuthorizeAny: true})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(a).ToNot(BeNil())
 
-	a, err = spiffeAuthorizer(nil, &config.SPIFFETLS{ServerID: "spiffe://example.org/registry"})
+	a, err = spiffeAuthorizer(nil, &apiv1.SPIFFETLS{ServerID: "spiffe://example.org/registry"})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(a).ToNot(BeNil())
 
-	a, err = spiffeAuthorizer(nil, &config.SPIFFETLS{TrustDomain: "example.org"})
+	a, err = spiffeAuthorizer(nil, &apiv1.SPIFFETLS{TrustDomain: "example.org"})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(a).ToNot(BeNil())
 
-	_, err = spiffeAuthorizer(nil, &config.SPIFFETLS{ServerID: "not-a-spiffe-id"})
+	_, err = spiffeAuthorizer(nil, &apiv1.SPIFFETLS{ServerID: "not-a-spiffe-id"})
 	g.Expect(err).To(MatchError(ContainSubstring("serverID")))
 }

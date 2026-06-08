@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 	"github.com/fluxcd/flux-mirror/internal/oci"
 	"github.com/fluxcd/flux-mirror/internal/selector"
 	"github.com/fluxcd/flux-mirror/internal/sync"
@@ -41,11 +41,11 @@ type Options struct {
 // the verified identity; a *oci.SignatureTooNewError is returned alongside the
 // info when the signature is valid but younger than the configured minAge.
 type Verifier interface {
-	Verify(ctx context.Context, ref string, cfg config.ArtifactVerification) (*oci.VerificationInfo, error)
+	Verify(ctx context.Context, ref string, cfg apiv1.ArtifactVerification) (*oci.VerificationInfo, error)
 }
 
 // New builds an EntryMirror for the given artifact entry.
-func New(client *oci.Client, entry config.ArtifactEntry, opts Options) sync.EntryMirror {
+func New(client *oci.Client, entry apiv1.ArtifactEntry, opts Options) sync.EntryMirror {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
@@ -60,7 +60,7 @@ func New(client *oci.Client, entry config.ArtifactEntry, opts Options) sync.Entr
 
 type mirror struct {
 	client *oci.Client
-	entry  config.ArtifactEntry
+	entry  apiv1.ArtifactEntry
 	opts   Options
 }
 
@@ -74,7 +74,7 @@ type tagJob struct {
 	srcDigest    string // pre-fetched when verified or when refs were snapshotted; otherwise ""
 	refs         []oci.Referrer
 	overwrite    bool
-	verification *sync.Verification // confirmed at plan time when entry.verify is set
+	verification *apiv1.Verification // confirmed at plan time when entry.verify is set
 }
 
 func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
@@ -117,7 +117,7 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 						"min_age", tooNew.MinAge)
 					ver := toVerification(info)
 					if ver == nil {
-						ver = &sync.Verification{}
+						ver = &apiv1.Verification{}
 					}
 					ver.Age = tooNew.Age.Round(time.Second).String()
 					ver.MinAge = tooNew.MinAge.String()
@@ -131,8 +131,8 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 						Verification: ver,
 						Run: func(context.Context) (sync.JobResult, error) {
 							return sync.JobResult{
-								Status: sync.StatusSkipped,
-								Reason: sync.ReasonSignatureTooNew,
+								Status: apiv1.StatusSkipped,
+								Reason: apiv1.ReasonSignatureTooNew,
 								Digest: skipDigest,
 							}, nil
 						},
@@ -210,7 +210,7 @@ func (m *mirror) runTag(ctx context.Context, j tagJob) (sync.JobResult, error) {
 		return sync.JobResult{Digest: cmp.SrcDigest}, err
 	}
 
-	var refResults []sync.ReferrerResult
+	var refResults []apiv1.ReferrerResult
 	if len(j.refs) > 0 {
 		refResults, err = m.mirrorReferrers(ctx, j.refs, j.overwrite)
 		if err != nil {
@@ -239,36 +239,36 @@ func (m *mirror) compareTag(ctx context.Context, src, dst, knownSrcDigest string
 // for the StateMissing/StateDrifted cases unless dry-run. copy performs the
 // actual mirror; onDrift logs the overwrite=false skip. Shared by the parent
 // tag and each referrer so the status mapping lives in one place.
-func (m *mirror) resolveCompare(cmp oci.CompareResult, overwrite bool, copyFn func() error, onDrift func()) (sync.Status, string, error) {
+func (m *mirror) resolveCompare(cmp oci.CompareResult, overwrite bool, copyFn func() error, onDrift func()) (apiv1.Status, string, error) {
 	switch cmp.State {
 	case oci.StateEqual:
-		return sync.StatusSkipped, sync.ReasonUpToDate, nil
+		return apiv1.StatusSkipped, apiv1.ReasonUpToDate, nil
 	case oci.StateMissing:
 		if m.opts.DryRun {
-			return sync.StatusWouldCopy, "", nil
+			return apiv1.StatusWouldCopy, "", nil
 		}
 		if err := copyFn(); err != nil {
 			return "", "", err
 		}
-		return sync.StatusCopied, "", nil
+		return apiv1.StatusCopied, "", nil
 	case oci.StateDrifted:
 		if !overwrite {
 			onDrift()
-			return sync.StatusDrifted, "", nil
+			return apiv1.StatusDrifted, "", nil
 		}
 		if m.opts.DryRun {
-			return sync.StatusWouldOverwrite, "", nil
+			return apiv1.StatusWouldOverwrite, "", nil
 		}
 		if err := copyFn(); err != nil {
 			return "", "", err
 		}
-		return sync.StatusOverwritten, "", nil
+		return apiv1.StatusOverwritten, "", nil
 	}
 	return "", "", fmt.Errorf("compare returned unknown state %d", cmp.State)
 }
 
 // applyOutcome resolves the Compare → Copy/skip switch for the parent tag.
-func (m *mirror) applyOutcome(ctx context.Context, src, dst string, cmp oci.CompareResult, overwrite bool, jobs int) (sync.Status, string, error) {
+func (m *mirror) applyOutcome(ctx context.Context, src, dst string, cmp oci.CompareResult, overwrite bool, jobs int) (apiv1.Status, string, error) {
 	return m.resolveCompare(cmp, overwrite,
 		func() error { return m.client.CopyTag(ctx, src, dst, jobs) },
 		func() {
@@ -285,25 +285,25 @@ func (m *mirror) applyOutcome(ctx context.Context, src, dst string, cmp oci.Comp
 // src-side fetch per referrer. On the first referrer error it appends a failed
 // row for that referrer and returns the rows collected so far alongside the
 // error (a referrer failure fails the parent tag).
-func (m *mirror) mirrorReferrers(ctx context.Context, refs []oci.Referrer, overwrite bool) ([]sync.ReferrerResult, error) {
-	results := make([]sync.ReferrerResult, 0, len(refs))
+func (m *mirror) mirrorReferrers(ctx context.Context, refs []oci.Referrer, overwrite bool) ([]apiv1.ReferrerResult, error) {
+	results := make([]apiv1.ReferrerResult, 0, len(refs))
 	for _, r := range refs {
 		dstRef := m.entry.Destination + "@" + r.Digest
 		cmp, err := m.client.CompareWithKnownSrc(ctx, r.Digest, dstRef)
 		if err != nil {
-			results = append(results, sync.ReferrerResult{
-				Digest: r.Digest, ArtifactType: r.ArtifactType, Status: sync.StatusFailed,
+			results = append(results, apiv1.ReferrerResult{
+				Digest: r.Digest, ArtifactType: r.ArtifactType, Status: apiv1.StatusFailed,
 			})
 			return results, fmt.Errorf("compare referrer %s: %w", r.Digest, err)
 		}
 		st, reason, err := m.applyReferrerOutcome(ctx, r, cmp, overwrite)
 		if err != nil {
-			results = append(results, sync.ReferrerResult{
-				Digest: r.Digest, ArtifactType: r.ArtifactType, Status: sync.StatusFailed,
+			results = append(results, apiv1.ReferrerResult{
+				Digest: r.Digest, ArtifactType: r.ArtifactType, Status: apiv1.StatusFailed,
 			})
 			return results, err
 		}
-		results = append(results, sync.ReferrerResult{
+		results = append(results, apiv1.ReferrerResult{
 			Digest: r.Digest, ArtifactType: r.ArtifactType, Status: st, Reason: reason,
 		})
 	}
@@ -312,7 +312,7 @@ func (m *mirror) mirrorReferrers(ctx context.Context, refs []oci.Referrer, overw
 
 // applyReferrerOutcome resolves one referrer's compare state, copying via
 // CopyReferrer. Mirrors applyOutcome through the shared resolveCompare switch.
-func (m *mirror) applyReferrerOutcome(ctx context.Context, r oci.Referrer, cmp oci.CompareResult, overwrite bool) (sync.Status, string, error) {
+func (m *mirror) applyReferrerOutcome(ctx context.Context, r oci.Referrer, cmp oci.CompareResult, overwrite bool) (apiv1.Status, string, error) {
 	return m.resolveCompare(cmp, overwrite,
 		func() error { return m.client.CopyReferrer(ctx, m.entry.Source, m.entry.Destination, r.Digest) },
 		func() {
@@ -325,11 +325,11 @@ func (m *mirror) applyReferrerOutcome(ctx context.Context, r oci.Referrer, cmp o
 // toVerification converts the oci-layer verification info into the report's
 // wire type, formatting the integrated time as RFC 3339 (omitted when zero).
 // Returns nil when info is nil (no verify configured / nothing confirmed).
-func toVerification(info *oci.VerificationInfo) *sync.Verification {
+func toVerification(info *oci.VerificationInfo) *apiv1.Verification {
 	if info == nil {
 		return nil
 	}
-	v := &sync.Verification{
+	v := &apiv1.Verification{
 		Provider: info.Provider,
 		Issuer:   info.Issuer,
 		Identity: info.Identity,
