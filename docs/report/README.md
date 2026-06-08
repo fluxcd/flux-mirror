@@ -58,7 +58,7 @@ Each `results[]` entry describes one config entry (an artifact or chart source).
 | `source`      | Source repository/reference being mirrored.                          |
 | `destination` | Destination repository the entry mirrors into.                       |
 | `status`      | Entry-level outcome: `completed` or `failed`.                        |
-| `error`       | Plan-time error message. Present **only** when `status` is `failed`. |
+| `error`       | Plan-time error message. Present only when `status` is `failed`. |
 | `tags[]`      | Per-tag results, in plan order (deterministic). May be empty.        |
 
 The entry `status` disambiguates an empty `tags` array:
@@ -76,8 +76,8 @@ problems, not an entry-level failure.
 | `tag`          | Tag name (artifacts) or chart version (charts).                                                 |
 | `status`       | Per-tag outcome — see [Status](#status-values).                                                 |
 | `digest`       | Source artifact digest, when resolved. Absent on a verify-failed row.                           |
-| `reason`       | Why a `skipped` tag was skipped — see [Reason](#reason-values). Present **only** on `skipped`.  |
-| `error`        | Error message. Present **only** when `status` is `failed`.                                      |
+| `reason`       | Why a `skipped` tag was skipped — see [Reason](#reason-values). Present only on `skipped`.  |
+| `error`        | Error message. Present only when `status` is `failed`.                                      |
 | `referrers[]`  | Mirrored sub-artifacts (signatures, SBOMs, attestations). Present only with `includeReferrers`. |
 | `verification` | Signature verification metadata. Present only when a signature was confirmed (under `verify:`). |
 
@@ -112,7 +112,7 @@ SBOM, or an attestation) mirrored alongside its parent tag.
 | `digest`       | Referrer manifest digest.                                      |
 | `artifactType` | The referrer manifest's `artifactType`, when set.              |
 | `status`       | Same [Status](#status-values) enum as a tag.                   |
-| `reason`       | Present **only** on `skipped` (same [Reason](#reason-values)). |
+| `reason`       | Present only on `skipped` (same [Reason](#reason-values)). |
 
 Referrers are reported for any tag whose mirror flow reached the referrer step — every
 status except `failed` (the tag copy errored first) and the `signature-too-new` skip

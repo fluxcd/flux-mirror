@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	dockercfg "github.com/docker/cli/cli/config"
 	"github.com/docker/cli/cli/config/credentials"
@@ -27,15 +28,16 @@ var loginArgs loginFlags
 var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Store configured credentials in the Docker config",
-	Long: `Resolve the credentials configured under auth.hosts and store them in
+	Long: `Resolve the credentials configured under hosts and store them in
 the Docker config so subsequent registry requests authenticate as those
 identities. These are the same credentials the sync command would attach, minted
 once: an OIDC/cloud token for a provider, the value of fromEnv, the contents of
 fromPath, or a freshly signed JWT for jwkPath. By default every host in the
 config is logged in; restrict with one or more --host flags.
 
-The config is read from --config, else $FLUX_MIRROR_CONFIG, else a path derived
-from the executable location ('-' reads the config from stdin).
+The config is read from --config, else $FLUX_MIRROR_CONFIG, else
+{{CONFIG_DEFAULT}}
+('-' reads the config from stdin).
 
 The credential is written through the Docker credential store, exactly like
 'docker login': if a credential helper is configured (credsStore/credHelpers) —
@@ -90,6 +92,12 @@ func loginCmdRun(cmd *cobra.Command, _ []string) error {
 	}
 
 	for _, h := range hosts {
+		// A TLS-only host (only transport settings, no credential) has nothing to
+		// store; skip it.
+		if !registryauth.HasCredential(h) {
+			cmd.Printf("• skipping %s: no credential configured (TLS-only host)\n", h.Host)
+			continue
+		}
 		ha, err := registryauth.ResolveHostAuth(cmd.Context(), h)
 		if err != nil {
 			return fmt.Errorf("host %q: %w", h.Host, err)
@@ -156,17 +164,29 @@ func resolveConfigFlag(flagVal string) (string, error) {
 	return exe + ".config", nil
 }
 
+// configDefaultPlaceholder marks where the executable-derived default config
+// path is templated into command Long help text at startup.
+const configDefaultPlaceholder = "{{CONFIG_DEFAULT}}"
+
+// defaultConfigDescription returns the executable-derived default config path
+// for help text, resolved at startup, or a generic placeholder when the
+// executable path can't be determined.
+func defaultConfigDescription() string {
+	if exe, err := os.Executable(); err == nil {
+		return exe + ".config"
+	}
+	return "<executable>.config"
+}
+
 // configFlagUsage is the shared --config flag help, with the executable-derived
 // default resolved at startup.
 func configFlagUsage() string {
-	def := "$FLUX_MIRROR_CONFIG, else <executable>.config"
-	if exe, err := os.Executable(); err == nil {
-		def = "$FLUX_MIRROR_CONFIG, else " + exe + ".config"
-	}
-	return "Path to the flux-mirror config, or '-' for stdin (default " + def + ")"
+	return "Path to the flux-mirror config, or '-' for stdin " +
+		"(default $FLUX_MIRROR_CONFIG, else " + defaultConfigDescription() + ")"
 }
 
 func init() {
+	loginCmd.Long = strings.ReplaceAll(loginCmd.Long, configDefaultPlaceholder, defaultConfigDescription())
 	loginCmd.Flags().StringVarP(&loginArgs.config, "config", "f", "", configFlagUsage())
 	loginCmd.Flags().StringArrayVar(&loginArgs.hosts, "host", nil,
 		"Registry host from the config to log in; repeatable, defaults to all hosts")

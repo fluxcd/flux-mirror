@@ -2,7 +2,7 @@
 
 The `flux-mirror keygen` command generates an EdDSA JSON Web Key pair for
 JWK-based registry auth. The output files plug directly into the
-[`auth.hosts[].credential.jwkPath`](./config.md#auth) config field, which
+[`hosts[].credential.jwkPath`](./config.md#hosts) config field, which
 `flux-mirror sync` and [`flux-mirror login`](./login.md) use to sign JWTs.
 
 ```
@@ -53,8 +53,8 @@ Output:
 
 ### Using the generated keys
 
-- **In a sync config** — point `auth.hosts[].credential.jwkPath` at `privkey.json`.
-  See the [`auth` section of the config spec](./config.md#auth).
+- **In a sync config** — point `hosts[].credential.jwkPath` at `privkey.json`.
+  See the [`hosts` section of the config spec](./config.md#hosts).
 - **To mint a one-shot JWT** — reference `privkey.json` from a host's
   `credential.jwkPath` and run [`flux-mirror login`](./login.md).
 - **To grant access** — share `pubkey.json` with the registry operator, or
