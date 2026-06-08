@@ -29,18 +29,18 @@ type HostAuth struct {
 
 // SelectAuthHosts returns the auth hosts to act on: the ones named in filter
 // (erroring on any not present), or all configured hosts when filter is empty.
-func SelectAuthHosts(cfg *apiv1.Config, filter []string) ([]apiv1.AuthHost, error) {
+func SelectAuthHosts(cfg *apiv1.Config, filter []string) ([]apiv1.RegistryHost, error) {
 	if len(cfg.Hosts) == 0 {
 		return nil, fmt.Errorf("config has no hosts")
 	}
 	if len(filter) == 0 {
 		return cfg.Hosts, nil
 	}
-	byHost := make(map[string]apiv1.AuthHost, len(cfg.Hosts))
+	byHost := make(map[string]apiv1.RegistryHost, len(cfg.Hosts))
 	for _, h := range cfg.Hosts {
 		byHost[h.Host] = h
 	}
-	out := make([]apiv1.AuthHost, 0, len(filter))
+	out := make([]apiv1.RegistryHost, 0, len(filter))
 	for _, name := range filter {
 		h, ok := byHost[name]
 		if !ok {
@@ -54,7 +54,7 @@ func SelectAuthHosts(cfg *apiv1.Config, filter []string) ([]apiv1.AuthHost, erro
 // HasCredential reports whether the host yields a registry credential — i.e. it
 // sets a provider or a credential. A TLS-only host (only tls configured) does
 // not, so the login/secret commands skip it.
-func HasCredential(h apiv1.AuthHost) bool {
+func HasCredential(h apiv1.RegistryHost) bool {
 	return h.Provider != "" || h.Credential != nil
 }
 
@@ -67,7 +67,7 @@ func HasCredential(h apiv1.AuthHost) bool {
 //
 // It errors on a host that configures neither (a TLS-only host); callers that
 // iterate all hosts should skip those via HasCredential first.
-func ResolveHostAuth(ctx context.Context, h apiv1.AuthHost) (HostAuth, error) {
+func ResolveHostAuth(ctx context.Context, h apiv1.RegistryHost) (HostAuth, error) {
 	if !HasCredential(h) {
 		return HostAuth{}, fmt.Errorf("host %q has no credential or provider configured", h.Host)
 	}
@@ -110,7 +110,7 @@ func pkgAuthProviderName(provider string) (string, error) {
 // providerAuthenticator obtains an authn.Authenticator for a provider host from
 // the cloud provider's ambient workload identity, the same way the
 // `flux push artifact` family does.
-func providerAuthenticator(ctx context.Context, h apiv1.AuthHost) (authn.Authenticator, error) {
+func providerAuthenticator(ctx context.Context, h apiv1.RegistryHost) (authn.Authenticator, error) {
 	name, err := pkgAuthProviderName(h.Provider)
 	if err != nil {
 		return nil, err
@@ -141,7 +141,7 @@ func (k providerKeychain) Resolve(res authn.Resource) (authn.Authenticator, erro
 // call, so go-containerregistry re-mints (e.g. a fresh jwkPath JWT) whenever it
 // refreshes the registry token. Used for credential hosts that set a username.
 type mintingAuthenticator struct {
-	host apiv1.AuthHost
+	host apiv1.RegistryHost
 }
 
 // Authorization implements authn.Authenticator.
@@ -163,7 +163,7 @@ func (m mintingAuthenticator) AuthorizationContext(ctx context.Context) (*authn.
 // credential hosts with a username — over the ambient Docker config. Provider
 // credentials are pre-fetched; username credentials are minted on demand.
 // Returns nil when no such host exists, so callers keep the default keychain.
-func BuildKeychain(ctx context.Context, hosts []apiv1.AuthHost) (authn.Keychain, error) {
+func BuildKeychain(ctx context.Context, hosts []apiv1.RegistryHost) (authn.Keychain, error) {
 	auths := make(map[string]authn.Authenticator)
 	for _, h := range hosts {
 		switch {
@@ -187,7 +187,7 @@ func BuildKeychain(ctx context.Context, hosts []apiv1.AuthHost) (authn.Keychain,
 // needed: true when any credential host has no username (a bearer token stamped
 // directly). Credential hosts with a username and provider hosts go through the
 // keychain instead.
-func NeedsCredentialTransport(hosts []apiv1.AuthHost) bool {
+func NeedsCredentialTransport(hosts []apiv1.RegistryHost) bool {
 	for _, h := range hosts {
 		if h.Credential != nil && h.Credential.Username == "" {
 			return true
@@ -199,7 +199,7 @@ func NeedsCredentialTransport(hosts []apiv1.AuthHost) bool {
 // NewCredentialTransport wraps inner with a cijwt transport that stamps the
 // per-host JWT credential on each request. Provider hosts are skipped (they
 // authenticate through the keychain). Call only when HasCredentialHosts is true.
-func NewCredentialTransport(inner http.RoundTripper, hosts []apiv1.AuthHost) (http.RoundTripper, error) {
+func NewCredentialTransport(inner http.RoundTripper, hosts []apiv1.RegistryHost) (http.RoundTripper, error) {
 	opts, err := JWTTransportOptions(inner, hosts)
 	if err != nil {
 		return nil, err
@@ -213,7 +213,7 @@ func NewCredentialTransport(inner http.RoundTripper, hosts []apiv1.AuthHost) (ht
 // to cijwt, which re-reads the file on every request. It assumes the config has
 // passed validation, so it only reports errors that need runtime state: an
 // unset env var or an unreadable key file.
-func JWTTransportOptions(inner http.RoundTripper, hosts []apiv1.AuthHost) ([]cijwt.Option, error) {
+func JWTTransportOptions(inner http.RoundTripper, hosts []apiv1.RegistryHost) ([]cijwt.Option, error) {
 	opts := []cijwt.Option{cijwt.WithInner(inner)}
 
 	for _, h := range hosts {

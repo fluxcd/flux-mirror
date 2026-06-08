@@ -19,7 +19,7 @@ import (
 )
 
 // NeedsTLS reports whether any host configures transport-layer TLS.
-func NeedsTLS(hosts []apiv1.AuthHost) bool {
+func NeedsTLS(hosts []apiv1.RegistryHost) bool {
 	for _, h := range hosts {
 		if h.TLS != nil {
 			return true
@@ -53,7 +53,7 @@ func (t tlsDispatchTransport) RoundTrip(req *http.Request) (*http.Response, erro
 //
 // The returned closer must be called when the transport is no longer needed; it
 // closes any SPIFFE Workload API sources opened for the configured hosts.
-func NewTLSTransport(ctx context.Context, inner http.RoundTripper, hosts []apiv1.AuthHost) (http.RoundTripper, func() error, error) {
+func NewTLSTransport(ctx context.Context, inner http.RoundTripper, hosts []apiv1.RegistryHost) (http.RoundTripper, func() error, error) {
 	if !NeedsTLS(hosts) {
 		return inner, func() error { return nil }, nil
 	}

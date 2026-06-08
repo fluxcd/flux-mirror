@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	jose "github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	. "github.com/onsi/gomega"
 	"github.com/spiffe/go-spiffe/v2/proto/spiffe/workload"
@@ -166,7 +166,7 @@ func TestSPIFFE_MTLSEndToEnd(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport,
-				[]apiv1.AuthHost{{Host: host, TLS: &apiv1.TLS{
+				[]apiv1.RegistryHost{{Host: host, TLS: &apiv1.TLS{
 					ClientAuth: &apiv1.TLSClientAuth{Provider: apiv1.TLSClientProviderX509SVID},
 					ServerAuth: &apiv1.TLSServerAuth{SPIFFE: tc.spiffe},
 				}}})
@@ -211,7 +211,7 @@ func TestSPIFFE_ClientOnly(t *testing.T) {
 	defer srv.Close()
 	host := mustHost(t, srv.URL)
 
-	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.AuthHost{{
+	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{{
 		Host: host,
 		TLS: &apiv1.TLS{
 			ServerAuth: &apiv1.TLSServerAuth{FromBytes: string(ca.certPEM)},
@@ -234,7 +234,7 @@ func TestSPIFFE_JWTSVIDCredential(t *testing.T) {
 	ca := newTestCA(t)
 	startFakeWorkloadAPI(t, ca)
 
-	h := apiv1.AuthHost{Host: "registry.example.com", Credential: &apiv1.AuthCredential{
+	h := apiv1.RegistryHost{Host: "registry.example.com", Credential: &apiv1.RegistryCredential{
 		Provider: apiv1.JWTProviderJWTSVID,
 	}}
 	cred, err := resolveCredential(context.Background(), h)

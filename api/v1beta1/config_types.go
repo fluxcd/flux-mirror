@@ -100,7 +100,7 @@ type Config struct {
 	// Hosts configures per-host authentication for OCI registry requests, both
 	// source pulls and destination pushes.
 	// +optional
-	Hosts []AuthHost `json:"hosts,omitempty"`
+	Hosts []RegistryHost `json:"hosts,omitempty"`
 
 	// Charts lists Helm charts to mirror from an HTTP/S or OCI source.
 	// +optional
@@ -111,19 +111,19 @@ type Config struct {
 	Artifacts []ArtifactEntry `json:"artifacts,omitempty"`
 }
 
-// AuthHost binds an authentication method to a registry host. Credential and
+// RegistryHost binds an authentication method to a registry host. Credential and
 // Provider configure the HTTP-layer registry credential (mutually exclusive).
 // TLS configures the transport-layer TLS/mTLS settings: it composes with
 // Credential, but is mutually exclusive with Provider — a cloud registry
 // provider is a managed registry whose transport flux-mirror does not customize.
-// At least one of Credential, Provider, or TLS must be set.
-type AuthHost struct {
+// At least one of Credential, Provider, TLS, or MaxChunkSize must be set.
+type RegistryHost struct {
 	// Host is the registry host (and optional port) the auth applies to.
 	Host string `json:"host"`
 
 	// Credential configures the HTTP-layer registry credential for the host.
 	// +optional
-	Credential *AuthCredential `json:"credential,omitempty"`
+	Credential *RegistryCredential `json:"credential,omitempty"`
 
 	// Provider authenticates the host with a cloud registry provider's workload
 	// identity, one of RegistryProviderECR, RegistryProviderACR or
@@ -136,9 +136,17 @@ type AuthHost struct {
 	// (custom CA), client certificate (mTLS), or SPIFFE X.509-SVID mTLS.
 	// +optional
 	TLS *TLS `json:"tls,omitempty"`
+
+	// MaxChunkSize is the maximum size in KiB (1024 bytes) for an OCI blob
+	// upload PATCH to this host; larger blobs are split into chunked PATCH
+	// uploads. 0 (the default) disables chunking, sending a single monolithic
+	// PATCH per blob. Useful for registries or proxies that cap request bodies.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxChunkSize int `json:"maxChunkSize,omitempty"`
 }
 
-// AuthCredential configures a per-host credential. Exactly one of Provider,
+// RegistryCredential configures a per-host credential. Exactly one of Provider,
 // FromEnv, FromPath, or JWKPath selects how the credential is obtained:
 //
 //   - Provider mints a per-request credential for Aud (an OIDC token for the
@@ -164,10 +172,10 @@ type AuthHost struct {
 // field. When set, the credential becomes the password of a username/password
 // pair: sync goes through the standard registry auth challenge (like the cloud
 // providers), and login/create write username/password/auth.
-type AuthCredential struct {
+type RegistryCredential struct {
 	// Provider mints a per-request credential for the audience, one of
 	// JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,
-	// JWTProviderAWS or JWTProviderJWTSVID.
+	// JWTProviderAWS, or JWTProviderJWTSVID.
 	// +optional
 	// +kubebuilder:validation:Enum=github;forgejo;gcp;azure;aws;jwt-svid
 	Provider string `json:"provider,omitempty"`
@@ -207,7 +215,7 @@ type AuthCredential struct {
 
 // EffectiveExp returns the jwkPath JWT lifetime with the documented default
 // (60s) applied. Only meaningful for jwkPath credentials.
-func (c AuthCredential) EffectiveExp() time.Duration {
+func (c RegistryCredential) EffectiveExp() time.Duration {
 	if c.Exp != nil {
 		return c.Exp.Duration
 	}
@@ -215,7 +223,7 @@ func (c AuthCredential) EffectiveExp() time.Duration {
 }
 
 // EffectiveAud returns the audience with the documented default (the host) applied.
-func (h AuthHost) EffectiveAud() string {
+func (h RegistryHost) EffectiveAud() string {
 	if h.Credential == nil || strings.TrimSpace(h.Credential.Aud) == "" {
 		return h.Host
 	}

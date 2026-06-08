@@ -96,7 +96,7 @@ func TestChunkingTransport_PassThrough(t *testing.T) {
 				body[i] = byte(i)
 			}
 			fake := &fakeRT{}
-			tr := &ChunkingTransport{Inner: fake, ChunkSize: tc.chunkSize}
+			tr := &ChunkingTransport{Inner: fake, ChunkSizes: map[string]int64{"example.test": tc.chunkSize}}
 			req, _ := http.NewRequest(tc.method, "https://example.test"+tc.path, strings.NewReader(string(body)))
 			req.ContentLength = int64(tc.bodyLen)
 			resp, err := tr.RoundTrip(req)
@@ -108,6 +108,20 @@ func TestChunkingTransport_PassThrough(t *testing.T) {
 	}
 }
 
+func TestChunkingTransport_UnconfiguredHostPassesThrough(t *testing.T) {
+	g := NewWithT(t)
+	body := make([]byte, 250)
+	fake := &fakeRT{}
+	// Only example.test is configured for chunking; a large upload to a
+	// different host must pass through as a single monolithic PATCH.
+	tr := &ChunkingTransport{Inner: fake, ChunkSizes: map[string]int64{"example.test": 100}}
+	resp, err := tr.RoundTrip(newPATCH(t, "https://other.test/v2/repo/blobs/uploads/abc", body))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(resp.StatusCode).To(Equal(http.StatusAccepted))
+	g.Expect(fake.calls).To(HaveLen(1))
+	g.Expect(fake.calls[0].body).To(Equal(body))
+}
+
 func TestChunkingTransport_SplitsAtChunkBoundary(t *testing.T) {
 	g := NewWithT(t)
 	body := make([]byte, 250)
@@ -115,7 +129,7 @@ func TestChunkingTransport_SplitsAtChunkBoundary(t *testing.T) {
 		body[i] = byte(i)
 	}
 	fake := &fakeRT{}
-	tr := &ChunkingTransport{Inner: fake, ChunkSize: 100}
+	tr := &ChunkingTransport{Inner: fake, ChunkSizes: map[string]int64{"example.test": 100}}
 	resp, err := tr.RoundTrip(newPATCH(t, "https://example.test/v2/repo/blobs/uploads/abc", body))
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(resp.StatusCode).To(Equal(http.StatusAccepted))
@@ -136,7 +150,7 @@ func TestChunkingTransport_ForwardsHeaders(t *testing.T) {
 	g := NewWithT(t)
 	body := make([]byte, 200)
 	fake := &fakeRT{}
-	tr := &ChunkingTransport{Inner: fake, ChunkSize: 100}
+	tr := &ChunkingTransport{Inner: fake, ChunkSizes: map[string]int64{"example.test": 100}}
 	_, err := tr.RoundTrip(newPATCH(t, "https://example.test/v2/repo/blobs/uploads/abc", body))
 	g.Expect(err).ToNot(HaveOccurred())
 	for _, c := range fake.calls {
@@ -149,7 +163,7 @@ func TestChunkingTransport_DefaultsContentType(t *testing.T) {
 	g := NewWithT(t)
 	body := make([]byte, 200)
 	fake := &fakeRT{}
-	tr := &ChunkingTransport{Inner: fake, ChunkSize: 100}
+	tr := &ChunkingTransport{Inner: fake, ChunkSizes: map[string]int64{"example.test": 100}}
 	req, _ := http.NewRequest(http.MethodPatch, "https://example.test/v2/repo/blobs/uploads/abc", strings.NewReader(string(body)))
 	req.ContentLength = int64(len(body))
 	// No Content-Type set on caller; ChunkingTransport must default.
@@ -176,7 +190,7 @@ func TestChunkingTransport_HonorsLocationFromPriorChunk(t *testing.T) {
 			}
 		},
 	}
-	tr := &ChunkingTransport{Inner: fake, ChunkSize: 100}
+	tr := &ChunkingTransport{Inner: fake, ChunkSizes: map[string]int64{"example.test": 100}}
 	resp, err := tr.RoundTrip(newPATCH(t, "https://example.test/v2/repo/blobs/uploads/start", body))
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(resp.StatusCode).To(Equal(http.StatusAccepted))
@@ -206,7 +220,7 @@ func TestChunkingTransport_AbortsOnNon202(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusAccepted, Header: h, Body: io.NopCloser(strings.NewReader(""))}
 		},
 	}
-	tr := &ChunkingTransport{Inner: fake, ChunkSize: 100}
+	tr := &ChunkingTransport{Inner: fake, ChunkSizes: map[string]int64{"example.test": 100}}
 	resp, err := tr.RoundTrip(newPATCH(t, "https://example.test/v2/repo/blobs/uploads/abc", body))
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(resp.StatusCode).To(Equal(http.StatusInternalServerError))
@@ -216,7 +230,7 @@ func TestChunkingTransport_AbortsOnNon202(t *testing.T) {
 
 func TestChunkingTransport_NilBody(t *testing.T) {
 	g := NewWithT(t)
-	tr := &ChunkingTransport{Inner: &fakeRT{}, ChunkSize: 100}
+	tr := &ChunkingTransport{Inner: &fakeRT{}, ChunkSizes: map[string]int64{"example.test": 100}}
 	req, _ := http.NewRequest(http.MethodPatch, "https://example.test/v2/repo/blobs/uploads/abc", nil)
 	req.ContentLength = 200
 	_, err := tr.RoundTrip(req)

@@ -80,7 +80,6 @@ type syncFlags struct {
 	verbose       bool
 	insecure      bool
 	noProgress    bool
-	maxChunkSize  int
 }
 
 var syncArgs = syncFlags{
@@ -111,10 +110,6 @@ func init() {
 		"Allow plaintext HTTP and skip TLS verification (test/dev only).")
 	syncCmd.Flags().BoolVar(&syncArgs.noProgress, "no-progress", false,
 		"Disable the live progress spinner.")
-	syncCmd.Flags().IntVar(&syncArgs.maxChunkSize, "oci-max-chunk-size", 0,
-		"Maximum size in KiB (1024 bytes) for an OCI blob upload PATCH; "+
-			"larger blobs are split into chunked PATCH uploads. 0 disables "+
-			"chunking (single monolithic PATCH per blob).")
 
 	rootCmd.AddCommand(syncCmd)
 }
@@ -281,10 +276,10 @@ func classifyExit(r sync.Result, driftExitCode int) error {
 }
 
 // buildClientTransport composes the optional transport stack from the config's
-// hosts and --oci-max-chunk-size. Returns (nil, noop, nil) if none is requested.
-// Stack order, outer first:
+// hosts (credentials, TLS, and per-host maxChunkSize). Returns (nil, noop, nil)
+// if none is requested. Stack order, outer first:
 //
-//	ChunkingTransport (split big PATCH bodies)
+//	ChunkingTransport (split big PATCH bodies, per destination host)
 //	  → cijwt.Transport (stamp Authorization on each chunk request)
 //	    → tls dispatch (per-host TLS/mTLS) | http.DefaultTransport
 //
@@ -292,15 +287,15 @@ func classifyExit(r sync.Result, driftExitCode int) error {
 // per-request token minting works per chunk; chunking is the outer wrapper so
 // split chunks each get freshly stamped auth from the JWT layer. The returned
 // closer releases any SPIFFE Workload API sources and must be called when done.
-func buildClientTransport(ctx context.Context, hosts []apiv1.AuthHost) (http.RoundTripper, func() error, error) {
+func buildClientTransport(ctx context.Context, hosts []apiv1.RegistryHost) (http.RoundTripper, func() error, error) {
 	noop := func() error { return nil }
 
 	// Only credential hosts use the cijwt transport; provider hosts authenticate
 	// through the keychain instead.
 	credSet := registryauth.NeedsCredentialTransport(hosts)
-	chunkSet := syncArgs.maxChunkSize > 0
+	chunkSizes := chunkSizesByHost(hosts)
 	tlsSet := registryauth.NeedsTLS(hosts)
-	if !credSet && !chunkSet && !tlsSet {
+	if !credSet && len(chunkSizes) == 0 && !tlsSet {
 		return nil, noop, nil
 	}
 
@@ -318,13 +313,26 @@ func buildClientTransport(ctx context.Context, hosts []apiv1.AuthHost) (http.Rou
 		}
 		t = ct
 	}
-	if chunkSet {
-		t = &oci.ChunkingTransport{
-			Inner:     t,
-			ChunkSize: int64(syncArgs.maxChunkSize) * 1024,
-		}
+	if len(chunkSizes) > 0 {
+		t = &oci.ChunkingTransport{Inner: t, ChunkSizes: chunkSizes}
 	}
 	return t, closeTLS, nil
+}
+
+// chunkSizesByHost maps each host that sets a positive maxChunkSize to its
+// chunk size in bytes (the config value is in KiB). Hosts that leave it unset
+// or 0 are omitted, so their blob uploads are never chunked.
+func chunkSizesByHost(hosts []apiv1.RegistryHost) map[string]int64 {
+	var m map[string]int64
+	for _, h := range hosts {
+		if h.MaxChunkSize > 0 {
+			if m == nil {
+				m = make(map[string]int64)
+			}
+			m[h.Host] = int64(h.MaxChunkSize) * 1024
+		}
+	}
+	return m
 }
 
 func resolveConfigPath(args []string) (string, error) {

@@ -41,7 +41,7 @@ import (
 // mirroring what jwtTransportOptions wires into the sync transport but returning
 // the value directly. It assumes the config has passed validation (exactly one
 // source).
-func resolveCredential(ctx context.Context, h apiv1.AuthHost) (string, error) {
+func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error) {
 	c := h.Credential
 	aud := h.EffectiveAud()
 	switch {

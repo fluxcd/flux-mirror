@@ -60,7 +60,7 @@ func ResolvePaths(c *apiv1.Config, baseDir string) error {
 }
 
 // hostPathFields returns pointers to the file-path string fields set on a host.
-func hostPathFields(h *apiv1.AuthHost) []*string {
+func hostPathFields(h *apiv1.RegistryHost) []*string {
 	var ps []*string
 	if h.Credential != nil {
 		ps = append(ps, &h.Credential.FromPath, &h.Credential.JWKPath)
@@ -129,7 +129,7 @@ func validate(c *apiv1.Config, requireEntries bool) error {
 	return nil
 }
 
-func validateHost(h apiv1.AuthHost) error {
+func validateHost(h apiv1.RegistryHost) error {
 	if strings.TrimSpace(h.Host) == "" {
 		return fmt.Errorf("host is required")
 	}
@@ -158,8 +158,11 @@ func validateHost(h apiv1.AuthHost) error {
 			return fmt.Errorf("tls: %w", err)
 		}
 	}
-	if h.Credential == nil && provider == "" && h.TLS == nil {
-		return fmt.Errorf("one of credential, provider, or tls is required")
+	if h.MaxChunkSize < 0 {
+		return fmt.Errorf("maxChunkSize must be >= 0 (0 disables chunking)")
+	}
+	if h.Credential == nil && provider == "" && h.TLS == nil && h.MaxChunkSize == 0 {
+		return fmt.Errorf("one of credential, provider, tls, or maxChunkSize is required")
 	}
 	return nil
 }
@@ -300,7 +303,7 @@ func validateSPIFFE(s apiv1.SPIFFETLS) error {
 	return nil
 }
 
-func validateCredential(j apiv1.AuthCredential) error {
+func validateCredential(j apiv1.RegistryCredential) error {
 	provider := strings.TrimSpace(j.Provider)
 	fromEnv := strings.TrimSpace(j.FromEnv)
 	fromPath := strings.TrimSpace(j.FromPath)

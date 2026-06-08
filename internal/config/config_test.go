@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/fluxcd/flux-mirror/api/v1beta1"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	. "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
 func TestDecode_FullExample(t *testing.T) {
@@ -89,9 +90,9 @@ func TestResolvePaths(t *testing.T) {
 	g := NewWithT(t)
 
 	mkCfg := func() *Config {
-		return &Config{Hosts: []AuthHost{{
+		return &Config{Hosts: []RegistryHost{{
 			Host: "h.example",
-			Credential: &AuthCredential{
+			Credential: &RegistryCredential{
 				FromPath: "tokens/jwt",
 				JWKPath:  "/abs/keys/jwk.json", // absolute: clamped within baseDir
 			},
@@ -280,50 +281,50 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth valid provider",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
-					Host: "mint.example", Credential: &AuthCredential{Provider: JWTProviderGitHub, Aud: "custom"},
+				Hosts: []RegistryHost{{
+					Host: "mint.example", Credential: &RegistryCredential{Provider: JWTProviderGitHub, Aud: "custom"},
 				}}},
 		},
 		{
 			name: "auth valid provider gcp",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
-					Host: "us-docker.pkg.dev", Credential: &AuthCredential{Provider: JWTProviderGCP, Aud: "custom"},
+				Hosts: []RegistryHost{{
+					Host: "us-docker.pkg.dev", Credential: &RegistryCredential{Provider: JWTProviderGCP, Aud: "custom"},
 				}}},
 		},
 		{
 			name: "auth valid provider azure",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
-					Host: "myregistry.azurecr.io", Credential: &AuthCredential{Provider: JWTProviderAzure, Aud: "custom"},
+				Hosts: []RegistryHost{{
+					Host: "myregistry.azurecr.io", Credential: &RegistryCredential{Provider: JWTProviderAzure, Aud: "custom"},
 				}}},
 		},
 		{
 			name: "auth valid provider aws",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
-					Host: "registry.example.com", Credential: &AuthCredential{Provider: JWTProviderAWS, Aud: "custom"},
+				Hosts: []RegistryHost{{
+					Host: "registry.example.com", Credential: &RegistryCredential{Provider: JWTProviderAWS, Aud: "custom"},
 				}}},
 		},
 		{
 			name: "auth valid fromEnv",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
-					Host: "static.example", Credential: &AuthCredential{FromEnv: "TOKEN"},
+				Hosts: []RegistryHost{{
+					Host: "static.example", Credential: &RegistryCredential{FromEnv: "TOKEN"},
 				}}},
 		},
 		{
 			name: "auth valid fromPath",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
-					Host: "static.example", Credential: &AuthCredential{FromPath: "/run/secrets/token"},
+				Hosts: []RegistryHost{{
+					Host: "static.example", Credential: &RegistryCredential{FromPath: "/run/secrets/token"},
 				}}},
 		},
 		{
 			name: "auth valid jwkPath",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
-					Host: "registry.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{
+					Host: "registry.example", Credential: &RegistryCredential{
 						JWKPath: "/path/jwk.json", Iss: "https://issuer", Sub: "client", Aud: "registry.example",
 					},
 				}}},
@@ -331,8 +332,8 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth valid jwkPath with exp",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
-					Host: "registry.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{
+					Host: "registry.example", Credential: &RegistryCredential{
 						JWKPath: "/path/jwk.json", Iss: "https://issuer", Sub: "client",
 						Exp: &metav1.Duration{Duration: time.Hour},
 					},
@@ -341,8 +342,8 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth jwkPath exp non-positive",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
-					Host: "registry.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{
+					Host: "registry.example", Credential: &RegistryCredential{
 						JWKPath: "/path/jwk.json", Iss: "https://issuer", Sub: "client",
 						Exp: &metav1.Duration{Duration: 0},
 					},
@@ -352,8 +353,8 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth exp rejected with provider",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
-					Host: "registry.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{
+					Host: "registry.example", Credential: &RegistryCredential{
 						Provider: JWTProviderGitHub, Exp: &metav1.Duration{Duration: time.Hour},
 					},
 				}}},
@@ -362,8 +363,8 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth exp rejected with fromEnv",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
-					Host: "registry.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{
+					Host: "registry.example", Credential: &RegistryCredential{
 						FromEnv: "TOKEN", Exp: &metav1.Duration{Duration: time.Hour},
 					},
 				}}},
@@ -372,56 +373,67 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth missing host",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Credential: &AuthCredential{FromEnv: "TOKEN"}}}},
+				Hosts: []RegistryHost{{Credential: &RegistryCredential{FromEnv: "TOKEN"}}}},
 			errMsg: "host is required",
 		},
 		{
-			name: "auth missing credential, provider and tls",
+			name: "auth missing credential, provider, tls and maxChunkSize",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example"}}},
-			errMsg: "one of credential, provider, or tls is required",
+				Hosts: []RegistryHost{{Host: "h.example"}}},
+			errMsg: "one of credential, provider, tls, or maxChunkSize is required",
+		},
+		{
+			name: "auth maxChunkSize only is valid",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{Host: "h.example", MaxChunkSize: 1024}}},
+		},
+		{
+			name: "auth negative maxChunkSize",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{Host: "h.example", MaxChunkSize: -1}}},
+			errMsg: "maxChunkSize must be >= 0",
 		},
 		{
 			name: "auth valid provider ecr",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
+				Hosts: []RegistryHost{{
 					Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: RegistryProviderECR,
 				}}},
 		},
 		{
 			name: "auth invalid provider",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Provider: "dockerhub"}}},
+				Hosts: []RegistryHost{{Host: "h.example", Provider: "dockerhub"}}},
 			errMsg: "provider \"dockerhub\" must be one of: ecr, acr, gar",
 		},
 		{
 			name: "auth credential and provider mutually exclusive",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{
+				Hosts: []RegistryHost{{
 					Host: "h.example", Provider: RegistryProviderGAR,
-					Credential: &AuthCredential{FromEnv: "TOKEN"},
+					Credential: &RegistryCredential{FromEnv: "TOKEN"},
 				}}},
 			errMsg: "credential and provider are mutually exclusive",
 		},
 		{
 			name: "auth duplicate host",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{
-					{Host: "dup.example", Credential: &AuthCredential{FromEnv: "A"}},
-					{Host: "dup.example", Credential: &AuthCredential{FromEnv: "B"}},
+				Hosts: []RegistryHost{
+					{Host: "dup.example", Credential: &RegistryCredential{FromEnv: "A"}},
+					{Host: "dup.example", Credential: &RegistryCredential{FromEnv: "B"}},
 				}},
 			errMsg: "configured more than once",
 		},
 		{
 			name: "auth no source set",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{}}}},
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{}}}},
 			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
 		},
 		{
 			name: "auth two sources set",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					Provider: JWTProviderGitHub, FromEnv: "TOKEN",
 				}}}},
 			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
@@ -429,7 +441,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth invalid provider",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					Provider: "gitlab",
 				}}}},
 			errMsg: "must be one of: github, forgejo, gcp, azure, aws",
@@ -437,7 +449,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth jwkPath missing iss",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					JWKPath: "/k.json", Sub: "client",
 				}}}},
 			errMsg: "iss is required with jwkPath",
@@ -445,7 +457,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth jwkPath missing sub",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					JWKPath: "/k.json", Iss: "https://issuer",
 				}}}},
 			errMsg: "sub is required with jwkPath",
@@ -453,7 +465,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth iss set without jwkPath",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					Provider: JWTProviderGitHub, Iss: "https://issuer",
 				}}}},
 			errMsg: "iss and sub can only be set with jwkPath",
@@ -461,7 +473,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth aud set with fromEnv",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					FromEnv: "TOKEN", Aud: "nope",
 				}}}},
 			errMsg: "aud can only be set with jwkPath or provider",
@@ -469,7 +481,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth aud set with fromPath",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					FromPath: "/path/token", Aud: "nope",
 				}}}},
 			errMsg: "aud can only be set with jwkPath or provider",
@@ -477,7 +489,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth iss set with fromPath",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					FromPath: "/path/token", Iss: "https://issuer",
 				}}}},
 			errMsg: "iss and sub can only be set with jwkPath",
@@ -485,7 +497,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth fromPath and fromEnv set",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					FromEnv: "TOKEN", FromPath: "/path/token",
 				}}}},
 			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
@@ -493,21 +505,21 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "credential provider jwt-svid is valid",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Credential: &AuthCredential{
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					Provider: JWTProviderJWTSVID, Aud: "h.example",
 				}}}},
 		},
 		{
 			name: "tls serverAuth only host is valid",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ServerAuth: &TLSServerAuth{FromPath: "/ca.crt"},
 				}}}},
 		},
 		{
 			name: "tls and provider mutually exclusive",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", Provider: RegistryProviderECR,
+				Hosts: []RegistryHost{{Host: "h.example", Provider: RegistryProviderECR,
 					TLS: &TLS{ServerAuth: &TLSServerAuth{FromPath: "/ca.crt"}},
 				}}},
 			errMsg: "provider and tls are mutually exclusive",
@@ -515,15 +527,15 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "tls credential and tls together is valid",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example",
-					Credential: &AuthCredential{FromEnv: "TOKEN"},
+				Hosts: []RegistryHost{{Host: "h.example",
+					Credential: &RegistryCredential{FromEnv: "TOKEN"},
 					TLS:        &TLS{ClientAuth: &TLSClientAuth{Certificate: &TLSData{FromPath: "/c.crt"}, Key: &TLSKey{FromPath: "/c.key"}}},
 				}}},
 		},
 		{
 			name: "tls client-only spiffe with custom CA server is valid",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ServerAuth: &TLSServerAuth{FromPath: "/ca.crt"},
 					ClientAuth: &TLSClientAuth{Provider: TLSClientProviderX509SVID},
 				}}}},
@@ -531,7 +543,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "tls full spiffe (client svid + server spiffe) is valid",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ServerAuth: &TLSServerAuth{SPIFFE: &SPIFFETLS{TrustDomain: TrustDomainSelf}},
 					ClientAuth: &TLSClientAuth{Provider: TLSClientProviderX509SVID},
 				}}}},
@@ -539,13 +551,13 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "tls empty is rejected",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{}}}},
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{}}}},
 			errMsg: "one of serverAuth or clientAuth is required",
 		},
 		{
 			name: "tls serverAuth two sources",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ServerAuth: &TLSServerAuth{FromPath: "/ca.crt", FromEnv: "CA"},
 				}}}},
 			errMsg: "serverAuth: exactly one of fromPath, fromEnv, fromBytes, or spiffe",
@@ -553,7 +565,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "tls serverAuth ca and spiffe together",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ServerAuth: &TLSServerAuth{FromPath: "/ca.crt", SPIFFE: &SPIFFETLS{AuthorizeAny: true}},
 				}}}},
 			errMsg: "serverAuth: exactly one of fromPath, fromEnv, fromBytes, or spiffe",
@@ -561,7 +573,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "tls clientAuth missing key",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ClientAuth: &TLSClientAuth{Certificate: &TLSData{FromPath: "/c.crt"}},
 				}}}},
 			errMsg: "clientAuth: key is required",
@@ -569,7 +581,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "tls clientAuth provider and static mutually exclusive",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ClientAuth: &TLSClientAuth{Provider: TLSClientProviderX509SVID, Key: &TLSKey{FromPath: "/c.key"}},
 				}}}},
 			errMsg: "provider is mutually exclusive with certificate and key",
@@ -577,7 +589,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "tls clientAuth invalid provider",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ClientAuth: &TLSClientAuth{Provider: "jwt-svid"},
 				}}}},
 			errMsg: `provider "jwt-svid" must be "x509-svid"`,
@@ -585,14 +597,14 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "tls serverAuth spiffe serverID valid",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ServerAuth: &TLSServerAuth{SPIFFE: &SPIFFETLS{ServerID: "spiffe://example.org/registry"}},
 				}}}},
 		},
 		{
 			name: "tls serverAuth spiffe no authorizer",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ServerAuth: &TLSServerAuth{SPIFFE: &SPIFFETLS{}},
 				}}}},
 			errMsg: "exactly one of serverID, trustDomain, or authorizeAny must be set",
@@ -600,7 +612,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "tls serverAuth spiffe two authorizers",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ServerAuth: &TLSServerAuth{SPIFFE: &SPIFFETLS{TrustDomain: TrustDomainSelf, AuthorizeAny: true}},
 				}}}},
 			errMsg: "exactly one of serverID, trustDomain, or authorizeAny must be set",
@@ -608,7 +620,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "tls serverAuth spiffe invalid serverID",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []AuthHost{{Host: "h.example", TLS: &TLS{
+				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ServerAuth: &TLSServerAuth{SPIFFE: &SPIFFETLS{ServerID: "not-a-spiffe-id"}},
 				}}}},
 			errMsg: "is not a valid SPIFFE ID",

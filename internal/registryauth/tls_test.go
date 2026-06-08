@@ -116,7 +116,7 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 
 	t.Run("serverAuth + clientAuth succeeds", func(t *testing.T) {
 		g := NewWithT(t)
-		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.AuthHost{{
+		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{{
 			Host: host,
 			TLS: &apiv1.TLS{
 				ServerAuth: &apiv1.TLSServerAuth{FromBytes: string(ca.certPEM)},
@@ -136,7 +136,7 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 
 	t.Run("missing client cert is rejected by the server", func(t *testing.T) {
 		g := NewWithT(t)
-		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.AuthHost{{
+		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{{
 			Host: host,
 			TLS:  &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{FromBytes: string(ca.certPEM)}},
 		}})
@@ -150,7 +150,7 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 	t.Run("wrong CA fails server verification", func(t *testing.T) {
 		g := NewWithT(t)
 		otherCA := newTestCA(t)
-		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.AuthHost{{
+		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{{
 			Host: host,
 			TLS: &apiv1.TLS{
 				ServerAuth: &apiv1.TLSServerAuth{FromBytes: string(otherCA.certPEM)},
@@ -218,15 +218,15 @@ func makeCertPEM(t *testing.T) (certPEM, keyPEM []byte) {
 func TestNeedsTLS(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(NeedsTLS(nil)).To(BeFalse())
-	g.Expect(NeedsTLS([]apiv1.AuthHost{{Host: "a", Credential: &apiv1.AuthCredential{FromEnv: "X"}}})).To(BeFalse())
-	g.Expect(NeedsTLS([]apiv1.AuthHost{{Host: "a", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{FromBytes: "x"}}}})).To(BeTrue())
+	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", Credential: &apiv1.RegistryCredential{FromEnv: "X"}}})).To(BeFalse())
+	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{FromBytes: "x"}}}})).To(BeTrue())
 }
 
 func TestNewTLSTransport_NoTLSReturnsInner(t *testing.T) {
 	g := NewWithT(t)
 	inner := http.DefaultTransport
-	rt, closeFn, err := NewTLSTransport(context.Background(), inner, []apiv1.AuthHost{
-		{Host: "a", Credential: &apiv1.AuthCredential{FromEnv: "X"}},
+	rt, closeFn, err := NewTLSTransport(context.Background(), inner, []apiv1.RegistryHost{
+		{Host: "a", Credential: &apiv1.RegistryCredential{FromEnv: "X"}},
 	})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(rt).To(BeIdenticalTo(inner))
@@ -238,13 +238,13 @@ func TestNewTLSTransport_StaticDispatch(t *testing.T) {
 	caPEM, _ := makeCertPEM(t)
 	certPEM, keyPEM := makeCertPEM(t)
 
-	hosts := []apiv1.AuthHost{
+	hosts := []apiv1.RegistryHost{
 		{Host: "ca.example", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{FromBytes: string(caPEM)}}},
 		{Host: "mtls.example", TLS: &apiv1.TLS{ClientAuth: &apiv1.TLSClientAuth{
 			Certificate: &apiv1.TLSData{FromBytes: string(certPEM)},
 			Key:         &apiv1.TLSKey{FromPath: writeTemp(t, keyPEM)},
 		}}},
-		{Host: "plain.example", Credential: &apiv1.AuthCredential{FromEnv: "X"}},
+		{Host: "plain.example", Credential: &apiv1.RegistryCredential{FromEnv: "X"}},
 	}
 	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, hosts)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -264,7 +264,7 @@ func TestNewTLSTransport_StaticDispatch(t *testing.T) {
 
 func TestNewTLSTransport_BadCABundle(t *testing.T) {
 	g := NewWithT(t)
-	_, _, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.AuthHost{
+	_, _, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{
 		{Host: "ca.example", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{FromBytes: "not a pem"}}},
 	})
 	g.Expect(err).To(MatchError(ContainSubstring("no valid certificates in CA bundle")))

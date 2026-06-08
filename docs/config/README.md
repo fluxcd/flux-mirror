@@ -36,7 +36,7 @@ hosts:
       fromEnv: 'QUAY_TOKEN'
 ```
 
-## Top-level fields
+## Specification
 
 | Field        | Type   | Default | Description                                                                                 |
 |--------------|--------|---------|---------------------------------------------------------------------------------------------|
@@ -59,7 +59,7 @@ Multi-arch images are mirrored faithfully as manifest lists; no platform filteri
 This section handles any OCI-addressable artifact: container images, OCI Helm
 charts, Flux OCI artifacts, or anything else stored in an OCI registry.
 
-### Fields
+### Artifact Fields
 
 | Field              | Type   | Default | Description                                                                                                                                                                    |
 |--------------------|--------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -95,7 +95,7 @@ The pipeline always orders highest first and takes the top N.
   don't parse are silently dropped. Typically paired with `regex` to extract
   a numeric portion from a composite tag.
 
-### Regex filter
+#### Regex filter
 
 Applies a Go regular expression to each tag before sort. A named capture
 group can extract a substring used as the comparison key, so tags with
@@ -199,7 +199,7 @@ detected by comparing the source tarball's content digest against the
 destination chart-layer digest, so re-runs against an unchanged source are
 idempotent.
 
-### Fields
+### Chart Fields
 
 | Field         | Type   | Default | Description                                                                                                                     |
 |---------------|--------|---------|---------------------------------------------------------------------------------------------------------------------------------|
@@ -262,28 +262,20 @@ destination is `quay.io/example/charts/my-app:<version>`.
 
 ## Hosts
 
-The optional `hosts` section attaches a credential to specific OCI registry
-hosts. On each request to a listed host, the credential is sent as the
-`Authorization: Bearer <credential>` value. Requests to hosts that are not
-listed use the ambient keychain auth (Docker config `~/.docker/config.json` /
-`$DOCKER_CONFIG` and any configured credential helpers) instead.
+The optional `hosts` section configures per-host registry authentication. A host
+listed here takes priority over Docker config. Requests to hosts that are not
+listed fall back to that ambient Docker config.
 
-`hosts` and the ambient credential files work together fine — **as long as each
-registry host is served by one or the other, not both.** Listing a host in
-`hosts` *and* relying on ambient credentials for that same host is unsupported:
-the credential and the keychain layer on top of each other in a registry-dependent
-way, and the result is undefined. Pick one mechanism per host.
-
-> This applies only to OCI registry requests — the `artifacts` section and
-> `oci://` Helm sources. HTTP/S Helm repositories are never affected by `hosts`;
-> their credentials always come from the Helm repositories config
-> (`repositories.yaml` / `$HELM_REPOSITORY_CONFIG`). See [Source scheme](#source-scheme).
+**Note** that the `hosts` section does not apply to Helm HTTP/S repositories,
+which use the ambient Helm repositories config.
 
 Each host configures either a `credential` (a JWT-based token, below) or a
 cloud registry `provider` — the two are mutually exclusive. A `credential` host
 (or a host with neither) may also set [`tls`](#tls) for transport-layer TLS/mTLS;
 `tls` is not allowed with `provider` (a cloud registry is managed and its
-transport is not customized). At least one of the three is required.
+transport is not customized). The host-level [`maxChunkSize`](#host-fields) tunes
+blob uploads independently of auth. At least one of `credential`, `provider`,
+`tls`, or `maxChunkSize` is required.
 
 ```yaml
 hosts:
@@ -355,12 +347,9 @@ exclusive with `credential`.
 | `fromPath` | Sends the JWT read from the file at the path, with surrounding whitespace trimmed. The file is re-read on every request.                                                                                                                                                                                                                                                                                                   |
 | `jwkPath`  | Signs a fresh JWT with the private Ed25519/ECDSA key in the JWK file at this path. By default each request gets a new 60-second token; set `exp` to issue longer-lived tokens (then cached and reminted at half-life). The file may be a bare JWK or a JWK set (`{"keys":[...]}`) containing exactly one key. The key id is set in the `kid` header. Generate a key pair with [`flux-mirror keygen`](../guides/keygen.md). |
 
-> Path values (`fromPath`, `jwkPath`, and the `tls` path fields) are resolved
-> within the config file's directory (via `SecureJoin`): relative paths,
-> absolute paths, and `../` segments are all confined to that directory, and
-> symlinks cannot escape it — a config can only reference files under its own
-> directory tree. When the config is read from stdin (`-f -`), the process working
-> directory is used as the confinement root instead.
+Path values (`fromPath`, `jwkPath`, and the `tls` path fields) are resolved relative to the config file's directory.
+A config can only reference files under its own directory tree.
+When the config is read from stdin (`-f -`), the process working directory is used as the confinement root instead.
 
 ### Token providers
 
@@ -388,27 +377,37 @@ platform docs for setup:
   (`SPIFFE_ENDPOINT_SOCKET`). This is the HTTP-layer counterpart to the
   transport-layer SPIFFE X.509-SVID mTLS under [`tls`](#tls).
 
-### Fields
+### Host fields
 
-The fields below are on the `credential` object, except `host` and `provider`
-which are on the host itself. Each host sets at most one of `credential` or
-`provider` (they are mutually exclusive); [`tls`](#tls) composes with `credential`
-but is not allowed with `provider`. At least one of `credential`, `provider`, or
-`tls` is required.
+A `hosts[]` entry. At least one of `credential`, `provider`, `tls`, or
+`maxChunkSize` must be set. `credential` and `provider` are mutually exclusive;
+`tls` composes with `credential` but is not allowed with `provider`.
 
-| Field                 | Type     | Default | Description                                                                                                                                                                                                                                                                                                     |
-|-----------------------|----------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `host`                | string   |         | Registry host to authenticate. Required and unique across `hosts`.                                                                                                                                                                                                                                              |
-| `provider` (host)     | string   |         | Cloud registry provider, one of `ecr`, `acr`, `gar`. Mutually exclusive with `credential`. See [Registry providers](#registry-providers).                                                                                                                                                                       |
-| `credential.provider` | string   |         | Token provider, one of `github`, `forgejo`, `gcp`, `azure`, `aws`, `jwt-svid`. Mutually exclusive with `fromEnv`, `fromPath`, and `jwkPath`.                                                                                                                                                                    |
-| `fromEnv`             | string   |         | Environment variable holding a static JWT. Mutually exclusive with `provider`, `fromPath`, and `jwkPath`.                                                                                                                                                                                                       |
-| `fromPath`            | string   |         | Path to a file holding a static JWT. Mutually exclusive with `provider`, `fromEnv`, and `jwkPath`.                                                                                                                                                                                                              |
-| `jwkPath`             | string   |         | Path to a private JSON Web Key, as a bare JWK or a single-key JWK set. Mutually exclusive with `provider`, `fromEnv`, and `fromPath`.                                                                                                                                                                           |
-| `iss`                 | string   |         | Token issuer. Required with `jwkPath`; not allowed otherwise.                                                                                                                                                                                                                                                   |
-| `sub`                 | string   |         | Token subject. Required with `jwkPath`; not allowed otherwise.                                                                                                                                                                                                                                                  |
-| `aud`                 | string   | `host`  | Token audience. Allowed only with `jwkPath` or `provider`; defaults to `host`.                                                                                                                                                                                                                                  |
-| `exp`                 | duration | `60s`   | JWT lifetime (e.g. `1h`). Allowed only with `jwkPath` — the one source whose lifetime flux-mirror controls. Must be positive. Other sources' lifetimes are fixed by their issuer.                                                                                                                               |
-| `username`            | string   |         | When unset, the credential is a bearer token (`registrytoken` / `Authorization: Bearer`). When set, the credential is the password of a `username`/`password` pair, using the standard registry auth challenge. See [Bearer token vs. username/password](#bearer-token-vs-usernamepassword-credentialusername). |
+| Field          | Type   | Default | Description                                                                                                                                                                                                |
+|----------------|--------|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `host`         | string |         | Registry host (with optional port) the entry applies to. Required and unique across `hosts`.                                                                                                               |
+| `credential`   | object |         | Per-host JWT-based credential. Mutually exclusive with `provider`. See [Credential fields](#credential-fields).                                                                                            |
+| `provider`     | string |         | Cloud registry provider, one of `ecr`, `acr`, `gar`. Mutually exclusive with `credential`. See [Registry providers](#registry-providers).                                                                  |
+| `tls`          | object |         | Transport-layer TLS/mTLS for this host. Composes with `credential`; not allowed with `provider`. See [TLS](#tls).                                                                                          |
+| `maxChunkSize` | int    | `0`     | Maximum size in KiB for a blob-upload `PATCH` to this host; larger blobs are split into chunked uploads. `0` disables chunking (one monolithic `PATCH` per blob). Useful behind body-size-capping proxies. |
+
+### Credential fields
+
+The `credential` object on a host. It selects exactly one token source
+(`provider`, `fromEnv`, `fromPath`, or `jwkPath`); see [Token sources](#token-sources)
+for what each does.
+
+| Field      | Type     | Default | Description                                                                                                                                                                                                                                                                                                     |
+|------------|----------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `provider` | string   |         | Token provider, one of `github`, `forgejo`, `gcp`, `azure`, `aws`, `jwt-svid`. Mutually exclusive with `fromEnv`, `fromPath`, and `jwkPath`. See [Token providers](#token-providers).                                                                                                                           |
+| `fromEnv`  | string   |         | Environment variable holding a static JWT. Mutually exclusive with `provider`, `fromPath`, and `jwkPath`.                                                                                                                                                                                                       |
+| `fromPath` | string   |         | Path to a file holding a static JWT. Mutually exclusive with `provider`, `fromEnv`, and `jwkPath`.                                                                                                                                                                                                              |
+| `jwkPath`  | string   |         | Path to a private JSON Web Key, as a bare JWK or a single-key JWK set. Mutually exclusive with `provider`, `fromEnv`, and `fromPath`.                                                                                                                                                                           |
+| `iss`      | string   |         | Token issuer. Required with `jwkPath`; not allowed otherwise.                                                                                                                                                                                                                                                   |
+| `sub`      | string   |         | Token subject. Required with `jwkPath`; not allowed otherwise.                                                                                                                                                                                                                                                  |
+| `aud`      | string   | `host`  | Token audience. Allowed only with `jwkPath` or `provider`; defaults to `host`.                                                                                                                                                                                                                                  |
+| `exp`      | duration | `60s`   | JWT lifetime (e.g. `1h`). Allowed only with `jwkPath` — the one source whose lifetime flux-mirror controls. Must be positive. Other sources' lifetimes are fixed by their issuer.                                                                                                                               |
+| `username` | string   |         | When unset, the credential is a bearer token (`registrytoken` / `Authorization: Bearer`). When set, the credential is the password of a `username`/`password` pair, using the standard registry auth challenge. See [Bearer token vs. username/password](#bearer-token-vs-usernamepassword-credentialusername). |
 
 ### TLS
 

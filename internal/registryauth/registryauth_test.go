@@ -15,9 +15,9 @@ import (
 func authHostsConfig(hosts ...string) *apiv1.Config {
 	cfg := &apiv1.Config{}
 	for _, h := range hosts {
-		cfg.Hosts = append(cfg.Hosts, apiv1.AuthHost{
+		cfg.Hosts = append(cfg.Hosts, apiv1.RegistryHost{
 			Host:       h,
-			Credential: &apiv1.AuthCredential{FromEnv: "X"},
+			Credential: &apiv1.RegistryCredential{FromEnv: "X"},
 		})
 	}
 	return cfg
@@ -55,11 +55,11 @@ func TestSelectAuthHosts_NoAuth(t *testing.T) {
 func TestUsernameSwitch(t *testing.T) {
 	g := NewWithT(t)
 
-	bearer := []apiv1.AuthHost{{
-		Host: "bearer.example", Credential: &apiv1.AuthCredential{FromEnv: "X"},
+	bearer := []apiv1.RegistryHost{{
+		Host: "bearer.example", Credential: &apiv1.RegistryCredential{FromEnv: "X"},
 	}}
-	userpass := []apiv1.AuthHost{{
-		Host: "userpass.example", Credential: &apiv1.AuthCredential{FromEnv: "X", Username: "robot"},
+	userpass := []apiv1.RegistryHost{{
+		Host: "userpass.example", Credential: &apiv1.RegistryCredential{FromEnv: "X", Username: "robot"},
 	}}
 
 	// cijwt (bearer-stamp) transport is needed only when a credential host has
@@ -99,11 +99,11 @@ func TestPkgAuthProviderName(t *testing.T) {
 func TestHasCredentialAndTLSOnly(t *testing.T) {
 	g := NewWithT(t)
 
-	tlsOnly := apiv1.AuthHost{Host: "tls.example", TLS: &apiv1.TLS{
+	tlsOnly := apiv1.RegistryHost{Host: "tls.example", TLS: &apiv1.TLS{
 		ServerAuth: &apiv1.TLSServerAuth{FromBytes: "x"},
 	}}
-	withCred := apiv1.AuthHost{Host: "c.example", Credential: &apiv1.AuthCredential{FromEnv: "X"}}
-	withProvider := apiv1.AuthHost{Host: "p.example", Provider: apiv1.RegistryProviderECR}
+	withCred := apiv1.RegistryHost{Host: "c.example", Credential: &apiv1.RegistryCredential{FromEnv: "X"}}
+	withProvider := apiv1.RegistryHost{Host: "p.example", Provider: apiv1.RegistryProviderECR}
 
 	g.Expect(HasCredential(tlsOnly)).To(BeFalse())
 	g.Expect(HasCredential(withCred)).To(BeTrue())

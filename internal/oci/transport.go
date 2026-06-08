@@ -13,32 +13,36 @@ import (
 	"strings"
 )
 
-// ChunkingTransport intercepts blob-upload PATCH requests whose body
-// is larger than ChunkSize and replays them as a sequence of OCI
-// dist-spec chunked PATCHes (Content-Range: <start>-<end>). Anything
-// else passes through. The final chunk's response is returned so
+// ChunkingTransport intercepts blob-upload PATCH requests whose body is larger
+// than the destination host's configured chunk size and replays them as a
+// sequence of OCI dist-spec chunked PATCHes (Content-Range: <start>-<end>).
+// Anything else passes through. The final chunk's response is returned so
 // go-containerregistry's commit step uses the correct upload Location.
 //
 // go-containerregistry sends one monolithic PATCH per blob and exposes
 // no chunking knob, so wrapping at the HTTP layer is the only seam
 // that doesn't fork the library.
 type ChunkingTransport struct {
-	Inner     http.RoundTripper
-	ChunkSize int64
+	Inner http.RoundTripper
+	// ChunkSizes maps a registry host (req.URL.Host, including any port) to its
+	// maximum blob-upload PATCH size in bytes. A host absent from the map, or
+	// mapped to a value <= 0, is never chunked.
+	ChunkSizes map[string]int64
 }
 
 func (t *ChunkingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if t.ChunkSize <= 0 ||
+	chunkSize := t.ChunkSizes[req.URL.Host]
+	if chunkSize <= 0 ||
 		req.Method != http.MethodPatch ||
 		!isBlobUploadPath(req.URL.Path) ||
 		req.ContentLength <= 0 ||
-		req.ContentLength <= t.ChunkSize {
+		req.ContentLength <= chunkSize {
 		return t.Inner.RoundTrip(req)
 	}
-	return t.chunkedUpload(req)
+	return t.chunkedUpload(req, chunkSize)
 }
 
-func (t *ChunkingTransport) chunkedUpload(req *http.Request) (*http.Response, error) {
+func (t *ChunkingTransport) chunkedUpload(req *http.Request, chunkSize int64) (*http.Response, error) {
 	if req.Body == nil {
 		return nil, errors.New("oci.ChunkingTransport: PATCH with nil body")
 	}
@@ -51,7 +55,7 @@ func (t *ChunkingTransport) chunkedUpload(req *http.Request) (*http.Response, er
 
 	for offset := int64(0); offset < total; {
 		remaining := total - offset
-		size := t.ChunkSize
+		size := chunkSize
 		if remaining < size {
 			size = remaining
 		}

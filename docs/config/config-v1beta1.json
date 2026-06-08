@@ -172,7 +172,7 @@
       "description": "Hosts configures per-host authentication for OCI registry requests, both\nsource pulls and destination pushes.",
       "items": {
         "additionalProperties": false,
-        "description": "AuthHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential (mutually exclusive).\nTLS configures the transport-layer TLS/mTLS settings: it composes with\nCredential, but is mutually exclusive with Provider — a cloud registry\nprovider is a managed registry whose transport flux-mirror does not customize.\nAt least one of Credential, Provider, or TLS must be set.",
+        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential (mutually exclusive).\nTLS configures the transport-layer TLS/mTLS settings: it composes with\nCredential, but is mutually exclusive with Provider — a cloud registry\nprovider is a managed registry whose transport flux-mirror does not customize.\nAt least one of Credential, Provider, TLS, or MaxChunkSize must be set.",
         "properties": {
           "credential": {
             "additionalProperties": false,
@@ -203,7 +203,7 @@
                 "type": "string"
               },
               "provider": {
-                "description": "Provider mints a per-request credential for the audience, one of\nJWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,\nJWTProviderAWS or JWTProviderJWTSVID.",
+                "description": "Provider mints a per-request credential for the audience, one of\nJWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,\nJWTProviderAWS, or JWTProviderJWTSVID.",
                 "enum": [
                   "github",
                   "forgejo",
@@ -228,6 +228,11 @@
           "host": {
             "description": "Host is the registry host (and optional port) the auth applies to.",
             "type": "string"
+          },
+          "maxChunkSize": {
+            "description": "MaxChunkSize is the maximum size in KiB (1024 bytes) for an OCI blob\nupload PATCH to this host; larger blobs are split into chunked PATCH\nuploads. 0 (the default) disables chunking, sending a single monolithic\nPATCH per blob. Useful for registries or proxies that cap request bodies.",
+            "minimum": 0,
+            "type": "integer"
           },
           "provider": {
             "description": "Provider authenticates the host with a cloud registry provider's workload\nidentity, one of RegistryProviderECR, RegistryProviderACR or\nRegistryProviderGAR. Mutually exclusive with Credential.",
