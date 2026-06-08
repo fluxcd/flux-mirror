@@ -39,7 +39,7 @@ tidy: ## Run go mod tidy.
 	go mod tidy
 
 .PHONY: test
-test: tidy fmt vet ## Run all unit tests.
+test: tidy fmt generate vet ## Run all unit tests.
 	go test ./... $(GO_TEST_ARGS) -coverprofile cover.out
 
 .PHONY: lint
@@ -47,8 +47,38 @@ lint: golangci-lint ## Run golangci linters.
 	$(GOLANGCI_LINT) run
 
 .PHONY: build
-build: tidy fmt vet ## Build CLI binary.
+build: tidy fmt generate vet ## Build CLI binary.
 	CGO_ENABLED=0 go build -ldflags="-s -w -X main.VERSION=$(VERSION_DEV)" -o ./bin/flux-mirror ./cmd/flux-mirror/
+
+.PHONY: generate
+generate: generate-json-schemas ## Generate deep copy and JSON Schema artifacts.
+
+.PHONY: generate-api
+generate-api: controller-gen ## Generate deep copy methods for the API types.
+	$(CONTROLLER_GEN) object:headerFile="api/boilerplate.go.txt" paths="./api/..."
+
+.PHONY: generate-json-schemas
+generate-json-schemas: generate-api ## Generate the config and report JSON Schemas.
+	mkdir -p ./docs/config ./docs/report
+	go run ./tools/schema-gen \
+		-controller-gen "$(CONTROLLER_GEN)" \
+		-group "mirror.fluxcd.io" \
+		-version "v1beta1" \
+		-kind "Config" \
+		-type "github.com/fluxcd/flux-mirror/api/v1beta1.Config" \
+		-title "Config is the flux-mirror configuration file." \
+		-id "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/config/config-v1beta1.json" \
+		-out ./docs/config/config-v1beta1.json
+	go run ./tools/schema-gen \
+		-controller-gen "$(CONTROLLER_GEN)" \
+		-group "mirror.fluxcd.io" \
+		-version "v1beta1" \
+		-kind "Report" \
+		-type "github.com/fluxcd/flux-mirror/api/v1beta1.ReportSpec" \
+		-field "report" \
+		-schema-field \
+		-id "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report/report-v1beta1.json" \
+		-out ./docs/report/report-v1beta1.json
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the CLI.
@@ -97,11 +127,18 @@ $(LOCALBIN):
 	mkdir -p $(LOCALBIN)
 
 ## Tool Binaries
+CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen-$(CONTROLLER_TOOLS_VERSION)
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint-$(GOLANGCI_LINT_VERSION)
 GOVULNCHECK ?= $(LOCALBIN)/govulncheck
 
 ## Tool Versions
+CONTROLLER_TOOLS_VERSION ?= v0.21.0
 GOLANGCI_LINT_VERSION ?= v2.12.2
+
+.PHONY: controller-gen
+controller-gen: $(CONTROLLER_GEN) ## Download controller-gen locally if necessary.
+$(CONTROLLER_GEN): $(LOCALBIN)
+	$(call go-install-tool,$(CONTROLLER_GEN),sigs.k8s.io/controller-tools/cmd/controller-gen,$(CONTROLLER_TOOLS_VERSION))
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.

@@ -33,7 +33,7 @@ import (
 	"github.com/fluxcd/pkg/auth/jwt"
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 	"github.com/fluxcd/flux-mirror/internal/jwkio"
 )
 
@@ -41,7 +41,7 @@ import (
 // mirroring what jwtTransportOptions wires into the sync transport but returning
 // the value directly. It assumes the config has passed validation (exactly one
 // source).
-func resolveCredential(ctx context.Context, h config.AuthHost) (string, error) {
+func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error) {
 	c := h.Credential
 	aud := h.EffectiveAud()
 	switch {
@@ -124,11 +124,11 @@ func gcpUserIDToken(ctx context.Context) (string, error) {
 // happens lazily under the request's own context.
 func providerTokenFunc(provider, aud string) (cijwt.TokenFunc, error) {
 	switch provider {
-	case config.JWTProviderGitHub, config.JWTProviderForgejo:
+	case apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo:
 		return func(ctx context.Context) (string, error) {
 			return actionsoidc.FetchToken(ctx, aud)
 		}, nil
-	case config.JWTProviderGCP:
+	case apiv1.JWTProviderGCP:
 		return func(ctx context.Context) (string, error) {
 			ts, err := idtoken.NewTokenSource(ctx, aud)
 			if err != nil {
@@ -148,7 +148,7 @@ func providerTokenFunc(provider, aud string) (cijwt.TokenFunc, error) {
 			}
 			return tok.AccessToken, nil
 		}, nil
-	case config.JWTProviderAzure:
+	case apiv1.JWTProviderAzure:
 		cred, err := azidentity.NewDefaultAzureCredential(nil)
 		if err != nil {
 			return nil, fmt.Errorf("create Azure credential: %w", err)
@@ -165,7 +165,7 @@ func providerTokenFunc(provider, aud string) (cijwt.TokenFunc, error) {
 			}
 			return tok.Token, nil
 		}, nil
-	case config.JWTProviderAWS:
+	case apiv1.JWTProviderAWS:
 		signer := v4.NewSigner()
 		return func(ctx context.Context) (string, error) {
 			cfg, err := awsconfig.LoadDefaultConfig(ctx)
@@ -178,7 +178,7 @@ func providerTokenFunc(provider, aud string) (cijwt.TokenFunc, error) {
 			}
 			return mintAWSSTSToken(ctx, cfg.Credentials, signer, region, aud)
 		}, nil
-	case config.JWTProviderJWTSVID:
+	case apiv1.JWTProviderJWTSVID:
 		return func(ctx context.Context) (string, error) {
 			// Fetch a JWT-SVID for the audience from the ambient Workload API
 			// (SPIFFE_ENDPOINT_SOCKET). The source is opened per cache-miss call

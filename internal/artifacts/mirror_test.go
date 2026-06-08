@@ -22,7 +22,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/types"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 	"github.com/fluxcd/flux-mirror/internal/oci"
 	"github.com/fluxcd/flux-mirror/internal/sync"
 	"github.com/fluxcd/flux-mirror/internal/testregistry"
@@ -61,7 +61,7 @@ type recordingVerifier struct {
 	afterVerify func()
 }
 
-func (v *recordingVerifier) Verify(_ context.Context, ref string, _ config.ArtifactVerification) (*oci.VerificationInfo, error) {
+func (v *recordingVerifier) Verify(_ context.Context, ref string, _ apiv1.ArtifactVerification) (*oci.VerificationInfo, error) {
 	v.refs = append(v.refs, ref)
 	if v.afterVerify != nil {
 		v.afterVerify()
@@ -71,8 +71,8 @@ func (v *recordingVerifier) Verify(_ context.Context, ref string, _ config.Artif
 
 // tagsWithStatus returns the entry's tag rows that landed in the given status,
 // for order-independent assertions against the row-based report.
-func tagsWithStatus(e sync.EntryResult, st sync.Status) []sync.TagResult {
-	var out []sync.TagResult
+func tagsWithStatus(e apiv1.EntryResult, st apiv1.Status) []apiv1.TagResult {
+	var out []apiv1.TagResult
 	for _, t := range e.Tags {
 		if t.Status == st {
 			out = append(out, t)
@@ -91,16 +91,16 @@ func TestMirror_CopiesSelectedTags(t *testing.T) {
 	testregistry.PushImage(t, src+":1.2.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ArtifactEntry{
+	entry := apiv1.ArtifactEntry{
 		Source:      src,
 		Destination: dst,
-		Selector:    config.Selector{Limit: new(2)},
+		Selector:    apiv1.Selector{Limit: new(2)},
 	}
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
 		New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
 	})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(tagsWithStatus(res.Entries[0], sync.StatusCopied)).To(HaveLen(2))
+	g.Expect(tagsWithStatus(res.Entries[0], apiv1.StatusCopied)).To(HaveLen(2))
 	g.Expect(res.HasFailures()).To(BeFalse())
 
 	tags, err := c.ListTags(context.Background(), dst)
@@ -118,13 +118,13 @@ func TestMirror_VerifiesSelectedTags(t *testing.T) {
 	srcDigest := testregistry.PushImage(t, src+":1.1.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ArtifactEntry{
+	entry := apiv1.ArtifactEntry{
 		Source:      src,
 		Destination: dst,
-		Selector:    config.Selector{Limit: new(1)},
-		Verify: &config.ArtifactVerification{
-			Provider: config.VerifyProviderCosign,
-			MatchOIDCIdentity: []config.OIDCIdentity{{
+		Selector:    apiv1.Selector{Limit: new(1)},
+		Verify: &apiv1.ArtifactVerification{
+			Provider: apiv1.VerifyProviderCosign,
+			MatchOIDCIdentity: []apiv1.OIDCIdentity{{
 				Issuer:  "https://token.actions.githubusercontent.com",
 				Subject: `^https://github\.com/example/.*$`,
 			}},
@@ -132,7 +132,7 @@ func TestMirror_VerifiesSelectedTags(t *testing.T) {
 	}
 	integrated := time.Date(2026, 5, 20, 9, 14, 2, 0, time.UTC)
 	verifier := &recordingVerifier{info: &oci.VerificationInfo{
-		Provider:       config.VerifyProviderCosign,
+		Provider:       apiv1.VerifyProviderCosign,
 		Issuer:         "https://token.actions.githubusercontent.com",
 		Identity:       "https://github.com/example/app/.github/workflows/release.yml@refs/tags/1.1.0",
 		Digest:         srcDigest,
@@ -147,7 +147,7 @@ func TestMirror_VerifiesSelectedTags(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(verifier.refs).To(Equal([]string{src + ":1.1.0"}))
 
-	copied := tagsWithStatus(res.Entries[0], sync.StatusCopied)
+	copied := tagsWithStatus(res.Entries[0], apiv1.StatusCopied)
 	g.Expect(copied).To(HaveLen(1))
 	row := copied[0]
 	g.Expect(row.Tag).To(Equal("1.1.0"))
@@ -173,13 +173,13 @@ func TestMirror_CopiesVerifiedDigestWhenTagMoves(t *testing.T) {
 	var movedDigest string
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ArtifactEntry{
+	entry := apiv1.ArtifactEntry{
 		Source:      src,
 		Destination: dst,
-		Selector:    config.Selector{Limit: new(1)},
-		Verify: &config.ArtifactVerification{
-			Provider: config.VerifyProviderCosign,
-			MatchOIDCIdentity: []config.OIDCIdentity{{
+		Selector:    apiv1.Selector{Limit: new(1)},
+		Verify: &apiv1.ArtifactVerification{
+			Provider: apiv1.VerifyProviderCosign,
+			MatchOIDCIdentity: []apiv1.OIDCIdentity{{
 				Issuer:  "https://token.actions.githubusercontent.com",
 				Subject: `^https://github\.com/example/.*$`,
 			}},
@@ -187,7 +187,7 @@ func TestMirror_CopiesVerifiedDigestWhenTagMoves(t *testing.T) {
 	}
 	verifier := &recordingVerifier{
 		info: &oci.VerificationInfo{
-			Provider: config.VerifyProviderCosign,
+			Provider: apiv1.VerifyProviderCosign,
 			Digest:   verifiedDigest,
 		},
 		afterVerify: func() {
@@ -206,7 +206,7 @@ func TestMirror_CopiesVerifiedDigestWhenTagMoves(t *testing.T) {
 	g.Expect(movedDigest).ToNot(Equal(verifiedDigest))
 	g.Expect(verifier.refs).To(Equal([]string{src + ":1.0.0"}))
 
-	copied := tagsWithStatus(res.Entries[0], sync.StatusCopied)
+	copied := tagsWithStatus(res.Entries[0], apiv1.StatusCopied)
 	g.Expect(copied).To(HaveLen(1))
 	g.Expect(copied[0].Digest).To(Equal(verifiedDigest))
 
@@ -226,13 +226,13 @@ func TestMirror_VerificationFailureStopsPlanning(t *testing.T) {
 	testregistry.PushImage(t, src+":1.1.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ArtifactEntry{
+	entry := apiv1.ArtifactEntry{
 		Source:      src,
 		Destination: dst,
-		Selector:    config.Selector{Limit: new(2)},
-		Verify: &config.ArtifactVerification{
-			Provider: config.VerifyProviderCosign,
-			MatchOIDCIdentity: []config.OIDCIdentity{{
+		Selector:    apiv1.Selector{Limit: new(2)},
+		Verify: &apiv1.ArtifactVerification{
+			Provider: apiv1.VerifyProviderCosign,
+			MatchOIDCIdentity: []apiv1.OIDCIdentity{{
 				Issuer:  "https://token.actions.githubusercontent.com",
 				Subject: `^https://github\.com/example/.*$`,
 			}},
@@ -259,11 +259,11 @@ func TestMirror_VerificationFailureStopsPlanning(t *testing.T) {
 	})
 	g.Expect(err).ToNot(HaveOccurred())
 	// The entry itself completed; the failure is a per-tag failed row.
-	g.Expect(res.Entries[0].Status).To(Equal(sync.EntryCompleted))
+	g.Expect(res.Entries[0].Status).To(Equal(apiv1.EntryCompleted))
 	g.Expect(res.Entries[0].Tags).To(HaveLen(1))
 	failed := res.Entries[0].Tags[0]
 	g.Expect(failed.Tag).To(Equal("1.1.0"))
-	g.Expect(failed.Status).To(Equal(sync.StatusFailed))
+	g.Expect(failed.Status).To(Equal(apiv1.StatusFailed))
 	g.Expect(failed.Error).To(ContainSubstring("verify " + src + ":1.1.0"))
 	g.Expect(failed.Error).To(ContainSubstring("denied"))
 	// A verify-failed row carries no digest and no verification block.
@@ -281,14 +281,14 @@ func TestMirror_SkipsSignatureTooNew(t *testing.T) {
 	testregistry.PushImage(t, src+":1.0.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ArtifactEntry{
+	entry := apiv1.ArtifactEntry{
 		Source:      src,
 		Destination: dst,
-		Selector:    config.Selector{Limit: new(1)},
-		Verify: &config.ArtifactVerification{
-			Provider: config.VerifyProviderCosign,
+		Selector:    apiv1.Selector{Limit: new(1)},
+		Verify: &apiv1.ArtifactVerification{
+			Provider: apiv1.VerifyProviderCosign,
 			MinAge:   &metav1.Duration{Duration: time.Hour},
-			MatchOIDCIdentity: []config.OIDCIdentity{{
+			MatchOIDCIdentity: []apiv1.OIDCIdentity{{
 				Issuer:  "https://token.actions.githubusercontent.com",
 				Subject: `^https://github\.com/example/.*$`,
 			}},
@@ -298,7 +298,7 @@ func TestMirror_SkipsSignatureTooNew(t *testing.T) {
 	integrated := time.Now().Add(-30 * time.Minute)
 	verifier := &recordingVerifier{
 		info: &oci.VerificationInfo{
-			Provider:       config.VerifyProviderCosign,
+			Provider:       apiv1.VerifyProviderCosign,
 			Issuer:         "https://token.actions.githubusercontent.com",
 			Identity:       "https://github.com/example/app/.github/workflows/release.yml@refs/tags/1.0.0",
 			Digest:         "sha256:9a8b7c6d5e4f30211223344556677889aabbccddeeff00112233445566778899",
@@ -320,12 +320,12 @@ func TestMirror_SkipsSignatureTooNew(t *testing.T) {
 	g.Expect(res.HasFailures()).To(BeFalse())
 	g.Expect(verifier.refs).To(Equal([]string{src + ":1.0.0"}))
 
-	skipped := tagsWithStatus(res.Entries[0], sync.StatusSkipped)
+	skipped := tagsWithStatus(res.Entries[0], apiv1.StatusSkipped)
 	g.Expect(skipped).To(HaveLen(1))
 	row := skipped[0]
 	g.Expect(row.Tag).To(Equal("1.0.0"))
 	// A skip always carries a reason; here it is the deferral.
-	g.Expect(row.Reason).To(Equal(sync.ReasonSignatureTooNew))
+	g.Expect(row.Reason).To(Equal(apiv1.ReasonSignatureTooNew))
 	// The digest is known even though nothing was copied.
 	g.Expect(row.Digest).To(Equal("sha256:9a8b7c6d5e4f30211223344556677889aabbccddeeff00112233445566778899"))
 	// The too-new skip carries the age/minAge in its verification block.
@@ -345,9 +345,9 @@ func TestMirror_SkipsEqual(t *testing.T) {
 	testregistry.PushImage(t, src+":1.0.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ArtifactEntry{
+	entry := apiv1.ArtifactEntry{
 		Source: src, Destination: dst,
-		Selector: config.Selector{Limit: new(1)},
+		Selector: apiv1.Selector{Limit: new(1)},
 	}
 	mirror := New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	runner := newRunner()
@@ -356,11 +356,11 @@ func TestMirror_SkipsEqual(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 	res2, err := runner.Run(context.Background(), []sync.EntryMirror{mirror})
 	g.Expect(err).ToNot(HaveOccurred())
-	skipped := tagsWithStatus(res2.Entries[0], sync.StatusSkipped)
+	skipped := tagsWithStatus(res2.Entries[0], apiv1.StatusSkipped)
 	g.Expect(skipped).To(HaveLen(1))
 	// An up-to-date skip always carries its reason.
-	g.Expect(skipped[0].Reason).To(Equal(sync.ReasonUpToDate))
-	g.Expect(tagsWithStatus(res2.Entries[0], sync.StatusCopied)).To(BeEmpty())
+	g.Expect(skipped[0].Reason).To(Equal(apiv1.ReasonUpToDate))
+	g.Expect(tagsWithStatus(res2.Entries[0], apiv1.StatusCopied)).To(BeEmpty())
 }
 
 func TestMirror_DriftWithoutOverwrite(t *testing.T) {
@@ -371,15 +371,15 @@ func TestMirror_DriftWithoutOverwrite(t *testing.T) {
 	testregistry.PushImage(t, dst+":1.0.0") // independent push → different digest
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ArtifactEntry{
+	entry := apiv1.ArtifactEntry{
 		Source: src, Destination: dst,
-		Selector: config.Selector{Limit: new(1)},
+		Selector: apiv1.Selector{Limit: new(1)},
 	}
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
 		New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
 	})
 	g.Expect(err).ToNot(HaveOccurred())
-	drifted := tagsWithStatus(res.Entries[0], sync.StatusDrifted)
+	drifted := tagsWithStatus(res.Entries[0], apiv1.StatusDrifted)
 	g.Expect(drifted).To(HaveLen(1))
 	g.Expect(drifted[0].Tag).To(Equal("1.0.0"))
 	g.Expect(res.HasDrift()).To(BeTrue())
@@ -395,15 +395,15 @@ func TestMirror_DriftWithOverwrite(t *testing.T) {
 	testregistry.PushImage(t, dst+":1.0.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ArtifactEntry{
+	entry := apiv1.ArtifactEntry{
 		Source: src, Destination: dst,
-		Selector: config.Selector{Limit: new(1)},
+		Selector: apiv1.Selector{Limit: new(1)},
 	}
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
 		New(c, entry, Options{Overwrite: true, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
 	})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(tagsWithStatus(res.Entries[0], sync.StatusOverwritten)).To(HaveLen(1))
+	g.Expect(tagsWithStatus(res.Entries[0], apiv1.StatusOverwritten)).To(HaveLen(1))
 
 	dig, err := crane.Digest(dst+":1.0.0", crane.Insecure)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -430,9 +430,9 @@ func TestMirror_IncludeReferrers(t *testing.T) {
 	testregistry.PushReferrer(t, src, subject, "application/spdx+json")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ArtifactEntry{
+	entry := apiv1.ArtifactEntry{
 		Source: src, Destination: dst,
-		Selector:         config.Selector{Limit: new(1)},
+		Selector:         apiv1.Selector{Limit: new(1)},
 		IncludeReferrers: true,
 	}
 	res, err := newRunner().Run(ctx, []sync.EntryMirror{
@@ -440,7 +440,7 @@ func TestMirror_IncludeReferrers(t *testing.T) {
 	})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(res.HasFailures()).To(BeFalse())
-	copied := tagsWithStatus(res.Entries[0], sync.StatusCopied)
+	copied := tagsWithStatus(res.Entries[0], apiv1.StatusCopied)
 	g.Expect(copied).To(HaveLen(1))
 
 	// The copied tag row carries a referrers[] array, one entry per referrer.
@@ -449,7 +449,7 @@ func TestMirror_IncludeReferrers(t *testing.T) {
 	refTypes := make([]string, 0, len(refs))
 	for _, r := range refs {
 		g.Expect(r.Digest).To(HavePrefix("sha256:"))
-		g.Expect(r.Status).To(Equal(sync.StatusCopied))
+		g.Expect(r.Status).To(Equal(apiv1.StatusCopied))
 		g.Expect(r.Reason).To(BeEmpty()) // reason only on skipped
 		refTypes = append(refTypes, r.ArtifactType)
 	}
@@ -480,17 +480,17 @@ func TestMirror_IncludeReferrers(t *testing.T) {
 		New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
 	})
 	g.Expect(err).ToNot(HaveOccurred())
-	skipped := tagsWithStatus(res2.Entries[0], sync.StatusSkipped)
+	skipped := tagsWithStatus(res2.Entries[0], apiv1.StatusSkipped)
 	g.Expect(skipped).To(HaveLen(1))
-	g.Expect(tagsWithStatus(res2.Entries[0], sync.StatusCopied)).To(BeEmpty())
+	g.Expect(tagsWithStatus(res2.Entries[0], apiv1.StatusCopied)).To(BeEmpty())
 
 	// Re-run: the subject and both referrers are up-to-date, each carrying a
 	// skipped status with the up-to-date reason.
-	g.Expect(skipped[0].Reason).To(Equal(sync.ReasonUpToDate))
+	g.Expect(skipped[0].Reason).To(Equal(apiv1.ReasonUpToDate))
 	g.Expect(skipped[0].Referrers).To(HaveLen(2))
 	for _, r := range skipped[0].Referrers {
-		g.Expect(r.Status).To(Equal(sync.StatusSkipped))
-		g.Expect(r.Reason).To(Equal(sync.ReasonUpToDate))
+		g.Expect(r.Status).To(Equal(apiv1.StatusSkipped))
+		g.Expect(r.Reason).To(Equal(apiv1.ReasonUpToDate))
 	}
 }
 
@@ -501,16 +501,16 @@ func TestMirror_DryRun(t *testing.T) {
 	testregistry.PushImage(t, src+":1.0.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := config.ArtifactEntry{
+	entry := apiv1.ArtifactEntry{
 		Source: src, Destination: dst,
-		Selector: config.Selector{Limit: new(1)},
+		Selector: apiv1.Selector{Limit: new(1)},
 	}
 	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
 		New(c, entry, Options{DryRun: true, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
 	})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(tagsWithStatus(res.Entries[0], sync.StatusWouldCopy)).To(HaveLen(1))
-	g.Expect(tagsWithStatus(res.Entries[0], sync.StatusCopied)).To(BeEmpty())
+	g.Expect(tagsWithStatus(res.Entries[0], apiv1.StatusWouldCopy)).To(HaveLen(1))
+	g.Expect(tagsWithStatus(res.Entries[0], apiv1.StatusCopied)).To(BeEmpty())
 
 	_, err = c.ListTags(context.Background(), dst)
 	g.Expect(err).To(HaveOccurred()) // 404 — repo was never created

@@ -19,13 +19,13 @@ import (
 	"testing"
 	"time"
 
-	jose "github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 	. "github.com/onsi/gomega"
 	"github.com/spiffe/go-spiffe/v2/proto/spiffe/workload"
 	"google.golang.org/grpc"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
 const (
@@ -155,20 +155,20 @@ func TestSPIFFE_MTLSEndToEnd(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		spiffe *config.SPIFFETLS
+		spiffe *apiv1.SPIFFETLS
 		wantOK bool
 	}{
-		{"trustDomain self", &config.SPIFFETLS{TrustDomain: config.TrustDomainSelf}, true},
-		{"exact serverID", &config.SPIFFETLS{ServerID: testServerID}, true},
-		{"serverID mismatch", &config.SPIFFETLS{ServerID: "spiffe://example.org/wrong"}, false},
+		{"trustDomain self", &apiv1.SPIFFETLS{TrustDomain: apiv1.TrustDomainSelf}, true},
+		{"exact serverID", &apiv1.SPIFFETLS{ServerID: testServerID}, true},
+		{"serverID mismatch", &apiv1.SPIFFETLS{ServerID: "spiffe://example.org/wrong"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport,
-				[]config.AuthHost{{Host: host, TLS: &config.TLS{
-					ClientAuth: &config.TLSClientAuth{Provider: config.TLSClientProviderX509SVID},
-					ServerAuth: &config.TLSServerAuth{SPIFFE: tc.spiffe},
+				[]apiv1.RegistryHost{{Host: host, TLS: &apiv1.TLS{
+					ClientAuth: &apiv1.TLSClientAuth{Provider: apiv1.TLSClientProviderX509SVID},
+					ServerAuth: &apiv1.TLSServerAuth{SPIFFE: tc.spiffe},
 				}}})
 			g.Expect(err).ToNot(HaveOccurred())
 			defer closeFn()
@@ -211,11 +211,11 @@ func TestSPIFFE_ClientOnly(t *testing.T) {
 	defer srv.Close()
 	host := mustHost(t, srv.URL)
 
-	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []config.AuthHost{{
+	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{{
 		Host: host,
-		TLS: &config.TLS{
-			ServerAuth: &config.TLSServerAuth{FromBytes: string(ca.certPEM)},
-			ClientAuth: &config.TLSClientAuth{Provider: config.TLSClientProviderX509SVID},
+		TLS: &apiv1.TLS{
+			ServerAuth: &apiv1.TLSServerAuth{FromBytes: string(ca.certPEM)},
+			ClientAuth: &apiv1.TLSClientAuth{Provider: apiv1.TLSClientProviderX509SVID},
 		},
 	}})
 	g.Expect(err).ToNot(HaveOccurred())
@@ -234,8 +234,8 @@ func TestSPIFFE_JWTSVIDCredential(t *testing.T) {
 	ca := newTestCA(t)
 	startFakeWorkloadAPI(t, ca)
 
-	h := config.AuthHost{Host: "registry.example.com", Credential: &config.AuthCredential{
-		Provider: config.JWTProviderJWTSVID,
+	h := apiv1.RegistryHost{Host: "registry.example.com", Credential: &apiv1.RegistryCredential{
+		Provider: apiv1.JWTProviderJWTSVID,
 	}}
 	cred, err := resolveCredential(context.Background(), h)
 	g.Expect(err).ToNot(HaveOccurred())

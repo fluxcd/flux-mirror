@@ -17,6 +17,7 @@ import (
 	craneLogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/spf13/cobra"
 
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 	"github.com/fluxcd/flux-mirror/internal/artifacts"
 	"github.com/fluxcd/flux-mirror/internal/charts"
 	"github.com/fluxcd/flux-mirror/internal/config"
@@ -37,7 +38,7 @@ var syncCmd = &cobra.Command{
 	Use:   "sync [CONFIG|-]",
 	Short: "Mirror Helm charts and OCI artifacts to a destination registry",
 	Long: `Mirror Helm charts and OCI artifacts between registries based on a
-declarative YAML config (apiVersion: mirror.fluxcd.io/v1alpha1, kind: Config).
+declarative YAML config (apiVersion: mirror.fluxcd.io/v1beta1, kind: Config).
 OCI registry auth is read from the ambient Docker config (~/.docker/config.json,
 $DOCKER_CONFIG, and configured credential helpers), or, for hosts listed in the
 config's 'hosts' section, from a per-host JWT. Helm HTTP/S repository auth is read
@@ -79,7 +80,6 @@ type syncFlags struct {
 	verbose       bool
 	insecure      bool
 	noProgress    bool
-	maxChunkSize  int
 }
 
 var syncArgs = syncFlags{
@@ -110,10 +110,6 @@ func init() {
 		"Allow plaintext HTTP and skip TLS verification (test/dev only).")
 	syncCmd.Flags().BoolVar(&syncArgs.noProgress, "no-progress", false,
 		"Disable the live progress spinner.")
-	syncCmd.Flags().IntVar(&syncArgs.maxChunkSize, "oci-max-chunk-size", 0,
-		"Maximum size in KiB (1024 bytes) for an OCI blob upload PATCH; "+
-			"larger blobs are split into chunked PATCH uploads. 0 disables "+
-			"chunking (single monolithic PATCH per blob).")
 
 	rootCmd.AddCommand(syncCmd)
 }
@@ -236,7 +232,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 		}
 	default:
 		report := sync.NewReport("flux-mirror/"+VERSION, time.Now(), res)
-		if err := report.Render(cmd.OutOrStdout(), syncArgs.output.String()); err != nil {
+		if err := sync.RenderReport(cmd.OutOrStdout(), syncArgs.output.String(), report); err != nil {
 			return err
 		}
 	}
@@ -280,10 +276,10 @@ func classifyExit(r sync.Result, driftExitCode int) error {
 }
 
 // buildClientTransport composes the optional transport stack from the config's
-// hosts and --oci-max-chunk-size. Returns (nil, noop, nil) if none is requested.
-// Stack order, outer first:
+// hosts (credentials, TLS, and per-host maxChunkSize). Returns (nil, noop, nil)
+// if none is requested. Stack order, outer first:
 //
-//	ChunkingTransport (split big PATCH bodies)
+//	ChunkingTransport (split big PATCH bodies, per destination host)
 //	  → cijwt.Transport (stamp Authorization on each chunk request)
 //	    → tls dispatch (per-host TLS/mTLS) | http.DefaultTransport
 //
@@ -291,15 +287,15 @@ func classifyExit(r sync.Result, driftExitCode int) error {
 // per-request token minting works per chunk; chunking is the outer wrapper so
 // split chunks each get freshly stamped auth from the JWT layer. The returned
 // closer releases any SPIFFE Workload API sources and must be called when done.
-func buildClientTransport(ctx context.Context, hosts []config.AuthHost) (http.RoundTripper, func() error, error) {
+func buildClientTransport(ctx context.Context, hosts []apiv1.RegistryHost) (http.RoundTripper, func() error, error) {
 	noop := func() error { return nil }
 
 	// Only credential hosts use the cijwt transport; provider hosts authenticate
 	// through the keychain instead.
 	credSet := registryauth.NeedsCredentialTransport(hosts)
-	chunkSet := syncArgs.maxChunkSize > 0
+	chunkSizes := chunkSizesByHost(hosts)
 	tlsSet := registryauth.NeedsTLS(hosts)
-	if !credSet && !chunkSet && !tlsSet {
+	if !credSet && len(chunkSizes) == 0 && !tlsSet {
 		return nil, noop, nil
 	}
 
@@ -317,13 +313,26 @@ func buildClientTransport(ctx context.Context, hosts []config.AuthHost) (http.Ro
 		}
 		t = ct
 	}
-	if chunkSet {
-		t = &oci.ChunkingTransport{
-			Inner:     t,
-			ChunkSize: int64(syncArgs.maxChunkSize) * 1024,
-		}
+	if len(chunkSizes) > 0 {
+		t = &oci.ChunkingTransport{Inner: t, ChunkSizes: chunkSizes}
 	}
 	return t, closeTLS, nil
+}
+
+// chunkSizesByHost maps each host that sets a positive maxChunkSize to its
+// chunk size in bytes (the config value is in KiB). Hosts that leave it unset
+// or 0 are omitted, so their blob uploads are never chunked.
+func chunkSizesByHost(hosts []apiv1.RegistryHost) map[string]int64 {
+	var m map[string]int64
+	for _, h := range hosts {
+		if h.MaxChunkSize > 0 {
+			if m == nil {
+				m = make(map[string]int64)
+			}
+			m[h.Host] = int64(h.MaxChunkSize) * 1024
+		}
+	}
+	return m
 }
 
 func resolveConfigPath(args []string) (string, error) {
@@ -341,15 +350,15 @@ func resolveConfigPath(args []string) (string, error) {
 // pass false for commands that consume only the hosts section (login). File-path
 // fields are resolved (via SecureJoin) within the config file's directory, or the
 // process working directory when the config is read from stdin.
-func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*config.Config, error) {
+func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*apiv1.Config, error) {
 	cfg, err := decodeConfig(cmd, path)
 	if err != nil {
 		return nil, err
 	}
 	if requireEntries {
-		err = cfg.Validate()
+		err = config.Validate(cfg)
 	} else {
-		err = cfg.ValidateNoEntriesOK()
+		err = config.ValidateNoEntriesOK(cfg)
 	}
 	if err != nil {
 		return nil, err
@@ -358,7 +367,7 @@ func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*config.C
 	if err != nil {
 		return nil, err
 	}
-	if err := cfg.ResolvePaths(baseDir); err != nil {
+	if err := config.ResolvePaths(cfg, baseDir); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -381,7 +390,7 @@ func configBaseDir(path string) (string, error) {
 	return filepath.Dir(abs), nil
 }
 
-func decodeConfig(cmd *cobra.Command, path string) (*config.Config, error) {
+func decodeConfig(cmd *cobra.Command, path string) (*apiv1.Config, error) {
 	if path == "-" {
 		return config.Decode(cmd.InOrStdin())
 	}

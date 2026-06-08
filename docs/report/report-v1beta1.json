@@ -1,0 +1,274 @@
+{
+  "$id": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report/report-v1beta1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "format": "uri",
+      "type": "string"
+    },
+    "apiVersion": {
+      "const": "mirror.fluxcd.io/v1beta1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Report",
+      "type": "string"
+    },
+    "report": {
+      "additionalProperties": false,
+      "description": "ReportSpec holds the sync run metadata and results.",
+      "properties": {
+        "durationMs": {
+          "description": "DurationMs is the total wall time of the run in milliseconds.",
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reporter": {
+          "description": "Reporter identifies the software that produced the report.",
+          "pattern": "^flux-mirror/",
+          "type": "string"
+        },
+        "results": {
+          "description": "Results contains one result per mirror entry.",
+          "items": {
+            "additionalProperties": false,
+            "description": "EntryResult is the per-entry slice of a report. Each tag job becomes a\nTagResult row carrying its own status, digest, skip reason, error, and\nreferrers — so verification and per-tag detail are expressible without a\nside channel. Status disambiguate an empty Tags array (nothing matched vs\nplan failed).",
+            "properties": {
+              "destination": {
+                "description": "Destination is the entry's destination repository.",
+                "type": "string"
+              },
+              "error": {
+                "description": "Error carries the plan-time failure message when Status is failed.",
+                "type": "string"
+              },
+              "source": {
+                "description": "Source identifies the entry's source.",
+                "type": "string"
+              },
+              "status": {
+                "description": "Status is the entry-level outcome.",
+                "enum": [
+                  "completed",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              "tags": {
+                "description": "Tags lists the per-tag results.",
+                "items": {
+                  "additionalProperties": false,
+                  "description": "TagResult is one tag's row in the report. Optional fields follow the wire\ncontract: digest when resolved; reason only on skipped; error only on\nfailed; referrers only when includeReferrers surfaced any; verification only\nwhen a signature was confirmed.",
+                  "properties": {
+                    "digest": {
+                      "description": "Digest is the resolved source artifact digest.",
+                      "type": "string"
+                    },
+                    "error": {
+                      "description": "Error carries the failure message when Status is failed.",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "description": "Reason explains a skip (up-to-date or signature-too-new).",
+                      "type": "string"
+                    },
+                    "referrers": {
+                      "description": "Referrers lists the mirrored referrers (signatures, SBOMs, attestations).",
+                      "items": {
+                        "additionalProperties": false,
+                        "description": "ReferrerResult is one mirrored referrer (cosign signature bundle, SBOM,\nattestation) of a tag. It reuses the per-tag Status enum; Reason is set to\nup-to-date on a skipped referrer (same always-on-skip rule as tags).",
+                        "properties": {
+                          "artifactType": {
+                            "description": "ArtifactType is the referrer's OCI artifact type.",
+                            "type": "string"
+                          },
+                          "digest": {
+                            "description": "Digest is the referrer digest.",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "description": "Reason explains a skip.",
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Status is the referrer outcome.",
+                            "enum": [
+                              "copied",
+                              "overwritten",
+                              "skipped",
+                              "drifted",
+                              "would-copy",
+                              "would-overwrite",
+                              "failed"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "digest",
+                          "status"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "status": {
+                      "description": "Status is the per-tag outcome.",
+                      "enum": [
+                        "copied",
+                        "overwritten",
+                        "skipped",
+                        "drifted",
+                        "would-copy",
+                        "would-overwrite",
+                        "failed"
+                      ],
+                      "type": "string"
+                    },
+                    "tag": {
+                      "description": "Tag is the tag name.",
+                      "type": "string"
+                    },
+                    "verification": {
+                      "additionalProperties": false,
+                      "description": "Verification carries the signature verification metadata, when confirmed.",
+                      "properties": {
+                        "age": {
+                          "description": "Age is the signature age on the signature-too-new skip.",
+                          "type": "string"
+                        },
+                        "identity": {
+                          "description": "Identity is the recovered keyless certificate identity.",
+                          "type": "string"
+                        },
+                        "integratedTime": {
+                          "description": "IntegratedTime is the verified transparency-log timestamp.",
+                          "type": "string"
+                        },
+                        "issuer": {
+                          "description": "Issuer is the recovered keyless certificate issuer.",
+                          "type": "string"
+                        },
+                        "minAge": {
+                          "description": "MinAge is the configured minimum age on the signature-too-new skip.",
+                          "type": "string"
+                        },
+                        "provider": {
+                          "description": "Provider is the verification provider (VerifyProviderCosign).",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "provider"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "tag"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "destination",
+              "source",
+              "status",
+              "tags"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "additionalProperties": false,
+          "description": "Summary contains aggregate per-outcome tag counts.",
+          "properties": {
+            "copied": {
+              "description": "Copied is the number of tags copied.",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "drifted": {
+              "description": "Drifted is the number of tags that drifted.",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "entries": {
+              "description": "Entries is the number of mirror entries processed.",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "exitCode": {
+              "description": "ExitCode is the semantic sync exit code (0 clean, 1 failures, 2 drift).",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "failed": {
+              "description": "Failed is the number of failed tags and plan-failed entries.",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "overwritten": {
+              "description": "Overwritten is the number of tags overwritten.",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "skipped": {
+              "description": "Skipped is the number of tags skipped.",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "wouldCopy": {
+              "description": "WouldCopy is the number of tags that would be copied (dry-run).",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "wouldOverwrite": {
+              "description": "WouldOverwrite is the number of tags that would be overwritten (dry-run).",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "copied",
+            "drifted",
+            "entries",
+            "exitCode",
+            "failed",
+            "overwritten",
+            "skipped",
+            "wouldCopy",
+            "wouldOverwrite"
+          ],
+          "type": "object"
+        },
+        "timestamp": {
+          "description": "Timestamp is the report creation time in RFC 3339 format.",
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "durationMs",
+        "reporter",
+        "results",
+        "summary",
+        "timestamp"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "report"
+  ],
+  "title": "ReportSpec holds the sync run metadata and results.",
+  "type": "object"
+}

@@ -24,6 +24,7 @@ RUN go mod download
 # copy source code
 COPY cmd/flux-mirror/ cmd/flux-mirror/
 COPY internal/ internal/
+COPY api/ api/
 
 # build
 ENV CGO_ENABLED=0

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/fluxcd/flux-mirror/api/v1beta1"
 	. "github.com/onsi/gomega"
 )
 
@@ -294,7 +295,8 @@ func TestReport_Render(t *testing.T) {
 	report := NewReport("flux-mirror/v1.2.3", ts, res)
 
 	// Envelope and summary are assembled from the Result.
-	g.Expect(report.Version).To(Equal(ReportVersion))
+	g.Expect(report.APIVersion).To(Equal(GroupVersion.String()))
+	g.Expect(report.Kind).To(Equal(ReportKind))
 	g.Expect(report.Schema).To(Equal(ReportSchema))
 	g.Expect(report.Report.Reporter).To(Equal("flux-mirror/v1.2.3"))
 	g.Expect(report.Report.Timestamp).To(Equal("2026-06-06T12:00:00Z"))
@@ -312,7 +314,7 @@ func TestReport_Render(t *testing.T) {
 		t.Run(format, func(t *testing.T) {
 			g := NewWithT(t)
 			var buf bytes.Buffer
-			g.Expect(report.Render(&buf, format)).To(Succeed())
+			g.Expect(RenderReport(&buf, format, report)).To(Succeed())
 			g.Expect(buf.String()).ToNot(BeEmpty())
 			g.Expect(buf.String()).To(ContainSubstring("ghcr.io/foo/bar"))
 			g.Expect(buf.String()).To(ContainSubstring("flux-mirror/v1.2.3"))
@@ -323,14 +325,14 @@ func TestReport_Render(t *testing.T) {
 
 	// $schema is JSON-only; YAML consumers don't use it.
 	var jsonBuf, yamlBuf bytes.Buffer
-	g.Expect(report.Render(&jsonBuf, "json")).To(Succeed())
+	g.Expect(RenderReport(&jsonBuf, "json", report)).To(Succeed())
 	g.Expect(jsonBuf.String()).To(ContainSubstring(`"$schema"`))
-	g.Expect(report.Render(&yamlBuf, "yaml")).To(Succeed())
+	g.Expect(RenderReport(&yamlBuf, "yaml", report)).To(Succeed())
 	g.Expect(yamlBuf.String()).ToNot(ContainSubstring("$schema"))
 
 	var buf bytes.Buffer
-	g.Expect(report.Render(&buf, "text")).To(MatchError(ContainSubstring("unsupported")))
-	g.Expect(report.Render(&buf, "xml")).To(MatchError(ContainSubstring("unsupported")))
+	g.Expect(RenderReport(&buf, "text", report)).To(MatchError(ContainSubstring("unsupported")))
+	g.Expect(RenderReport(&buf, "xml", report)).To(MatchError(ContainSubstring("unsupported")))
 }
 
 // NewReport must emit results as an empty array, never null, so consumers can
@@ -339,7 +341,7 @@ func TestReport_EmptyResults(t *testing.T) {
 	g := NewWithT(t)
 	report := NewReport("flux-mirror/v1.2.3", time.Date(2026, 6, 6, 12, 0, 0, 0, time.UTC), Result{})
 	var buf bytes.Buffer
-	g.Expect(report.Render(&buf, "json")).To(Succeed())
+	g.Expect(RenderReport(&buf, "json", report)).To(Succeed())
 	g.Expect(buf.String()).To(ContainSubstring(`"results": []`))
 }
 

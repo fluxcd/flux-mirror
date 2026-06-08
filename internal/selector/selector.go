@@ -11,7 +11,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 
-	"github.com/fluxcd/flux-mirror/internal/config"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
 // Pipeline:
@@ -46,8 +46,8 @@ type Options struct {
 }
 
 // Select runs the full pipeline. The selector is assumed to have already
-// passed config.Selector.validate(); errors here indicate programmer error.
-func Select(tags []string, sel config.Selector, opts Options) (Result, error) {
+// passed apiv1.Selector.validate(); errors here indicate programmer error.
+func Select(tags []string, sel apiv1.Selector, opts Options) (Result, error) {
 	res := Result{}
 	record := func(tag, reason string) {
 		if opts.Verbose {
@@ -66,11 +66,11 @@ func Select(tags []string, sel config.Selector, opts Options) (Result, error) {
 	}
 
 	switch sel.EffectiveSortBy() {
-	case config.SortBySemver:
+	case apiv1.SortBySemver:
 		entries = sortSemver(entries, record)
-	case config.SortByAlphabetical:
+	case apiv1.SortByAlphabetical:
 		entries = sortAlphabetical(entries)
-	case config.SortByNumerical:
+	case apiv1.SortByNumerical:
 		entries = sortNumerical(entries, record)
 	default:
 		return Result{}, fmt.Errorf("unknown sortBy %q (config validation should have caught this)", sel.EffectiveSortBy())
@@ -94,7 +94,7 @@ type entry struct {
 	tag string // original tag
 }
 
-func applyRegex(tags []string, rf *config.RegexFilter, record func(tag, reason string)) ([]entry, error) {
+func applyRegex(tags []string, rf *apiv1.RegexFilter, record func(tag, reason string)) ([]entry, error) {
 	if rf == nil {
 		out := make([]entry, len(tags))
 		for i, t := range tags {

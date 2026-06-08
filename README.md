@@ -80,7 +80,7 @@ Write a config file describing what to mirror:
 
 ```yaml
 # flux-mirror.yaml
-apiVersion: mirror.fluxcd.io/v1alpha1
+apiVersion: mirror.fluxcd.io/v1beta1
 kind: Config
 charts:
   - name: external-dns
@@ -122,7 +122,7 @@ flux-mirror sync flux-mirror.yaml --overwrite
 ```
 
 See [`examples/`](examples) for more configurations and
-[`docs/sync.md`](docs/sync.md) for the full flag reference.
+[`docs/guides/sync.md`](docs/guides/sync.md) for the full flag reference.
 
 ## Running in CI
 
@@ -221,15 +221,18 @@ Run `flux-mirror <command> --help` for the full flag list.
 
 ## Documentation
 
-- [Sync command reference](docs/sync.md) — flags, output modes, outcomes,
+- [Sync command reference](docs/guides/sync.md) — flags, output modes, outcomes,
   exit codes, and example invocations.
-- [Config specification](docs/config.md) — YAML schema for `artifacts` and
-  `charts` entries, selector pipeline, overwrite semantics, defaults.
-- [Keygen command reference](docs/keygen.md) — generate EdDSA JWK pairs for
+- [Config specification](docs/config/README.md) — YAML schema for `hosts`,
+  `artifacts`, and `charts` entries, selector pipeline, overwrite semantics,
+  defaults, and the published [JSON Schema](docs/config/config-v1beta1.json).
+- [Sync report reference](docs/report/README.md) — report envelope and its
+  published [JSON Schema](docs/report/report-v1beta1.json) for `-o json` / `-o yaml`.
+- [Keygen command reference](docs/guides/keygen.md) — generate EdDSA JWK pairs for
   JWK-based registry auth.
-- [Login command reference](docs/login.md) — store configured credentials in
+- [Login command reference](docs/guides/login.md) — store configured credentials in
   the Docker config or OS keychain.
-- [Secret command reference](docs/secret.md) — upsert per-host credentials into
+- [Secret command reference](docs/guides/secret.md) — upsert per-host credentials into
   a Kubernetes `dockerconfigjson` Secret.
 - [Examples](examples/) — runnable configs for common mirror scenarios.
 

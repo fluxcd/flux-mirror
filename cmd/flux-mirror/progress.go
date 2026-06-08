@@ -11,7 +11,7 @@ import (
 
 	"github.com/briandowns/spinner"
 
-	syncpkg "github.com/fluxcd/flux-mirror/internal/sync"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
 // progress drives a single global spinner (on stderr) plus per-job
@@ -46,7 +46,7 @@ func newProgress(out, ttyOut io.Writer, totalEntries int) *progress {
 
 // JobFinished is the OnJobFinished hook for sync.Runner. Safe for
 // concurrent invocation.
-func (p *progress) JobFinished(entry, id, dst string, st syncpkg.Status, err error) {
+func (p *progress) JobFinished(entry, id, dst string, st apiv1.Status, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err != nil {

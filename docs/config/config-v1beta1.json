@@ -1,0 +1,358 @@
+{
+  "$id": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/config/config-v1beta1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Config is the flux-mirror configuration file.",
+  "properties": {
+    "apiVersion": {
+      "const": "mirror.fluxcd.io/v1beta1",
+      "type": "string"
+    },
+    "artifacts": {
+      "description": "Artifacts lists OCI artifacts to mirror.",
+      "items": {
+        "additionalProperties": false,
+        "description": "ArtifactEntry mirrors an OCI artifact (image, OCI chart, signed manifest, etc.).",
+        "properties": {
+          "destination": {
+            "description": "Destination is the OCI repository the artifact is mirrored to.",
+            "type": "string"
+          },
+          "includeReferrers": {
+            "description": "IncludeReferrers also mirrors the artifact's referrers (signatures, SBOMs).",
+            "type": "boolean"
+          },
+          "overwrite": {
+            "description": "Overwrite re-mirrors tags that already exist at the destination.",
+            "type": "boolean"
+          },
+          "selector": {
+            "additionalProperties": false,
+            "description": "Selector selects which tags to mirror.",
+            "properties": {
+              "limit": {
+                "description": "Limit caps how many tags are mirrored. 0 means unlimited.",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "regex": {
+                "additionalProperties": false,
+                "description": "Regex applies a Go regexp prefilter to tags.",
+                "properties": {
+                  "extract": {
+                    "description": "Extract is the named capture group used as the sort/semver value.",
+                    "type": "string"
+                  },
+                  "pattern": {
+                    "description": "Pattern is the Go regexp applied to tags.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pattern"
+                ],
+                "type": "object"
+              },
+              "semver": {
+                "description": "Semver is a semver constraint applied after the regex prefilter.",
+                "type": "string"
+              },
+              "sortBy": {
+                "description": "SortBy selects the sort strategy: semver, alphabetical, or numerical.",
+                "enum": [
+                  "semver",
+                  "alphabetical",
+                  "numerical"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "source": {
+            "description": "Source is the OCI repository the artifact is mirrored from.",
+            "type": "string"
+          },
+          "verify": {
+            "additionalProperties": false,
+            "description": "Verify configures signature verification for source artifacts.",
+            "properties": {
+              "matchOIDCIdentity": {
+                "description": "MatchOIDCIdentity lists the Fulcio certificate identities to accept.",
+                "items": {
+                  "additionalProperties": false,
+                  "description": "OIDCIdentity matches a Fulcio certificate identity.",
+                  "properties": {
+                    "issuer": {
+                      "description": "Issuer is the OIDC issuer URL of the signing identity.",
+                      "type": "string"
+                    },
+                    "subject": {
+                      "description": "Subject is a regexp matched against the certificate subject.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "issuer",
+                    "subject"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "minAge": {
+                "description": "MinAge requires a signature to be at least this old before mirroring.",
+                "type": "string"
+              },
+              "provider": {
+                "description": "Provider is the verification provider (VerifyProviderCosign).",
+                "enum": [
+                  "cosign"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "provider"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "destination",
+          "selector",
+          "source"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "charts": {
+      "description": "Charts lists Helm charts to mirror from an HTTP/S or OCI source.",
+      "items": {
+        "additionalProperties": false,
+        "description": "ChartEntry mirrors a Helm chart from an HTTP/S or OCI source to an OCI destination.",
+        "properties": {
+          "destination": {
+            "description": "Destination is the OCI repository URL the chart is mirrored to.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Limit caps how many matching versions are mirrored. 0 means unlimited.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "description": "Name is the chart name.",
+            "type": "string"
+          },
+          "overwrite": {
+            "description": "Overwrite re-mirrors versions that already exist at the destination.",
+            "type": "boolean"
+          },
+          "source": {
+            "description": "Source is the HTTP/S or OCI repository URL the chart is mirrored from.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Version is the semver constraint selecting which chart versions to mirror.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "destination",
+          "name",
+          "source"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "hosts": {
+      "description": "Hosts configures per-host authentication for OCI registry requests, both\nsource pulls and destination pushes.",
+      "items": {
+        "additionalProperties": false,
+        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential (mutually exclusive).\nTLS configures the transport-layer TLS/mTLS settings: it composes with\nCredential, but is mutually exclusive with Provider — a cloud registry\nprovider is a managed registry whose transport flux-mirror does not customize.\nAt least one of Credential, Provider, TLS, or MaxChunkSize must be set.",
+        "properties": {
+          "credential": {
+            "additionalProperties": false,
+            "description": "Credential configures the HTTP-layer registry credential for the host.",
+            "properties": {
+              "aud": {
+                "description": "Aud is the audience claim. Defaults to Host.",
+                "type": "string"
+              },
+              "exp": {
+                "description": "Exp is the jwkPath JWT lifetime. Defaults to 60s.",
+                "type": "string"
+              },
+              "fromEnv": {
+                "description": "FromEnv sends a static JWT read from the named environment variable.",
+                "type": "string"
+              },
+              "fromPath": {
+                "description": "FromPath sends a static JWT read from the file at the path.",
+                "type": "string"
+              },
+              "iss": {
+                "description": "Iss is the issuer claim for jwkPath-signed tokens.",
+                "type": "string"
+              },
+              "jwkPath": {
+                "description": "JWKPath signs a fresh JWT with the private JSON Web Key at the path.",
+                "type": "string"
+              },
+              "provider": {
+                "description": "Provider mints a per-request credential for the audience, one of\nJWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,\nJWTProviderAWS, or JWTProviderJWTSVID.",
+                "enum": [
+                  "github",
+                  "forgejo",
+                  "gcp",
+                  "azure",
+                  "aws",
+                  "jwt-svid"
+                ],
+                "type": "string"
+              },
+              "sub": {
+                "description": "Sub is the subject claim for jwkPath-signed tokens.",
+                "type": "string"
+              },
+              "username": {
+                "description": "Username presents the credential as a username/password pair.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "host": {
+            "description": "Host is the registry host (and optional port) the auth applies to.",
+            "type": "string"
+          },
+          "maxChunkSize": {
+            "description": "MaxChunkSize is the maximum size in KiB (1024 bytes) for an OCI blob\nupload PATCH to this host; larger blobs are split into chunked PATCH\nuploads. 0 (the default) disables chunking, sending a single monolithic\nPATCH per blob. Useful for registries or proxies that cap request bodies.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "provider": {
+            "description": "Provider authenticates the host with a cloud registry provider's workload\nidentity, one of RegistryProviderECR, RegistryProviderACR or\nRegistryProviderGAR. Mutually exclusive with Credential.",
+            "enum": [
+              "ecr",
+              "acr",
+              "gar"
+            ],
+            "type": "string"
+          },
+          "tls": {
+            "additionalProperties": false,
+            "description": "TLS configures transport-layer TLS for the host: server verification\n(custom CA), client certificate (mTLS), or SPIFFE X.509-SVID mTLS.",
+            "properties": {
+              "clientAuth": {
+                "additionalProperties": false,
+                "description": "ClientAuth presents a client certificate (mTLS).",
+                "properties": {
+                  "certificate": {
+                    "additionalProperties": false,
+                    "description": "Certificate is the static client certificate chain.",
+                    "properties": {
+                      "fromBytes": {
+                        "description": "FromBytes inlines the PEM-encoded value.",
+                        "type": "string"
+                      },
+                      "fromEnv": {
+                        "description": "FromEnv reads the value from the named environment variable.",
+                        "type": "string"
+                      },
+                      "fromPath": {
+                        "description": "FromPath reads the value from the file at the path.",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "key": {
+                    "additionalProperties": false,
+                    "description": "Key is the static client private key.",
+                    "properties": {
+                      "fromEnv": {
+                        "description": "FromEnv reads the private key from the named environment variable.",
+                        "type": "string"
+                      },
+                      "fromPath": {
+                        "description": "FromPath reads the private key from the file at the path.",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "provider": {
+                    "description": "Provider presents a SPIFFE X.509-SVID from the Workload API as the client\ncertificate (TLSClientProviderX509SVID).",
+                    "enum": [
+                      "x509-svid"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "serverAuth": {
+                "additionalProperties": false,
+                "description": "ServerAuth verifies the registry's server certificate.",
+                "properties": {
+                  "fromBytes": {
+                    "description": "FromBytes inlines the PEM-encoded CA bundle.",
+                    "type": "string"
+                  },
+                  "fromEnv": {
+                    "description": "FromEnv reads the CA bundle from the named environment variable.",
+                    "type": "string"
+                  },
+                  "fromPath": {
+                    "description": "FromPath reads the CA bundle from the file at the path.",
+                    "type": "string"
+                  },
+                  "spiffe": {
+                    "additionalProperties": false,
+                    "description": "SPIFFE verifies the server's X.509-SVID against the SPIFFE trust bundle.",
+                    "properties": {
+                      "authorizeAny": {
+                        "description": "AuthorizeAny accepts any SVID the bundle can validate (discouraged).",
+                        "type": "boolean"
+                      },
+                      "serverID": {
+                        "description": "ServerID authorizes one exact SPIFFE ID.",
+                        "type": "string"
+                      },
+                      "trustDomain": {
+                        "description": "TrustDomain authorizes any SVID in the named trust domain; TrustDomainSelf\n(\"self\") uses the client's own trust domain.",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "host"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "kind": {
+      "const": "Config",
+      "type": "string"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind"
+  ],
+  "title": "Config is the flux-mirror configuration file.",
+  "type": "object"
+}

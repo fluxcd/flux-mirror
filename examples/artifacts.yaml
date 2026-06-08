@@ -1,4 +1,4 @@
-apiVersion: mirror.fluxcd.io/v1alpha1
+apiVersion: mirror.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: ghcr.io/stefanprodan/charts/podinfo

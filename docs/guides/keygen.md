@@ -2,7 +2,7 @@
 
 The `flux-mirror keygen` command generates an EdDSA JSON Web Key pair for
 JWK-based registry auth. The output files plug directly into the
-[`hosts[].credential.jwkPath`](./config.md#hosts) config field, which
+[`hosts[].credential.jwkPath`](../config/README.md#hosts) config field, which
 `flux-mirror sync` and [`flux-mirror login`](./login.md) use to sign JWTs.
 
 ```
@@ -12,19 +12,19 @@ flux-mirror keygen [flags]
 Generates an EdDSA Ed25519 key pair and writes it to a directory as two JWK
 sets:
 
-| File          | Contents                | Mode |
-|---------------|-------------------------|------|
-| `pubkey.json` | Public JWK set, share this with the registry or publish it as JWKS. | `0644` |
-| `privkey.json`| Private JWK set, keep it secret.                                    | `0600` |
+| File           | Contents                                                            | Mode   |
+|----------------|---------------------------------------------------------------------|--------|
+| `pubkey.json`  | Public JWK set, share this with the registry or publish it as JWKS. | `0644` |
+| `privkey.json` | Private JWK set, keep it secret.                                    | `0600` |
 
 Both files use the standard JWK set shape `{"keys":[...]}`. The two keys share
 a UUIDv6 `kid` so the signature can be matched against the public set.
 
 ### Flags
 
-| Flag                  | Default | Description                                                                |
-|-----------------------|---------|----------------------------------------------------------------------------|
-| `-o, --output-dir`    | `.`     | Directory to write `pubkey.json` and `privkey.json` into. Created if missing. |
+| Flag               | Default | Description                                                                   |
+|--------------------|---------|-------------------------------------------------------------------------------|
+| `-o, --output-dir` | `.`     | Directory to write `pubkey.json` and `privkey.json` into. Created if missing. |
 
 ### Behavior
 
@@ -54,7 +54,7 @@ Output:
 ### Using the generated keys
 
 - **In a sync config** — point `hosts[].credential.jwkPath` at `privkey.json`.
-  See the [`hosts` section of the config spec](./config.md#hosts).
+  See the [`hosts` section of the config spec](../config/README.md#hosts).
 - **To mint a one-shot JWT** — reference `privkey.json` from a host's
   `credential.jwkPath` and run [`flux-mirror login`](./login.md).
 - **To grant access** — share `pubkey.json` with the registry operator, or

@@ -3,7 +3,11 @@
 
 package sync
 
-import "context"
+import (
+	"context"
+
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+)
 
 // EntryMirror is the consumer-side interface the Runner uses to drive any
 // kind of mirror entry (artifacts, charts, future). Entry-type specifics
@@ -45,7 +49,7 @@ type Job struct {
 	// plan time (cosign keyless identity, issuer, integrated time). Nil when
 	// the entry has no verify: block. Attached to the tag row at record time
 	// so a verified copy is distinguishable from an unverified one.
-	Verification *Verification
+	Verification *apiv1.Verification
 	// PlanError, when non-nil, marks a work unit the plan already determined
 	// has failed (e.g. signature verification failed at plan time). The runner
 	// records it as a StatusFailed row carrying this error and invokes neither
@@ -65,7 +69,7 @@ type JobResult struct {
 	// Status is the outcome of the job (copied, skipped, drifted, …). Must be
 	// one of the Run-returnable values (Valid reports this); StatusFailed is
 	// runner-assigned on error and never returned here.
-	Status Status
+	Status apiv1.Status
 	// Digest is the source artifact digest, when the job resolved it. Present
 	// for every status whose path computed it (including the too-new skip).
 	Digest string
@@ -74,47 +78,5 @@ type JobResult struct {
 	Reason string
 	// Referrers lists the mirrored sub-artifacts (signatures, SBOMs,
 	// attestations), in snapshot order. Empty unless includeReferrers is set.
-	Referrers []ReferrerResult
-}
-
-// Status is the result of one Job.Run, or runner-assigned on failure.
-type Status string
-
-const (
-	StatusCopied         Status = "copied"
-	StatusOverwritten    Status = "overwritten"
-	StatusSkipped        Status = "skipped" // nothing was copied; see Reason
-	StatusDrifted        Status = "drifted" // dst had a different digest, overwrite=false
-	StatusWouldCopy      Status = "would-copy"
-	StatusWouldOverwrite Status = "would-overwrite"
-	// StatusFailed marks a failed mirror. The runner assigns it as a job's own
-	// status when the job errors (or carries a Job.PlanError); a Job never
-	// returns it as JobResult.Status, so it is excluded from validStatuses.
-	// Nested ReferrerResult rows may carry it directly when a referrer fails.
-	StatusFailed Status = "failed"
-)
-
-// Reason values explain why a skipped tag or referrer was skipped. Always set
-// on a StatusSkipped result, absent otherwise.
-const (
-	ReasonUpToDate        = "up-to-date"
-	ReasonSignatureTooNew = "signature-too-new"
-)
-
-var validStatuses = map[Status]struct{}{
-	StatusCopied:         {},
-	StatusOverwritten:    {},
-	StatusSkipped:        {},
-	StatusDrifted:        {},
-	StatusWouldCopy:      {},
-	StatusWouldOverwrite: {},
-}
-
-// Valid reports whether s is one of the documented Run-returnable statuses.
-// Catches typos in entry implementations (a `return "coppied"` would otherwise
-// compile and produce an unmatched status that's silently ignored by Render).
-// StatusFailed is excluded by design: it is runner-assigned, not returned.
-func (s Status) Valid() bool {
-	_, ok := validStatuses[s]
-	return ok
+	Referrers []apiv1.ReferrerResult
 }
