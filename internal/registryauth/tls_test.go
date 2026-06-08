@@ -172,10 +172,7 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 // takes and that the TLS dispatch matches on.
 func mustHost(t *testing.T, rawURL string) string {
 	t.Helper()
-	g := NewWithT(t)
-	u, err := url.Parse(rawURL)
-	g.Expect(err).ToNot(HaveOccurred())
-	return u.Host
+	return mustURL(t, rawURL).Host
 }
 
 func mustGet(t *testing.T, rawURL string) *http.Request {
