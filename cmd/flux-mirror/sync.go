@@ -40,7 +40,7 @@ var syncCmd = &cobra.Command{
 declarative YAML config (apiVersion: mirror.fluxcd.io/v1alpha1, kind: Config).
 OCI registry auth is read from the ambient Docker config (~/.docker/config.json,
 $DOCKER_CONFIG, and configured credential helpers), or, for hosts listed in the
-config's 'auth' section, from a per-host JWT. Helm HTTP/S repository auth is read
+config's 'hosts' section, from a per-host JWT. Helm HTTP/S repository auth is read
 from Helm's default repositories.yaml path, or $HELM_REPOSITORY_CONFIG when set.
 
 Exit codes:
@@ -71,6 +71,7 @@ destination registry is known to be immutable.`,
 type syncFlags struct {
 	output        flags.Output
 	concurrency   int
+	timeout       time.Duration
 	retries       int
 	overwrite     bool
 	driftExitCode int
@@ -84,6 +85,7 @@ type syncFlags struct {
 var syncArgs = syncFlags{
 	output:        "text",
 	concurrency:   4,
+	timeout:       syncDefaultTimeout,
 	retries:       3,
 	driftExitCode: syncDefaultDriftExitCode,
 }
@@ -92,6 +94,8 @@ func init() {
 	syncCmd.Flags().VarP(&syncArgs.output, "output", "o", syncArgs.output.Description())
 	syncCmd.Flags().IntVar(&syncArgs.concurrency, "concurrency", syncArgs.concurrency,
 		"Maximum number of copy operations to run in parallel per job")
+	syncCmd.Flags().DurationVar(&syncArgs.timeout, "timeout", syncArgs.timeout,
+		"The length of time to wait before giving up on the current operation.")
 	syncCmd.Flags().IntVar(&syncArgs.retries, "retries", syncArgs.retries,
 		"Maximum number of retry attempts per job within timeout budget.")
 	syncCmd.Flags().BoolVar(&syncArgs.overwrite, "overwrite", false,
@@ -128,12 +132,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Bump per-job timeout to 5m if the user didn't pass --timeout explicitly.
-	// The root flag's declared default stays at 1m so other commands aren't
-	// affected.
-	if !cmd.Flags().Changed("timeout") {
-		rootArgs.timeout = syncDefaultTimeout
-	}
+	timeout := resolveSyncTimeout(cmd)
 
 	// Verbose enables our own structured logs (sync started, entry started,
 	// mirroring tag, tag done, entry summary, sync complete) AND wires
@@ -172,7 +171,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 	runner := &sync.Runner{
 		Concurrency:   syncArgs.concurrency,
 		Retries:       syncArgs.retries,
-		PerJobTimeout: rootArgs.timeout,
+		PerJobTimeout: timeout,
 		Logger:        logger,
 	}
 
@@ -242,6 +241,16 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return classifyExit(res, syncArgs.driftExitCode)
+}
+
+func resolveSyncTimeout(cmd *cobra.Command) time.Duration {
+	timeout := syncArgs.timeout
+	if !cmd.Flags().Changed("timeout") {
+		if f := rootCmd.PersistentFlags().Lookup("timeout"); f != nil && f.Changed {
+			timeout = rootArgs.timeout
+		}
+	}
+	return timeout
 }
 
 // syncExitError is returned to make `main` exit with a code other than 1
