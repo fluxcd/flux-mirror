@@ -36,7 +36,7 @@ Read the [README](README.md) for an overview of the project and its features.
 - `internal/artifacts/` - OCI artifact mirroring from source repository tags to destination repository tags, including drift handling, dry-run outcomes, referrers, verification, and concurrency fan-out.
 - `internal/charts/` - Helm chart mirroring to OCI destinations, including version selection, deterministic Helm-OCI publication, drift handling, and dry-run outcomes.
 - `internal/oci/` - OCI client wrapper, auth/keychain setup, transport customization, digest checks, blob copy, Helm artifact helpers, referrers, and cosign verification.
-- `internal/helmrepo/` - HTTP/S and OCI Helm repository access, index/chart resolution, and ambient Helm credential handling.
+- `internal/helmrepo/` - HTTP/S Helm repository access, index/chart resolution, and ambient Helm credential handling.
 - `internal/registryauth/`, `internal/jwkio/`, `internal/keygen/` - per-host registry auth, JWT/JWK loading and signing, and JWK key generation.
 - `internal/flags/` - reusable `pflag.Value` implementations for CLI flags with constrained values, such as output format.
 - `internal/testregistry/` - test helpers for registry-backed mirror tests.

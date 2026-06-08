@@ -128,10 +128,10 @@
       "type": "array"
     },
     "charts": {
-      "description": "Charts lists Helm charts to mirror from an HTTP/S or OCI source.",
+      "description": "Charts lists Helm charts to mirror from an HTTP/S repository into an OCI\nregistry. Mirroring a chart that already lives in an OCI registry is an\nOCI-to-OCI copy; configure it under Artifacts instead.",
       "items": {
         "additionalProperties": false,
-        "description": "ChartEntry mirrors a Helm chart from an HTTP/S or OCI source to an OCI destination.",
+        "description": "ChartEntry mirrors a Helm chart from an HTTP/S repository to an OCI\ndestination. To mirror a chart that is already in an OCI registry, use an\nArtifactEntry instead (an OCI Helm chart is mirrored as a plain OCI artifact).",
         "properties": {
           "destination": {
             "description": "Destination is the OCI repository URL the chart is mirrored to.",
@@ -151,7 +151,7 @@
             "type": "boolean"
           },
           "source": {
-            "description": "Source is the HTTP/S or OCI repository URL the chart is mirrored from.",
+            "description": "Source is the HTTP/S repository URL the chart is mirrored from.",
             "type": "string"
           },
           "version": {
@@ -183,7 +183,7 @@
                 "type": "string"
               },
               "exp": {
-                "description": "Exp is the jwkPath JWT lifetime. Defaults to 60s.",
+                "description": "Exp is the jwkPath/jwkEnv JWT lifetime. Defaults to 60s.",
                 "type": "string"
               },
               "fromEnv": {
@@ -195,7 +195,11 @@
                 "type": "string"
               },
               "iss": {
-                "description": "Iss is the issuer claim for jwkPath-signed tokens.",
+                "description": "Iss is the issuer claim for jwkPath/jwkEnv-signed tokens.",
+                "type": "string"
+              },
+              "jwkEnv": {
+                "description": "JWKEnv signs a fresh JWT with the private JSON Web Key read from the named\nenvironment variable.",
                 "type": "string"
               },
               "jwkPath": {
@@ -215,7 +219,7 @@
                 "type": "string"
               },
               "sub": {
-                "description": "Sub is the subject claim for jwkPath-signed tokens.",
+                "description": "Sub is the subject claim for jwkPath/jwkEnv-signed tokens.",
                 "type": "string"
               },
               "username": {

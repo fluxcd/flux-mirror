@@ -174,6 +174,13 @@ func TestValidate_Table(t *testing.T) {
 			errMsg: "scheme \"ftp\"",
 		},
 		{
+			name: "chart oci source rejected",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Charts: []ChartEntry{{
+				Source: "oci://ghcr.io/example/charts", Destination: "oci://ghcr.io/x", Name: "foo",
+			}}},
+			errMsg: "use 'artifacts' to mirror an OCI Helm chart",
+		},
+		{
 			name: "chart destination not oci",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Charts: []ChartEntry{{
 				Source: "https://charts.example.com", Destination: "https://ghcr.io/x", Name: "foo",
@@ -340,6 +347,36 @@ func TestValidate_Table(t *testing.T) {
 				}}},
 		},
 		{
+			name: "auth valid jwkEnv",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "registry.example", Credential: &RegistryCredential{
+						JWKEnv: "REGISTRY_JWK", Iss: "https://issuer", Sub: "client", Aud: "registry.example",
+						Exp: &metav1.Duration{Duration: time.Hour},
+					},
+				}}},
+		},
+		{
+			name: "auth jwkEnv missing iss",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "registry.example", Credential: &RegistryCredential{
+						JWKEnv: "REGISTRY_JWK", Sub: "client",
+					},
+				}}},
+			errMsg: "iss is required with jwkPath or jwkEnv",
+		},
+		{
+			name: "auth jwkPath and jwkEnv both set",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "registry.example", Credential: &RegistryCredential{
+						JWKPath: "/path/jwk.json", JWKEnv: "REGISTRY_JWK", Iss: "https://issuer", Sub: "client",
+					},
+				}}},
+			errMsg: "exactly one of provider, fromEnv, fromPath, jwkPath, or jwkEnv",
+		},
+		{
 			name: "auth jwkPath exp non-positive",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{
@@ -428,7 +465,7 @@ func TestValidate_Table(t *testing.T) {
 			name: "auth no source set",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{}}}},
-			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
+			errMsg: "exactly one of provider, fromEnv, fromPath, jwkPath, or jwkEnv",
 		},
 		{
 			name: "auth two sources set",
@@ -436,7 +473,7 @@ func TestValidate_Table(t *testing.T) {
 				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					Provider: JWTProviderGitHub, FromEnv: "TOKEN",
 				}}}},
-			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
+			errMsg: "exactly one of provider, fromEnv, fromPath, jwkPath, or jwkEnv",
 		},
 		{
 			name: "auth invalid provider",
@@ -476,7 +513,7 @@ func TestValidate_Table(t *testing.T) {
 				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					FromEnv: "TOKEN", Aud: "nope",
 				}}}},
-			errMsg: "aud can only be set with jwkPath or provider",
+			errMsg: "aud can only be set with jwkPath, jwkEnv, or provider",
 		},
 		{
 			name: "auth aud set with fromPath",
@@ -484,7 +521,7 @@ func TestValidate_Table(t *testing.T) {
 				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					FromPath: "/path/token", Aud: "nope",
 				}}}},
-			errMsg: "aud can only be set with jwkPath or provider",
+			errMsg: "aud can only be set with jwkPath, jwkEnv, or provider",
 		},
 		{
 			name: "auth iss set with fromPath",
@@ -500,7 +537,7 @@ func TestValidate_Table(t *testing.T) {
 				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					FromEnv: "TOKEN", FromPath: "/path/token",
 				}}}},
-			errMsg: "exactly one of provider, fromEnv, fromPath, or jwkPath",
+			errMsg: "exactly one of provider, fromEnv, fromPath, jwkPath, or jwkEnv",
 		},
 		{
 			name: "credential provider jwt-svid is valid",

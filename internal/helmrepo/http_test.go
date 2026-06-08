@@ -177,7 +177,7 @@ func TestNew_LoadsHelmRepositoryConfig(t *testing.T) {
 	})
 	t.Setenv("HELM_REPOSITORY_CONFIG", reposPath)
 
-	src, err := New(srv.URL(), nil)
+	src, err := New(srv.URL())
 	g.Expect(err).ToNot(HaveOccurred())
 	versions, err := src.ListVersions(context.Background(), "podinfo")
 	g.Expect(err).ToNot(HaveOccurred())
@@ -189,7 +189,7 @@ func TestNew_MissingHelmRepositoryConfigFallsBackAnonymous(t *testing.T) {
 	srv := newHelmServer(t, "0.1.0")
 	t.Setenv("HELM_REPOSITORY_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 
-	src, err := New(srv.URL(), nil)
+	src, err := New(srv.URL())
 	g.Expect(err).ToNot(HaveOccurred())
 	versions, err := src.ListVersions(context.Background(), "podinfo")
 	g.Expect(err).ToNot(HaveOccurred())

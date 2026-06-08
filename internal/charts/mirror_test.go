@@ -264,30 +264,3 @@ func TestChartsMirror_DryRun(t *testing.T) {
 	_, err = c.ListTags(context.Background(), dst+"/podinfo")
 	g.Expect(err).To(HaveOccurred(), "destination repo should not exist after dry-run")
 }
-
-func TestChartsMirror_OCISourceToOCIDest(t *testing.T) {
-	g := NewWithT(t)
-	c := oci.NewClient(oci.Insecure())
-
-	srcBase := testregistry.Repo(dockerReg, "charts-o2o-src")
-	dstBase := testregistry.Repo(dockerReg, "charts-o2o-dst")
-	pushHelmFixture(t, c, srcBase+"/podinfo:1.0.0", "1.0.0")
-	pushHelmFixture(t, c, srcBase+"/podinfo:1.1.0", "1.1.0")
-
-	entry := apiv1.ChartEntry{
-		Source:      "oci://" + srcBase,
-		Destination: "oci://" + dstBase,
-		Name:        "podinfo",
-		Limit:       new(0),
-	}
-	mirror, err := New(c, entry, Options{Logger: discardLogger()})
-	g.Expect(err).ToNot(HaveOccurred())
-
-	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{mirror})
-	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(versionsWithStatus(res.Entries[0], apiv1.StatusCopied)).To(ConsistOf("1.0.0", "1.1.0"))
-
-	tags, err := c.ListTags(context.Background(), dstBase+"/podinfo")
-	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(tags).To(ConsistOf("1.0.0", "1.1.0"))
-}

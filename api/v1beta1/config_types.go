@@ -80,7 +80,7 @@ const (
 	// defaultLimit is the chart/selector limit applied when unset.
 	defaultLimit = 1
 
-	// defaultJWKExp is the jwkPath JWT lifetime when exp is unset. It matches
+	// defaultJWKExp is the jwkPath/jwkEnv JWT lifetime when exp is unset. It matches
 	// cijwt's per-request signing lifetime, keeping the default behavior of
 	// short-lived, freshly signed tokens.
 	defaultJWKExp = 60 * time.Second
@@ -102,7 +102,9 @@ type Config struct {
 	// +optional
 	Hosts []RegistryHost `json:"hosts,omitempty"`
 
-	// Charts lists Helm charts to mirror from an HTTP/S or OCI source.
+	// Charts lists Helm charts to mirror from an HTTP/S repository into an OCI
+	// registry. Mirroring a chart that already lives in an OCI registry is an
+	// OCI-to-OCI copy; configure it under Artifacts instead.
 	// +optional
 	Charts []ChartEntry `json:"charts,omitempty"`
 
@@ -147,7 +149,7 @@ type RegistryHost struct {
 }
 
 // RegistryCredential configures a per-host credential. Exactly one of Provider,
-// FromEnv, FromPath, or JWKPath selects how the credential is obtained:
+// FromEnv, FromPath, JWKPath, or JWKEnv selects how the credential is obtained:
 //
 //   - Provider mints a per-request credential for Aud (an OIDC token for the
 //     OIDC providers, or a signed sts:GetCallerIdentity envelope for aws; see
@@ -158,13 +160,15 @@ type RegistryHost struct {
 //   - FromPath sends a static JWT read from the file at the path, with leading
 //     and trailing whitespace trimmed.
 //   - JWKPath signs a fresh JWT with the private JSON Web Key at the path.
+//   - JWKEnv signs a fresh JWT with the private JSON Web Key read from the named
+//     environment variable. It is the in-environment counterpart to JWKPath.
 //
-// Iss and Sub are required for, and may only be set with, JWKPath. Aud is
-// optional and may only be set with JWKPath or Provider; it defaults to Host.
-// Exp sets the JWT lifetime and may only be set with JWKPath, the one source
-// whose lifetime flux-mirror controls; it defaults to a short 60s. Every other
-// source's lifetime is fixed by an external issuer or is an opaque static
-// token, so Exp is rejected for them.
+// Iss and Sub are required for, and may only be set with, JWKPath or JWKEnv. Aud
+// is optional and may only be set with JWKPath, JWKEnv, or Provider; it defaults
+// to Host. Exp sets the JWT lifetime and may only be set with JWKPath or JWKEnv,
+// the sources whose lifetime flux-mirror controls; it defaults to a short 60s.
+// Every other source's lifetime is fixed by an external issuer or is an opaque
+// static token, so Exp is rejected for them.
 //
 // Username changes how the credential is presented. When unset, the credential
 // is a bearer token: sync stamps it as Authorization: Bearer (no auth
@@ -192,11 +196,16 @@ type RegistryCredential struct {
 	// +optional
 	JWKPath string `json:"jwkPath,omitempty"`
 
-	// Iss is the issuer claim for jwkPath-signed tokens.
+	// JWKEnv signs a fresh JWT with the private JSON Web Key read from the named
+	// environment variable.
+	// +optional
+	JWKEnv string `json:"jwkEnv,omitempty"`
+
+	// Iss is the issuer claim for jwkPath/jwkEnv-signed tokens.
 	// +optional
 	Iss string `json:"iss,omitempty"`
 
-	// Sub is the subject claim for jwkPath-signed tokens.
+	// Sub is the subject claim for jwkPath/jwkEnv-signed tokens.
 	// +optional
 	Sub string `json:"sub,omitempty"`
 
@@ -204,7 +213,7 @@ type RegistryCredential struct {
 	// +optional
 	Aud string `json:"aud,omitempty"`
 
-	// Exp is the jwkPath JWT lifetime. Defaults to 60s.
+	// Exp is the jwkPath/jwkEnv JWT lifetime. Defaults to 60s.
 	// +optional
 	Exp *metav1.Duration `json:"exp,omitempty"`
 
@@ -213,8 +222,8 @@ type RegistryCredential struct {
 	Username string `json:"username,omitempty"`
 }
 
-// EffectiveExp returns the jwkPath JWT lifetime with the documented default
-// (60s) applied. Only meaningful for jwkPath credentials.
+// EffectiveExp returns the jwkPath/jwkEnv JWT lifetime with the documented
+// default (60s) applied. Only meaningful for jwkPath/jwkEnv credentials.
 func (c RegistryCredential) EffectiveExp() time.Duration {
 	if c.Exp != nil {
 		return c.Exp.Duration
@@ -341,9 +350,11 @@ type SPIFFETLS struct {
 	AuthorizeAny bool `json:"authorizeAny,omitempty"`
 }
 
-// ChartEntry mirrors a Helm chart from an HTTP/S or OCI source to an OCI destination.
+// ChartEntry mirrors a Helm chart from an HTTP/S repository to an OCI
+// destination. To mirror a chart that is already in an OCI registry, use an
+// ArtifactEntry instead (an OCI Helm chart is mirrored as a plain OCI artifact).
 type ChartEntry struct {
-	// Source is the HTTP/S or OCI repository URL the chart is mirrored from.
+	// Source is the HTTP/S repository URL the chart is mirrored from.
 	Source string `json:"source"`
 
 	// Destination is the OCI repository URL the chart is mirrored to.

@@ -52,7 +52,7 @@ func New(client *oci.Client, entry apiv1.ChartEntry, opts Options) (sync.EntryMi
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	src, err := helmrepo.New(entry.Source, client)
+	src, err := helmrepo.New(entry.Source)
 	if err != nil {
 		return nil, err
 	}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
@@ -201,6 +202,72 @@ func TestJWTTransportOptions(t *testing.T) {
 				JWKPath: path,
 				Iss:     "https://issuer.example",
 				Sub:     "client-id",
+			},
+		}}
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
+		g.Expect(err).To(MatchError(ContainSubstring("parse JWK")))
+	})
+
+	t.Run("jwkEnv signs from the named env var", func(t *testing.T) {
+		g := NewWithT(t)
+		t.Setenv("REGISTRY_JWK", string(mustMarshalJWK(t)))
+		hosts := []apiv1.RegistryHost{{
+			Host: "registry.example",
+			Credential: &apiv1.RegistryCredential{
+				JWKEnv: "REGISTRY_JWK",
+				Iss:    "https://issuer.example",
+				Sub:    "client-id",
+				Aud:    "registry.example",
+			},
+		}}
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
+		g.Expect(err).ToNot(HaveOccurred())
+		_, err = cijwt.NewTransport(opts...)
+		g.Expect(err).ToNot(HaveOccurred())
+	})
+
+	t.Run("jwkEnv with custom exp signs from the named env var", func(t *testing.T) {
+		g := NewWithT(t)
+		t.Setenv("REGISTRY_JWK", string(mustMarshalJWK(t)))
+		hosts := []apiv1.RegistryHost{{
+			Host: "registry.example",
+			Credential: &apiv1.RegistryCredential{
+				JWKEnv: "REGISTRY_JWK",
+				Iss:    "https://issuer.example",
+				Sub:    "client-id",
+				Exp:    &metav1.Duration{Duration: time.Hour},
+			},
+		}}
+		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
+		g.Expect(err).ToNot(HaveOccurred())
+		_, err = cijwt.NewTransport(opts...)
+		g.Expect(err).ToNot(HaveOccurred())
+	})
+
+	t.Run("jwkEnv with unset env var errors", func(t *testing.T) {
+		g := NewWithT(t)
+		t.Setenv("REGISTRY_JWK", "")
+		hosts := []apiv1.RegistryHost{{
+			Host: "registry.example",
+			Credential: &apiv1.RegistryCredential{
+				JWKEnv: "REGISTRY_JWK",
+				Iss:    "https://issuer.example",
+				Sub:    "client-id",
+			},
+		}}
+		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
+		g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
+	})
+
+	t.Run("jwkEnv rejects malformed JWK", func(t *testing.T) {
+		g := NewWithT(t)
+		t.Setenv("REGISTRY_JWK", "not json")
+		hosts := []apiv1.RegistryHost{{
+			Host: "registry.example",
+			Credential: &apiv1.RegistryCredential{
+				JWKEnv: "REGISTRY_JWK",
+				Iss:    "https://issuer.example",
+				Sub:    "client-id",
 			},
 		}}
 		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)

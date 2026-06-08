@@ -22,6 +22,13 @@ func ReadPrivateJWK(path string) (string, error) {
 	return parsePrivateJWK(data)
 }
 
+// ReadPrivateJWKFromBytes is ReadPrivateJWK for an in-memory JWK (e.g. one read
+// from an environment variable). It accepts the same two shapes — a bare JSON
+// Web Key or a single-key JWK Set — and returns a single JWK.
+func ReadPrivateJWKFromBytes(data []byte) (string, error) {
+	return parsePrivateJWK(data)
+}
+
 func parsePrivateJWK(data []byte) (string, error) {
 	var probe struct {
 		Keys []json.RawMessage `json:"keys"`

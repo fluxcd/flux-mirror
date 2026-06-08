@@ -3,7 +3,7 @@
 
 // Package registryauth resolves OCI registry credentials for the hosts in a
 // flux-mirror config's hosts section: JWT credentials (provider/fromEnv/fromPath/
-// jwkPath) and cloud registry providers (ecr/acr/gar). It is the auth layer
+// jwkPath/jwkEnv) and cloud registry providers (ecr/acr/gar). It is the auth layer
 // shared by the sync, login, and create commands.
 package registryauth
 
@@ -34,7 +34,6 @@ import (
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
-	"github.com/fluxcd/flux-mirror/internal/jwkio"
 )
 
 // resolveCredential mints or reads the credential for a single credential host,
@@ -52,25 +51,21 @@ func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error
 		}
 		return fn(ctx)
 	case c.FromEnv != "":
-		token := os.Getenv(c.FromEnv)
-		if token == "" {
-			return "", fmt.Errorf("environment variable %q is not set or empty", c.FromEnv)
-		}
-		return token, nil
+		return requireEnv(c.FromEnv)
 	case c.FromPath != "":
 		b, err := os.ReadFile(c.FromPath)
 		if err != nil {
 			return "", fmt.Errorf("read fromPath: %w", err)
 		}
 		return strings.TrimSpace(string(b)), nil
-	case c.JWKPath != "":
-		raw, err := jwkio.ReadPrivateJWK(c.JWKPath)
+	case c.JWKPath != "", c.JWKEnv != "":
+		raw, err := readJWK(c)
 		if err != nil {
-			return "", fmt.Errorf("read jwkPath: %w", err)
+			return "", err
 		}
 		fn, err := jwkTokenFunc(raw, c.Iss, c.Sub, aud, c.EffectiveExp())
 		if err != nil {
-			return "", fmt.Errorf("parse jwkPath: %w", err)
+			return "", fmt.Errorf("parse JWK: %w", err)
 		}
 		return fn(ctx)
 	default:
@@ -80,8 +75,8 @@ func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error
 
 // jwkTokenFunc parses a private JWK once and returns a cijwt.TokenFunc that
 // signs a fresh JWT with the given claims and lifetime on each call. Used for
-// jwkPath credentials that set a custom exp; the default 60s lifetime is served
-// by cijwt.WithHostJWK instead.
+// jwkPath/jwkEnv credentials that set a custom exp; the default 60s lifetime is
+// served by cijwt.WithHostJWK instead.
 func jwkTokenFunc(jwk, iss, sub, aud string, ttl time.Duration) (cijwt.TokenFunc, error) {
 	key, err := jwt.ParseJWK(jwk)
 	if err != nil {
