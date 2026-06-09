@@ -73,7 +73,7 @@ lifetime (here ~1 year). With no `username`, the signed JWT is stored as a beare
 
 ```yaml
 # config.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com

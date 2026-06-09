@@ -5,7 +5,7 @@
   "description": "Config is the flux-mirror configuration file.",
   "properties": {
     "apiVersion": {
-      "const": "mirror.fluxcd.io/v1beta1",
+      "const": "mirror.plugin.fluxcd.io/v1beta1",
       "type": "string"
     },
     "artifacts": {

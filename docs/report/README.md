@@ -21,7 +21,7 @@ Every report is wrapped in a top-level envelope:
 
 | Key                 | Description                                                  |
 |---------------------|--------------------------------------------------------------|
-| `apiVersion`        | Report API version. Currently `mirror.fluxcd.io/v1beta1`.    |
+| `apiVersion`        | Report API version. Currently `mirror.plugin.fluxcd.io/v1beta1`.    |
 | `kind`              | Report API kind. Currently `Report`.                         |
 | `$schema`           | URL of the JSON Schema describing the envelope. JSON only.   |
 | `report.reporter`   | Identity of the producer, e.g. `flux-mirror/v0.1.0`.         |
@@ -159,7 +159,7 @@ second entry failed at plan time because the source repository does not exist.
 
 ```json
 {
-  "apiVersion": "mirror.fluxcd.io/v1beta1",
+  "apiVersion": "mirror.plugin.fluxcd.io/v1beta1",
   "kind": "Report",
   "$schema": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report/report-v1beta1.json",
   "report": {

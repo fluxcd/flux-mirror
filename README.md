@@ -80,7 +80,7 @@ Write a config file describing what to mirror:
 
 ```yaml
 # flux-mirror.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 charts:
   - name: external-dns

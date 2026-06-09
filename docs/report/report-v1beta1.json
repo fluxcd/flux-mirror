@@ -8,7 +8,7 @@
       "type": "string"
     },
     "apiVersion": {
-      "const": "mirror.fluxcd.io/v1beta1",
+      "const": "mirror.plugin.fluxcd.io/v1beta1",
       "type": "string"
     },
     "kind": {

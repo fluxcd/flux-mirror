@@ -63,7 +63,7 @@ generate-json-schemas: generate-api ## Generate the config and report JSON Schem
 	mkdir -p ./docs/config ./docs/report
 	go run ./tools/schema-gen \
 		-controller-gen "$(CONTROLLER_GEN)" \
-		-group "mirror.fluxcd.io" \
+		-group "mirror.plugin.fluxcd.io" \
 		-version "v1beta1" \
 		-kind "Config" \
 		-type "github.com/fluxcd/flux-mirror/api/v1beta1.Config" \
@@ -72,7 +72,7 @@ generate-json-schemas: generate-api ## Generate the config and report JSON Schem
 		-out ./docs/config/config-v1beta1.json
 	go run ./tools/schema-gen \
 		-controller-gen "$(CONTROLLER_GEN)" \
-		-group "mirror.fluxcd.io" \
+		-group "mirror.plugin.fluxcd.io" \
 		-version "v1beta1" \
 		-kind "Report" \
 		-type "github.com/fluxcd/flux-mirror/api/v1beta1.ReportSpec" \

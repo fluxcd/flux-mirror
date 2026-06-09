@@ -79,7 +79,7 @@ A hosts-only config — switch clouds by changing the host and `provider`:
 
 ```yaml
 # hosts.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
@@ -133,7 +133,7 @@ a username/password login — so set `username` to any value (for example a
 
 ```yaml
 # hosts.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: ghcr.io
@@ -168,7 +168,7 @@ Hub account and pass an access token as the password via `value`:
 
 ```yaml
 # hosts.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: docker.io
