@@ -46,7 +46,7 @@ func executeCommandWithInput(args []string, input string) (string, error) {
 }
 
 func resetCmdArgs() {
-	rootArgs.timeout = timeout
+	rootArgs = rootFlags{timeout: timeout}
 	rootCmd.SetIn(os.Stdin)
 
 	versionArgs = versionFlags{output: "text"}

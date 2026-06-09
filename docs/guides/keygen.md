@@ -54,7 +54,7 @@ Output:
 
 ## Example: mint a long-lived login token
 
-Unlike `provider`/`fromEnv` credentials — whose lifetime is fixed by an external
+Unlike `provider`/`value` credentials — whose lifetime is fixed by an external
 issuer — a `jwkPath` credential is signed locally, so you control its lifetime
 through [`exp`](../config/README.md#per-host-credential). This makes a key pair plus
 `login` a convenient way to mint a single, long-lived bearer token (for example,

@@ -17,12 +17,32 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-// writeLoginConfig writes a valid config whose single host carries the
-// given credential block (already indented two levels under `credential:`) and
-// returns its path.
-func writeLoginConfig(t *testing.T, credBlock string) string {
+// writeLoginConfig writes a valid config whose single host carries a value credential from MY_LOGIN_TOKEN.
+func writeLoginConfig(t *testing.T) string {
 	t.Helper()
-	return writeLoginConfigIn(t, t.TempDir(), credBlock)
+	return writeLoginConfigIn(t, t.TempDir(), "      value: ${MY_LOGIN_TOKEN}\n")
+}
+
+func writeLoginConfigWithUsername(t *testing.T, username, credBlock string) string {
+	t.Helper()
+	dir := t.TempDir()
+	g := NewWithT(t)
+	src := `apiVersion: mirror.fluxcd.io/v1beta1
+kind: Config
+artifacts:
+  - source: ghcr.io/a/b
+    destination: ghcr.io/c/d
+    selector:
+      semver: ">=1.0.0"
+      limit: 1
+hosts:
+  - host: registry.example.com
+    username: ` + username + `
+    credential:
+` + credBlock
+	path := filepath.Join(dir, "config.yaml")
+	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
+	return path
 }
 
 // writeLoginConfigIn writes the config into dir, so path fields in credBlock
@@ -87,9 +107,16 @@ func parseUnverified(t *testing.T, token string) gojwt.MapClaims {
 // OS keychain helper.
 func loginStore(t *testing.T, configRef, input string) (string, error) {
 	t.Helper()
+	return loginStoreWithArgs(t, configRef, input)
+}
+
+func loginStoreWithArgs(t *testing.T, configRef, input string, extraArgs ...string) (string, error) {
+	t.Helper()
 	const host = "registry.example.com"
 	dir := t.TempDir()
-	args := []string{"login", "--host", host, "--config", configRef, "--docker-config", dir, "--plaintext"}
+	args := make([]string, 0, 8+len(extraArgs))
+	args = append(args, "login", "--host", host, "--config", configRef, "--docker-config", dir, "--plaintext")
+	args = append(args, extraArgs...)
 	if _, err := executeCommandWithInput(args, input); err != nil {
 		return "", err
 	}
@@ -121,14 +148,24 @@ func loginStore(t *testing.T, configRef, input string) (string, error) {
 	return pass, nil
 }
 
-func TestLogin_FromEnv(t *testing.T) {
+func TestLogin_ValueFromEnvSubstitution(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t)
 
 	cred, err := loginStore(t, cfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(cred).To(Equal("static-token-value"))
+}
+
+func TestLogin_NoEnvSubstStoresLiteralValue(t *testing.T) {
+	g := NewWithT(t)
+	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
+	cfg := writeLoginConfig(t)
+
+	cred, err := loginStoreWithArgs(t, cfg, "", "--no-envsubst")
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(cred).To(Equal("${MY_LOGIN_TOKEN}"))
 }
 
 func TestLogin_FromPath(t *testing.T) {
@@ -191,7 +228,7 @@ kind: Config
 hosts:
   - host: registry.example.com
     credential:
-      fromEnv: MY_LOGIN_TOKEN
+      value: ${MY_LOGIN_TOKEN}
 `
 	cred, err := loginStore(t, "-", src)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -207,7 +244,7 @@ kind: Config
 hosts:
   - host: registry.example.com
     credential:
-      fromEnv: MY_LOGIN_TOKEN
+      value: ${MY_LOGIN_TOKEN}
 `
 	path := filepath.Join(t.TempDir(), "auth-only.yaml")
 	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
@@ -224,7 +261,7 @@ hosts:
 func TestLogin_StoresRegistryToken(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t)
 	dockerDir := t.TempDir()
 
 	out, err := executeCommand([]string{
@@ -256,7 +293,7 @@ func TestLogin_StoresRegistryToken(t *testing.T) {
 func TestLogin_UsernameStoresUserPassword(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n      username: robot\n")
+	cfg := writeLoginConfigWithUsername(t, "robot", "      value: ${MY_LOGIN_TOKEN}\n")
 	dockerDir := t.TempDir()
 
 	_, err := executeCommand([]string{
@@ -290,10 +327,10 @@ kind: Config
 hosts:
   - host: a.example.com
     credential:
-      fromEnv: TOKEN_A
+      value: ${TOKEN_A}
   - host: b.example.com
     credential:
-      fromEnv: TOKEN_B
+      value: ${TOKEN_B}
 `
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	g.Expect(os.WriteFile(cfgPath, []byte(src), 0o600)).To(Succeed())
@@ -317,7 +354,8 @@ hosts:
 
 func TestLogin_HostNotFound(t *testing.T) {
 	g := NewWithT(t)
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
+	cfg := writeLoginConfig(t)
 
 	_, err := executeCommand([]string{"login", "--host", "other.example.com", "--config", cfg})
 	g.Expect(err).To(MatchError(ContainSubstring(`host "other.example.com" not found`)))
@@ -341,13 +379,13 @@ artifacts:
 	g.Expect(err).To(MatchError(ContainSubstring("no hosts")))
 }
 
-func TestLogin_FromEnvUnset(t *testing.T) {
+func TestLogin_ValueEnvSubstitutionUnset(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t)
 
 	_, err := executeCommand([]string{"login", "--config", cfg})
-	g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
+	g.Expect(err).To(MatchError(ContainSubstring("exactly one of provider, value, fromPath, jwkPath, or jwkValue")))
 }
 
 func TestLogin_SkipsTLSOnlyHost(t *testing.T) {
@@ -360,7 +398,7 @@ hosts:
   - host: tls.example.com
     tls:
       serverAuth:
-        fromBytes: dummy
+        value: dummy
 `
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())

@@ -392,12 +392,12 @@ func configBaseDir(path string) (string, error) {
 
 func decodeConfig(cmd *cobra.Command, path string) (*apiv1.Config, error) {
 	if path == "-" {
-		return config.Decode(cmd.InOrStdin())
+		return config.DecodeWithEnvSubst(cmd.InOrStdin(), !rootArgs.noEnvsubst)
 	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open config: %w", err)
 	}
 	defer f.Close()
-	return config.Decode(f)
+	return config.DecodeWithEnvSubst(f, !rootArgs.noEnvsubst)
 }

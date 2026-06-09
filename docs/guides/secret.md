@@ -46,7 +46,8 @@ defaults to the one from the active kubeconfig context, or the in-cluster
 ServiceAccount namespace when running inside a pod.
 
 The global `--timeout` flag (default `1m`) bounds credential resolution, which
-for `provider` sources involves a network call to mint the token.
+for `provider` sources involves a network call to mint the token. The global
+`--no-envsubst` flag disables config environment substitution.
 
 ## Behavior
 
@@ -219,8 +220,8 @@ apiVersion: mirror.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
+    username: sa-oidc          # value the registry expects; often ignored
     credential:
-      username: sa-oidc          # value the registry expects; often ignored
       fromPath: registry-token   # the audience is set by the projected volume
 ```
 
@@ -281,9 +282,9 @@ apiVersion: mirror.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
+    username: spiffe           # value the registry expects; often ignored
     credential:
       provider: jwt-svid
-      username: spiffe           # value the registry expects; often ignored
       # aud defaults to the host (registry.example.com)
 ```
 
