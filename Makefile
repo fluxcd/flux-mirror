@@ -7,6 +7,7 @@ DOCKER_IMAGE ?= ghcr.io/fluxcd/flux-mirror:latest-dev
 VERSION_DEV ?=0.0.0-$(shell git rev-parse --abbrev-ref HEAD)-$(shell git rev-parse --short HEAD)-$(shell date +%s)
 GO_TEST_ARGS ?=
 GO_RUN_ARGS ?=
+RELEASE_DIR ?= ./bin/release
 
 # Setting SHELL to bash allows bash commands to be executed by recipes.
 # Options are set to exit when a recipe line exits non-zero or a piped command fails.
@@ -79,6 +80,14 @@ generate-json-schemas: generate-api ## Generate the config and report JSON Schem
 		-schema-field \
 		-id "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report/report-v1beta1.json" \
 		-out ./docs/report/report-v1beta1.json
+
+.PHONY: package-schemas
+package-schemas: ## Package JSON Schemas for release assets.
+	rm -rf $(RELEASE_DIR)/schemas
+	mkdir -p $(RELEASE_DIR)/schemas
+	cp ./docs/config/config-v1beta1.json $(RELEASE_DIR)/schemas/
+	cp ./docs/report/report-v1beta1.json $(RELEASE_DIR)/schemas/
+	tar -czf $(RELEASE_DIR)/schemas.tar.gz -C $(RELEASE_DIR) schemas
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the CLI.
