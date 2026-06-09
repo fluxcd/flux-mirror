@@ -214,7 +214,7 @@ func TestSPIFFE_ClientOnly(t *testing.T) {
 	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{{
 		Host: host,
 		TLS: &apiv1.TLS{
-			ServerAuth: &apiv1.TLSServerAuth{FromBytes: string(ca.certPEM)},
+			ServerAuth: &apiv1.TLSServerAuth{Value: string(ca.certPEM)},
 			ClientAuth: &apiv1.TLSClientAuth{Provider: apiv1.TLSClientProviderX509SVID},
 		},
 	}})

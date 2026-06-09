@@ -183,11 +183,7 @@
                 "type": "string"
               },
               "exp": {
-                "description": "Exp is the jwkPath/jwkEnv JWT lifetime. Defaults to 60s.",
-                "type": "string"
-              },
-              "fromEnv": {
-                "description": "FromEnv sends a static JWT read from the named environment variable.",
+                "description": "Exp is the jwkPath/jwkValue JWT lifetime. Defaults to 60s.",
                 "type": "string"
               },
               "fromPath": {
@@ -195,15 +191,15 @@
                 "type": "string"
               },
               "iss": {
-                "description": "Iss is the issuer claim for jwkPath/jwkEnv-signed tokens.",
-                "type": "string"
-              },
-              "jwkEnv": {
-                "description": "JWKEnv signs a fresh JWT with the private JSON Web Key read from the named\nenvironment variable.",
+                "description": "Iss is the issuer claim for jwkPath/jwkValue-signed tokens.",
                 "type": "string"
               },
               "jwkPath": {
                 "description": "JWKPath signs a fresh JWT with the private JSON Web Key at the path.",
+                "type": "string"
+              },
+              "jwkValue": {
+                "description": "JWKValue signs a fresh JWT with the private JSON Web Key read from the config.",
                 "type": "string"
               },
               "provider": {
@@ -219,11 +215,11 @@
                 "type": "string"
               },
               "sub": {
-                "description": "Sub is the subject claim for jwkPath/jwkEnv-signed tokens.",
+                "description": "Sub is the subject claim for jwkPath/jwkValue-signed tokens.",
                 "type": "string"
               },
-              "username": {
-                "description": "Username presents the credential as a username/password pair.",
+              "value": {
+                "description": "Value sends a static JWT read from the config.",
                 "type": "string"
               }
             },
@@ -259,16 +255,12 @@
                     "additionalProperties": false,
                     "description": "Certificate is the static client certificate chain.",
                     "properties": {
-                      "fromBytes": {
-                        "description": "FromBytes inlines the PEM-encoded value.",
-                        "type": "string"
-                      },
-                      "fromEnv": {
-                        "description": "FromEnv reads the value from the named environment variable.",
-                        "type": "string"
-                      },
                       "fromPath": {
                         "description": "FromPath reads the value from the file at the path.",
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "Value inlines the PEM-encoded value.",
                         "type": "string"
                       }
                     },
@@ -278,12 +270,12 @@
                     "additionalProperties": false,
                     "description": "Key is the static client private key.",
                     "properties": {
-                      "fromEnv": {
-                        "description": "FromEnv reads the private key from the named environment variable.",
-                        "type": "string"
-                      },
                       "fromPath": {
                         "description": "FromPath reads the private key from the file at the path.",
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "Value reads the private key from the config.",
                         "type": "string"
                       }
                     },
@@ -303,14 +295,6 @@
                 "additionalProperties": false,
                 "description": "ServerAuth verifies the registry's server certificate.",
                 "properties": {
-                  "fromBytes": {
-                    "description": "FromBytes inlines the PEM-encoded CA bundle.",
-                    "type": "string"
-                  },
-                  "fromEnv": {
-                    "description": "FromEnv reads the CA bundle from the named environment variable.",
-                    "type": "string"
-                  },
                   "fromPath": {
                     "description": "FromPath reads the CA bundle from the file at the path.",
                     "type": "string"
@@ -333,12 +317,20 @@
                       }
                     },
                     "type": "object"
+                  },
+                  "value": {
+                    "description": "Value inlines the PEM-encoded CA bundle.",
+                    "type": "string"
                   }
                 },
                 "type": "object"
               }
             },
             "type": "object"
+          },
+          "username": {
+            "description": "Username presents the host credential as a username/password pair. When\nunset, the host credential is used as a bearer token.",
+            "type": "string"
           }
         },
         "required": [

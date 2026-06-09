@@ -12,7 +12,7 @@ artifacts:
     selector:
       regex:
         pattern: '^6\.11\.(?P<patch>\d+)$'
-        extract: "${patch}"
+        extract: "$patch"
       sortBy: numerical
       limit: 2
     includeReferrers: true

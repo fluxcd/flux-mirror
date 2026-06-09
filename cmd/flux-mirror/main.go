@@ -31,7 +31,8 @@ we adapt to new features and/or find better ways to facilitate what it does.`,
 }
 
 type rootFlags struct {
-	timeout time.Duration
+	timeout    time.Duration
+	noEnvsubst bool
 }
 
 var rootArgs = rootFlags{
@@ -41,6 +42,8 @@ var rootArgs = rootFlags{
 func init() {
 	rootCmd.PersistentFlags().DurationVar(&rootArgs.timeout, "timeout", rootArgs.timeout,
 		"The length of time to wait before giving up on the current operation.")
+	rootCmd.PersistentFlags().BoolVar(&rootArgs.noEnvsubst, "no-envsubst", false,
+		"Disable environment variable substitution in config files.")
 
 	rootCmd.SetOut(os.Stdout)
 }

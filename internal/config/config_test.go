@@ -4,6 +4,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -71,6 +72,96 @@ artifacts:
 	g.Expect(cfg.Artifacts[1].Selector.EffectiveSortBy()).To(Equal(SortByNumerical))
 }
 
+func TestDecode_EnvSubstitution(t *testing.T) {
+	g := NewWithT(t)
+	t.Setenv("CREDENTIAL_KEY", "value")
+	t.Setenv("REGISTRY_TOKEN", "env-token")
+
+	src := `apiVersion: mirror.fluxcd.io/v1beta1
+kind: Config
+hosts:
+  - host: registry.example.com
+    credential:
+      ${CREDENTIAL_KEY}: ${REGISTRY_TOKEN}
+`
+	cfg, err := Decode(strings.NewReader(src))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(cfg.Hosts).To(HaveLen(1))
+	g.Expect(cfg.Hosts[0].Credential.Value).To(Equal("env-token"))
+}
+
+func TestDecode_EnvSubstitutionIgnoresSingleDollar(t *testing.T) {
+	g := NewWithT(t)
+
+	src := `apiVersion: mirror.fluxcd.io/v1beta1
+kind: Config
+artifacts:
+  - source: ghcr.io/a/b
+    destination: ghcr.io/c/d
+    selector:
+      regex:
+        pattern: .*
+        extract: "$patch"
+`
+	cfg, err := Decode(strings.NewReader(src))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(cfg.Artifacts[0].Selector.Regex.Extract).To(Equal("$patch"))
+}
+
+func TestDecodeWithEnvSubstDisabled(t *testing.T) {
+	g := NewWithT(t)
+	t.Setenv("REGISTRY_TOKEN", "env-token")
+
+	src := `apiVersion: mirror.fluxcd.io/v1beta1
+kind: Config
+hosts:
+  - host: registry.example.com
+    credential:
+      value: ${REGISTRY_TOKEN}
+`
+	cfg, err := DecodeWithEnvSubst(strings.NewReader(src), false)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(cfg.Hosts[0].Credential.Value).To(Equal("${REGISTRY_TOKEN}"))
+}
+
+func TestDecode_EnvSubstitutionStrict(t *testing.T) {
+	g := NewWithT(t)
+	const missingToken = "FLUX_MIRROR_TEST_MISSING_TOKEN_STRICT"
+	old, hadOld := os.LookupEnv(missingToken)
+	g.Expect(os.Unsetenv(missingToken)).To(Succeed())
+	t.Cleanup(func() {
+		if hadOld {
+			_ = os.Setenv(missingToken, old)
+		}
+	})
+
+	src := `apiVersion: mirror.fluxcd.io/v1beta1
+kind: Config
+hosts:
+  - host: registry.example.com
+    credential:
+      value: ${FLUX_MIRROR_TEST_MISSING_TOKEN_STRICT}
+`
+	_, err := Decode(strings.NewReader(src))
+	g.Expect(err).To(MatchError(ContainSubstring("substitute environment variables")))
+}
+
+func TestDecode_EnvSubstitutionStrictAllowsEmpty(t *testing.T) {
+	g := NewWithT(t)
+	t.Setenv("EMPTY_TOKEN", "")
+
+	src := `apiVersion: mirror.fluxcd.io/v1beta1
+kind: Config
+hosts:
+  - host: registry.example.com
+    credential:
+      value: ${EMPTY_TOKEN}
+`
+	cfg, err := Decode(strings.NewReader(src))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(cfg.Hosts[0].Credential.Value).To(BeEmpty())
+}
+
 func TestDefaults(t *testing.T) {
 	g := NewWithT(t)
 
@@ -100,7 +191,7 @@ func TestResolvePaths(t *testing.T) {
 				ServerAuth: &TLSServerAuth{FromPath: "../../etc/shadow"}, // traversal: clamped
 				ClientAuth: &TLSClientAuth{
 					Certificate: &TLSData{FromPath: "certs/client.crt"},
-					Key:         &TLSKey{FromEnv: "CLIENT_KEY"}, // not a path: untouched
+					Key:         &TLSKey{Value: "CLIENT_KEY"}, // not a path: untouched
 				},
 			},
 		}}}
@@ -115,7 +206,7 @@ func TestResolvePaths(t *testing.T) {
 	g.Expect(h.Credential.JWKPath).To(Equal("/etc/flux-mirror/abs/keys/jwk.json"))
 	g.Expect(h.TLS.ServerAuth.FromPath).To(Equal("/etc/flux-mirror/etc/shadow")) // escape clamped
 	g.Expect(h.TLS.ClientAuth.Certificate.FromPath).To(Equal("/etc/flux-mirror/certs/client.crt"))
-	g.Expect(h.TLS.ClientAuth.Key.FromEnv).To(Equal("CLIENT_KEY"))
+	g.Expect(h.TLS.ClientAuth.Key.Value).To(Equal("CLIENT_KEY"))
 
 	// Empty baseDir is a no-op: paths stay as written.
 	cfg = mkCfg()
@@ -314,10 +405,10 @@ func TestValidate_Table(t *testing.T) {
 				}}},
 		},
 		{
-			name: "auth valid fromEnv",
+			name: "auth valid value",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{
-					Host: "static.example", Credential: &RegistryCredential{FromEnv: "TOKEN"},
+					Host: "static.example", Credential: &RegistryCredential{Value: "TOKEN"},
 				}}},
 		},
 		{
@@ -347,34 +438,34 @@ func TestValidate_Table(t *testing.T) {
 				}}},
 		},
 		{
-			name: "auth valid jwkEnv",
+			name: "auth valid jwkValue",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{
 					Host: "registry.example", Credential: &RegistryCredential{
-						JWKEnv: "REGISTRY_JWK", Iss: "https://issuer", Sub: "client", Aud: "registry.example",
+						JWKValue: "REGISTRY_JWK", Iss: "https://issuer", Sub: "client", Aud: "registry.example",
 						Exp: &metav1.Duration{Duration: time.Hour},
 					},
 				}}},
 		},
 		{
-			name: "auth jwkEnv missing iss",
+			name: "auth jwkValue missing iss",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{
 					Host: "registry.example", Credential: &RegistryCredential{
-						JWKEnv: "REGISTRY_JWK", Sub: "client",
+						JWKValue: "REGISTRY_JWK", Sub: "client",
 					},
 				}}},
-			errMsg: "iss is required with jwkPath or jwkEnv",
+			errMsg: "iss is required with jwkPath or jwkValue",
 		},
 		{
-			name: "auth jwkPath and jwkEnv both set",
+			name: "auth jwkPath and jwkValue both set",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{
 					Host: "registry.example", Credential: &RegistryCredential{
-						JWKPath: "/path/jwk.json", JWKEnv: "REGISTRY_JWK", Iss: "https://issuer", Sub: "client",
+						JWKPath: "/path/jwk.json", JWKValue: "REGISTRY_JWK", Iss: "https://issuer", Sub: "client",
 					},
 				}}},
-			errMsg: "exactly one of provider, fromEnv, fromPath, jwkPath, or jwkEnv",
+			errMsg: "exactly one of provider, value, fromPath, jwkPath, or jwkValue",
 		},
 		{
 			name: "auth jwkPath exp non-positive",
@@ -398,11 +489,11 @@ func TestValidate_Table(t *testing.T) {
 			errMsg: "exp can only be set with jwkPath",
 		},
 		{
-			name: "auth exp rejected with fromEnv",
+			name: "auth exp rejected with value",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{
 					Host: "registry.example", Credential: &RegistryCredential{
-						FromEnv: "TOKEN", Exp: &metav1.Duration{Duration: time.Hour},
+						Value: "TOKEN", Exp: &metav1.Duration{Duration: time.Hour},
 					},
 				}}},
 			errMsg: "exp can only be set with jwkPath",
@@ -410,7 +501,7 @@ func TestValidate_Table(t *testing.T) {
 		{
 			name: "auth missing host",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []RegistryHost{{Credential: &RegistryCredential{FromEnv: "TOKEN"}}}},
+				Hosts: []RegistryHost{{Credential: &RegistryCredential{Value: "TOKEN"}}}},
 			errMsg: "host is required",
 		},
 		{
@@ -448,7 +539,7 @@ func TestValidate_Table(t *testing.T) {
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{
 					Host: "h.example", Provider: RegistryProviderGAR,
-					Credential: &RegistryCredential{FromEnv: "TOKEN"},
+					Credential: &RegistryCredential{Value: "TOKEN"},
 				}}},
 			errMsg: "credential and provider are mutually exclusive",
 		},
@@ -456,8 +547,8 @@ func TestValidate_Table(t *testing.T) {
 			name: "auth duplicate host",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{
-					{Host: "dup.example", Credential: &RegistryCredential{FromEnv: "A"}},
-					{Host: "dup.example", Credential: &RegistryCredential{FromEnv: "B"}},
+					{Host: "dup.example", Credential: &RegistryCredential{Value: "A"}},
+					{Host: "dup.example", Credential: &RegistryCredential{Value: "B"}},
 				}},
 			errMsg: "configured more than once",
 		},
@@ -465,15 +556,15 @@ func TestValidate_Table(t *testing.T) {
 			name: "auth no source set",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{}}}},
-			errMsg: "exactly one of provider, fromEnv, fromPath, jwkPath, or jwkEnv",
+			errMsg: "exactly one of provider, value, fromPath, jwkPath, or jwkValue",
 		},
 		{
 			name: "auth two sources set",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
-					Provider: JWTProviderGitHub, FromEnv: "TOKEN",
+					Provider: JWTProviderGitHub, Value: "TOKEN",
 				}}}},
-			errMsg: "exactly one of provider, fromEnv, fromPath, jwkPath, or jwkEnv",
+			errMsg: "exactly one of provider, value, fromPath, jwkPath, or jwkValue",
 		},
 		{
 			name: "auth invalid provider",
@@ -508,12 +599,12 @@ func TestValidate_Table(t *testing.T) {
 			errMsg: "iss and sub can only be set with jwkPath",
 		},
 		{
-			name: "auth aud set with fromEnv",
+			name: "auth aud set with value",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
-					FromEnv: "TOKEN", Aud: "nope",
+					Value: "TOKEN", Aud: "nope",
 				}}}},
-			errMsg: "aud can only be set with jwkPath, jwkEnv, or provider",
+			errMsg: "aud can only be set with jwkPath, jwkValue, or provider",
 		},
 		{
 			name: "auth aud set with fromPath",
@@ -521,7 +612,7 @@ func TestValidate_Table(t *testing.T) {
 				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
 					FromPath: "/path/token", Aud: "nope",
 				}}}},
-			errMsg: "aud can only be set with jwkPath, jwkEnv, or provider",
+			errMsg: "aud can only be set with jwkPath, jwkValue, or provider",
 		},
 		{
 			name: "auth iss set with fromPath",
@@ -532,12 +623,12 @@ func TestValidate_Table(t *testing.T) {
 			errMsg: "iss and sub can only be set with jwkPath",
 		},
 		{
-			name: "auth fromPath and fromEnv set",
+			name: "auth fromPath and value set",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
-					FromEnv: "TOKEN", FromPath: "/path/token",
+					Value: "TOKEN", FromPath: "/path/token",
 				}}}},
-			errMsg: "exactly one of provider, fromEnv, fromPath, jwkPath, or jwkEnv",
+			errMsg: "exactly one of provider, value, fromPath, jwkPath, or jwkValue",
 		},
 		{
 			name: "credential provider jwt-svid is valid",
@@ -565,7 +656,7 @@ func TestValidate_Table(t *testing.T) {
 			name: "tls credential and tls together is valid",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{Host: "h.example",
-					Credential: &RegistryCredential{FromEnv: "TOKEN"},
+					Credential: &RegistryCredential{Value: "TOKEN"},
 					TLS:        &TLS{ClientAuth: &TLSClientAuth{Certificate: &TLSData{FromPath: "/c.crt"}, Key: &TLSKey{FromPath: "/c.key"}}},
 				}}},
 		},
@@ -595,9 +686,9 @@ func TestValidate_Table(t *testing.T) {
 			name: "tls serverAuth two sources",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
-					ServerAuth: &TLSServerAuth{FromPath: "/ca.crt", FromEnv: "CA"},
+					ServerAuth: &TLSServerAuth{FromPath: "/ca.crt", Value: "CA"},
 				}}}},
-			errMsg: "serverAuth: exactly one of fromPath, fromEnv, fromBytes, or spiffe",
+			errMsg: "serverAuth: exactly one of fromPath, value, or spiffe",
 		},
 		{
 			name: "tls serverAuth ca and spiffe together",
@@ -605,7 +696,7 @@ func TestValidate_Table(t *testing.T) {
 				Hosts: []RegistryHost{{Host: "h.example", TLS: &TLS{
 					ServerAuth: &TLSServerAuth{FromPath: "/ca.crt", SPIFFE: &SPIFFETLS{AuthorizeAny: true}},
 				}}}},
-			errMsg: "serverAuth: exactly one of fromPath, fromEnv, fromBytes, or spiffe",
+			errMsg: "serverAuth: exactly one of fromPath, value, or spiffe",
 		},
 		{
 			name: "tls clientAuth missing key",
