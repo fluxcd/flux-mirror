@@ -186,7 +186,7 @@ This config mirrors a few such charts into GitHub Container Registry (GHCR):
 
 ```yaml
 # flux-mirror.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 charts:
   - name: ingress-nginx
@@ -251,7 +251,7 @@ the only way to mirror an OCI Helm chart between OCI repositories — the
 [`charts`](../config/README.md#charts) section is exclusively for HTTP/S sources.
 
 ```yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: ghcr.io/stefanprodan/charts/podinfo
@@ -271,7 +271,7 @@ expects a username/password login, so `username` is set there too.
 
 ```yaml
 # flux-mirror.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: ghcr.io/fluxcd/source-controller
@@ -339,7 +339,7 @@ The config is the same for all three clouds except for the destination host and
 
 ```yaml
 # flux-mirror.yaml — Amazon ECR destination
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: ghcr.io/fluxcd/source-controller   # container image
@@ -465,7 +465,7 @@ are mounted together (below) so a relative `fromPath` resolves:
 
 ```yaml
 # mirror.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: source-registry.example.com/library/app
@@ -556,7 +556,7 @@ metadata:
 
 ```yaml
 # mirror.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: source-registry.example.com/library/app

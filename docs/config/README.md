@@ -22,7 +22,7 @@ The following config mirrors a container image and a Helm chart, and
 authenticates to the destination registry with a per-host credential:
 
 ```yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: docker.io/stefanprodan/podinfo
@@ -72,7 +72,7 @@ flux-mirror sync ./config.yaml
 
 ## Writing a Config spec
 
-A config is a single YAML document with `apiVersion: mirror.fluxcd.io/v1beta1`,
+A config is a single YAML document with `apiVersion: mirror.plugin.fluxcd.io/v1beta1`,
 `kind: Config`, and any of the `artifacts`, `charts`, and `hosts` lists.
 
 At least one `artifacts` or `charts` entry is required, except for

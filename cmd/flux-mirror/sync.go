@@ -38,7 +38,7 @@ var syncCmd = &cobra.Command{
 	Use:   "sync [CONFIG|-]",
 	Short: "Mirror Helm charts and OCI artifacts to a destination registry",
 	Long: `Mirror Helm charts and OCI artifacts between registries based on a
-declarative YAML config (apiVersion: mirror.fluxcd.io/v1beta1, kind: Config).
+declarative YAML config (apiVersion: mirror.plugin.fluxcd.io/v1beta1, kind: Config).
 OCI registry auth is read from the ambient Docker config (~/.docker/config.json,
 $DOCKER_CONFIG, and configured credential helpers), or, for hosts listed in the
 config's 'hosts' section, from a per-host JWT. Helm HTTP/S repository auth is read

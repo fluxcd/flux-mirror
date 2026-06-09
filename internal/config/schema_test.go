@@ -33,7 +33,7 @@ func validateConfigSchema(t *testing.T, raw string) {
 }
 
 func TestConfig_Schema(t *testing.T) {
-	validateConfigSchema(t, `apiVersion: mirror.fluxcd.io/v1beta1
+	validateConfigSchema(t, `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: ghcr.io

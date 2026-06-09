@@ -287,7 +287,7 @@ func writeConfig(t *testing.T, src, dst string) string {
 }
 
 func configBody(src, dst string) string {
-	return fmt.Sprintf(`apiVersion: mirror.fluxcd.io/v1beta1
+	return fmt.Sprintf(`apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: %s

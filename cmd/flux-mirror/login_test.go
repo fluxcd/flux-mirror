@@ -27,7 +27,7 @@ func writeLoginConfigWithUsername(t *testing.T, username, credBlock string) stri
 	t.Helper()
 	dir := t.TempDir()
 	g := NewWithT(t)
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: ghcr.io/a/b
@@ -50,7 +50,7 @@ hosts:
 func writeLoginConfigIn(t *testing.T, dir, credBlock string) string {
 	t.Helper()
 	g := NewWithT(t)
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: ghcr.io/a/b
@@ -223,7 +223,7 @@ func TestLogin_AudDefaultsToHost(t *testing.T) {
 func TestLogin_ConfigFromStdin(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "stdin-token")
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
@@ -239,7 +239,7 @@ func TestLogin_AuthOnlyConfig(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "auth-only-token")
 	// No charts or artifacts — valid for login, rejected by sync.
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
@@ -322,7 +322,7 @@ func TestLogin_AllHostsByDefault(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("TOKEN_A", "cred-a")
 	t.Setenv("TOKEN_B", "cred-b")
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: a.example.com
@@ -363,7 +363,7 @@ func TestLogin_HostNotFound(t *testing.T) {
 
 func TestLogin_NoHosts(t *testing.T) {
 	g := NewWithT(t)
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: ghcr.io/a/b
@@ -392,7 +392,7 @@ func TestLogin_SkipsTLSOnlyHost(t *testing.T) {
 	g := NewWithT(t)
 	// A TLS-only host has no credential to store: login skips it without error
 	// (and without panicking).
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: tls.example.com

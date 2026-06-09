@@ -19,7 +19,7 @@ func TestDecode_FullExample(t *testing.T) {
 	g := NewWithT(t)
 
 	src := `
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 charts:
   - source: https://charts.dexidp.io
@@ -77,7 +77,7 @@ func TestDecode_EnvSubstitution(t *testing.T) {
 	t.Setenv("CREDENTIAL_KEY", "value")
 	t.Setenv("REGISTRY_TOKEN", "env-token")
 
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
@@ -93,7 +93,7 @@ hosts:
 func TestDecode_EnvSubstitutionIgnoresSingleDollar(t *testing.T) {
 	g := NewWithT(t)
 
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: ghcr.io/a/b
@@ -112,7 +112,7 @@ func TestDecodeWithEnvSubstDisabled(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("REGISTRY_TOKEN", "env-token")
 
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
@@ -135,7 +135,7 @@ func TestDecode_EnvSubstitutionStrict(t *testing.T) {
 		}
 	})
 
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
@@ -150,7 +150,7 @@ func TestDecode_EnvSubstitutionStrictAllowsEmpty(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("EMPTY_TOKEN", "")
 
-	src := `apiVersion: mirror.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
@@ -800,7 +800,7 @@ func TestDecode_BadYAML(t *testing.T) {
 func TestDecode_BadDuration(t *testing.T) {
 	g := NewWithT(t)
 	_, err := Decode(strings.NewReader(`
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 artifacts:
   - source: ghcr.io/a/b

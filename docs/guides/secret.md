@@ -145,7 +145,7 @@ A hosts-only config selecting the cloud registry (switch clouds via the host and
 
 ```yaml
 # mirror.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
@@ -216,7 +216,7 @@ are mounted together:
 
 ```yaml
 # mirror.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
@@ -278,7 +278,7 @@ cloud annotations are needed; the registry trusts the SPIFFE trust domain).
 
 ```yaml
 # mirror.yaml
-apiVersion: mirror.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
