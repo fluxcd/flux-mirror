@@ -212,9 +212,9 @@ hosts:
   # username is any non-empty value; GHCR authorizes by the token), so `username`
   # is set and GITHUB_TOKEN is the password.
   - host: ghcr.io
+    username: my-org
     credential:
-      username: my-org
-      fromEnv: GH_TOKEN
+      value: ${GH_TOKEN}
 ```
 
 Each chart lands at `ghcr.io/my-org/charts/<name>:<version>`. Run it from GitHub
@@ -287,22 +287,17 @@ artifacts:
 hosts:
   # Source: authenticate to GHCR to avoid anonymous rate limits.
   - host: ghcr.io
+    username: my-org
     credential:
-      username: my-org
-      fromEnv: GH_TOKEN
+      value: ${GH_TOKEN}
   # Destination: a private registry expecting a username/password login. The
-  # password is read from the environment; the username is substituted into the
-  # config in CI (see the envsubst step below).
+  # username and password are substituted from the environment while loading the
+  # config.
   - host: registry.internal.example.com
+    username: ${REGISTRY_USERNAME}
     credential:
-      username: ${REGISTRY_USERNAME}
-      fromEnv: REGISTRY_PASSWORD
+      value: ${REGISTRY_PASSWORD}
 ```
-
-> **Note:** `credential.username` is a literal string in the config — it is not
-> an env reference. To source it from a secret, substitute it before running
-> `sync` (e.g. with `envsubst`, as below). Only the password is read at runtime
-> from the environment via `fromEnv`.
 
 ```yaml
 # .github/workflows/mirror-images.yaml
@@ -357,9 +352,9 @@ artifacts:
     selector: { regex: { pattern: "^latest$" }, sortBy: alphabetical }
 hosts:
   - host: ghcr.io
+    username: my-org
     credential:
-      username: my-org
-      fromEnv: GH_TOKEN
+      value: ${GH_TOKEN}
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
     provider: ecr
 ```

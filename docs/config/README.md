@@ -43,9 +43,9 @@ charts:
     limit: 2
 hosts:
   - host: quay.io
+    username: 'my-org+robot-user'
     credential:
-      username: 'my-org+robot-user'
-      fromEnv: 'QUAY_TOKEN'
+      value: ${QUAY_TOKEN}
 ```
 
 In the above example:
@@ -296,9 +296,7 @@ Exactly one **token source** subfield selects how the credential is obtained:
   `forgejo`, `gcp`, `azure`, `aws`, or `jwt-svid` — see
   [Token providers](#token-providers) for what each obtains and what the registry
   must accept.
-- `.fromEnv`, sends the JSON Web Token read from the named environment variable
-  as-is (e.g. a GitLab CI `id_token`). It is read once and errors if the variable
-  is unset or empty.
+- `.value`, sends the JSON Web Token configured inline as-is (e.g. a GitLab CI `id_token`). Use `${VAR}` to substitute it from the environment while loading the config.
 - `.fromPath`, sends the token read from the file at the path, with surrounding
   whitespace trimmed. The file is re-read on every request, so the token can be
   rotated without restarting (useful for a projected ServiceAccount token).
@@ -306,23 +304,22 @@ Exactly one **token source** subfield selects how the credential is obtained:
   file at the path. The key may be a bare JWK or a single-key JWK set
   (`{"keys":[...]}`), and its `kid` is carried in the JWT header. Generate a key
   pair with [`flux-mirror keygen`](../guides/keygen.md).
-- `.jwkEnv`, the in-environment counterpart to `.jwkPath`: it reads the private
-  JWK from the named environment variable instead of a file.
+- `.jwkValue`, signs a fresh JWT per request with the private JSON Web Key configured inline. Use `${VAR}` to substitute it from the environment while loading the config.
 
 The signed and minted sources take additional claim subfields:
 
 - `.iss` and `.sub`, the issuer and subject claims. Both are **required** with
-  `.jwkPath` or `.jwkEnv`, and not allowed with the other sources.
-- `.aud`, the audience claim. Allowed with `.jwkPath`, `.jwkEnv`, or `.provider`,
+  `.jwkPath` or `.jwkValue`, and not allowed with the other sources.
+- `.aud`, the audience claim. Allowed with `.jwkPath`, `.jwkValue`, or `.provider`,
   and defaults to the host. The audience pins the credential to a specific
   registry, so it must match what the registry (or the cloud identity provider)
   expects.
 - `.exp`, the signed JWT lifetime, as a
   [duration](https://pkg.go.dev/time#ParseDuration). Allowed only with `.jwkPath`
-  or `.jwkEnv` — the sources whose lifetime `flux-mirror` controls — and defaults
+  or `.jwkValue` — the sources whose lifetime `flux-mirror` controls — and defaults
   to `60s`. A longer-lived token is cached and re-minted at half its lifetime.
   Every other source's lifetime is fixed by its issuer.
-- `.username`, controls how the resolved credential is transported, and therefore
+- `.hosts[].username`, controls how the resolved credential is transported, and therefore
   what the registry must accept — see
   [Bearer token vs. username/password](#bearer-token-vs-usernamepassword).
 
@@ -370,7 +367,7 @@ directory is used as the confinement root instead.
 
 ##### Bearer token vs. username/password
 
-`.hosts[].credential.username` controls how the resolved credential is
+`.hosts[].username` controls how the resolved credential is
 transported, and therefore what the registry on the other side must accept:
 
 - **`username` unset (default)** — the credential is treated as a **bearer
@@ -423,15 +420,14 @@ and ignore it. It is not allowed on a `provider` host. The field has two
 independent halves, of which at least one must be set:
 
 - `.serverAuth`, how the registry's server certificate is verified. Set exactly
-  one of `.fromPath` / `.fromEnv` / `.fromBytes` to supply a custom CA bundle
+  one of `.fromPath` / `.value` to supply a custom CA bundle
   (one or more concatenated PEM certificates), or `.spiffe` to verify the
   server's X.509-SVID against the SPIFFE trust bundle. When `.serverAuth` is
   omitted entirely, the system trust pool is used.
 - `.clientAuth`, the client certificate for mTLS. Set exactly one of `.provider:
   x509-svid` (present a SPIFFE X.509-SVID from the Workload API) or the static
   `.certificate` + `.key` pair. The `.certificate` is one of
-  `.fromPath`/`.fromEnv`/`.fromBytes`; the `.key` is one of `.fromPath`/`.fromEnv`
-  (a private key cannot be inlined, so there is no `.fromBytes`).
+  `.fromPath`/`.value`; the `.key` is one of `.fromPath`/`.value`.
 
 Each half chooses SPIFFE or non-SPIFFE independently, so SPIFFE can authenticate
 the client while a normal or custom CA verifies the server, or vice versa. Under

@@ -219,8 +219,8 @@ apiVersion: mirror.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
+    username: sa-oidc          # value the registry expects; often ignored
     credential:
-      username: sa-oidc          # value the registry expects; often ignored
       fromPath: registry-token   # the audience is set by the projected volume
 ```
 
@@ -281,9 +281,9 @@ apiVersion: mirror.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
+    username: spiffe           # value the registry expects; often ignored
     credential:
       provider: jwt-svid
-      username: spiffe           # value the registry expects; often ignored
       # aud defaults to the host (registry.example.com)
 ```
 

@@ -25,6 +25,28 @@ func writeLoginConfig(t *testing.T, credBlock string) string {
 	return writeLoginConfigIn(t, t.TempDir(), credBlock)
 }
 
+func writeLoginConfigWithUsername(t *testing.T, username, credBlock string) string {
+	t.Helper()
+	dir := t.TempDir()
+	g := NewWithT(t)
+	src := `apiVersion: mirror.fluxcd.io/v1beta1
+kind: Config
+artifacts:
+  - source: ghcr.io/a/b
+    destination: ghcr.io/c/d
+    selector:
+      semver: ">=1.0.0"
+      limit: 1
+hosts:
+  - host: registry.example.com
+    username: ` + username + `
+    credential:
+` + credBlock
+	path := filepath.Join(dir, "config.yaml")
+	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
+	return path
+}
+
 // writeLoginConfigIn writes the config into dir, so path fields in credBlock
 // (resolved within the config's directory) can reference files placed in dir.
 func writeLoginConfigIn(t *testing.T, dir, credBlock string) string {
@@ -121,10 +143,10 @@ func loginStore(t *testing.T, configRef, input string) (string, error) {
 	return pass, nil
 }
 
-func TestLogin_FromEnv(t *testing.T) {
+func TestLogin_ValueFromEnvSubstitution(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t, "      value: ${MY_LOGIN_TOKEN}\n")
 
 	cred, err := loginStore(t, cfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
@@ -191,7 +213,7 @@ kind: Config
 hosts:
   - host: registry.example.com
     credential:
-      fromEnv: MY_LOGIN_TOKEN
+      value: ${MY_LOGIN_TOKEN}
 `
 	cred, err := loginStore(t, "-", src)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -207,7 +229,7 @@ kind: Config
 hosts:
   - host: registry.example.com
     credential:
-      fromEnv: MY_LOGIN_TOKEN
+      value: ${MY_LOGIN_TOKEN}
 `
 	path := filepath.Join(t.TempDir(), "auth-only.yaml")
 	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
@@ -224,7 +246,7 @@ hosts:
 func TestLogin_StoresRegistryToken(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t, "      value: ${MY_LOGIN_TOKEN}\n")
 	dockerDir := t.TempDir()
 
 	out, err := executeCommand([]string{
@@ -256,7 +278,7 @@ func TestLogin_StoresRegistryToken(t *testing.T) {
 func TestLogin_UsernameStoresUserPassword(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n      username: robot\n")
+	cfg := writeLoginConfigWithUsername(t, "robot", "      value: ${MY_LOGIN_TOKEN}\n")
 	dockerDir := t.TempDir()
 
 	_, err := executeCommand([]string{
@@ -290,10 +312,10 @@ kind: Config
 hosts:
   - host: a.example.com
     credential:
-      fromEnv: TOKEN_A
+      value: ${TOKEN_A}
   - host: b.example.com
     credential:
-      fromEnv: TOKEN_B
+      value: ${TOKEN_B}
 `
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	g.Expect(os.WriteFile(cfgPath, []byte(src), 0o600)).To(Succeed())
@@ -317,7 +339,8 @@ hosts:
 
 func TestLogin_HostNotFound(t *testing.T) {
 	g := NewWithT(t)
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
+	cfg := writeLoginConfig(t, "      value: ${MY_LOGIN_TOKEN}\n")
 
 	_, err := executeCommand([]string{"login", "--host", "other.example.com", "--config", cfg})
 	g.Expect(err).To(MatchError(ContainSubstring(`host "other.example.com" not found`)))
@@ -341,13 +364,13 @@ artifacts:
 	g.Expect(err).To(MatchError(ContainSubstring("no hosts")))
 }
 
-func TestLogin_FromEnvUnset(t *testing.T) {
+func TestLogin_ValueEnvSubstitutionUnset(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t, "      value: ${MY_LOGIN_TOKEN}\n")
 
 	_, err := executeCommand([]string{"login", "--config", cfg})
-	g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
+	g.Expect(err).To(MatchError(ContainSubstring("exactly one of provider, value, fromPath, jwkPath, or jwkValue")))
 }
 
 func TestLogin_SkipsTLSOnlyHost(t *testing.T) {
@@ -360,7 +383,7 @@ hosts:
   - host: tls.example.com
     tls:
       serverAuth:
-        fromBytes: dummy
+        value: dummy
 `
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
