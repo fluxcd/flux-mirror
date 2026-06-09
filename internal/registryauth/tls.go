@@ -122,7 +122,7 @@ func buildTLSConfig(t *apiv1.TLS, src *workloadapi.X509Source) (*tls.Config, err
 		}
 		tlsconfig.HookTLSClientConfig(cfg, src, authorizer)
 	case t.ServerAuth != nil:
-		pemBytes, err := readPEMSource(t.ServerAuth.FromPath, t.ServerAuth.FromEnv, t.ServerAuth.FromBytes)
+		pemBytes, err := readPEMSource(t.ServerAuth.FromPath, t.ServerAuth.Value)
 		if err != nil {
 			return nil, fmt.Errorf("serverAuth: %w", err)
 		}
@@ -142,9 +142,9 @@ func buildTLSConfig(t *apiv1.TLS, src *workloadapi.X509Source) (*tls.Config, err
 		if err != nil {
 			return nil, fmt.Errorf("clientAuth: certificate: %w", err)
 		}
-		keyPEM, err := readPEMSource(t.ClientAuth.Key.FromPath, t.ClientAuth.Key.FromEnv, "")
+		keyPEM, err := os.ReadFile(t.ClientAuth.Key.FromPath)
 		if err != nil {
-			return nil, fmt.Errorf("clientAuth: key: %w", err)
+			return nil, fmt.Errorf("clientAuth: key: read fromPath: %w", err)
 		}
 		cert, err := tls.X509KeyPair(certPEM, keyPEM)
 		if err != nil {
@@ -189,12 +189,12 @@ func spiffeAuthorizer(src *workloadapi.X509Source, s *apiv1.SPIFFETLS) (tlsconfi
 
 // readTLSData reads a single PEM value from the one configured source.
 func readTLSData(d *apiv1.TLSData) ([]byte, error) {
-	return readPEMSource(d.FromPath, d.FromEnv, d.FromBytes)
+	return readPEMSource(d.FromPath, d.Value)
 }
 
-// readPEMSource reads PEM bytes from exactly one of a file path, an environment
-// variable, or an inline value.
-func readPEMSource(fromPath, fromEnv, fromBytes string) ([]byte, error) {
+// readPEMSource reads PEM bytes from exactly one of a file path or an inline
+// value.
+func readPEMSource(fromPath, value string) ([]byte, error) {
 	switch {
 	case fromPath != "":
 		b, err := os.ReadFile(fromPath)
@@ -202,14 +202,8 @@ func readPEMSource(fromPath, fromEnv, fromBytes string) ([]byte, error) {
 			return nil, fmt.Errorf("read fromPath: %w", err)
 		}
 		return b, nil
-	case fromEnv != "":
-		v, err := requireEnv(fromEnv)
-		if err != nil {
-			return nil, err
-		}
-		return []byte(v), nil
-	case fromBytes != "":
-		return []byte(fromBytes), nil
+	case value != "":
+		return []byte(value), nil
 	default:
 		return nil, fmt.Errorf("no source set")
 	}

@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package registryauth resolves OCI registry credentials for the hosts in a
-// flux-mirror config's hosts section: JWT credentials (provider/fromEnv/fromPath/
-// jwkPath/jwkEnv) and cloud registry providers (ecr/acr/gar). It is the auth layer
-// shared by the sync, login, and create commands.
+// flux-mirror config's hosts section: JWT credentials (provider/value/fromPath/
+// jwkPath/jwkValue) and cloud registry providers (ecr/acr/gar). It is the auth
+// layer shared by the sync, login, and create commands.
 package registryauth
 
 import (
@@ -50,15 +50,15 @@ func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error
 			return "", err
 		}
 		return fn(ctx)
-	case c.FromEnv != "":
-		return requireEnv(c.FromEnv)
+	case c.Value != "":
+		return c.Value, nil
 	case c.FromPath != "":
 		b, err := os.ReadFile(c.FromPath)
 		if err != nil {
 			return "", fmt.Errorf("read fromPath: %w", err)
 		}
 		return strings.TrimSpace(string(b)), nil
-	case c.JWKPath != "", c.JWKEnv != "":
+	case c.JWKPath != "", c.JWKValue != "":
 		raw, err := readJWK(c)
 		if err != nil {
 			return "", err
@@ -75,7 +75,7 @@ func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error
 
 // jwkTokenFunc parses a private JWK once and returns a cijwt.TokenFunc that
 // signs a fresh JWT with the given claims and lifetime on each call. Used for
-// jwkPath/jwkEnv credentials that set a custom exp; the default 60s lifetime is
+// jwkPath/jwkValue credentials that set a custom exp; the default 60s lifetime is
 // served by cijwt.WithHostJWK instead.
 func jwkTokenFunc(jwk, iss, sub, aud string, ttl time.Duration) (cijwt.TokenFunc, error) {
 	key, err := jwt.ParseJWK(jwk)

@@ -31,9 +31,9 @@ var loginCmd = &cobra.Command{
 	Long: `Resolve the credentials configured under hosts and store them in
 the Docker config so subsequent registry requests authenticate as those
 identities. These are the same credentials the sync command would attach, minted
-once: an OIDC/cloud token for a provider, the value of fromEnv, the contents of
-fromPath, or a freshly signed JWT for jwkPath. By default every host in the
-config is logged in; restrict with one or more --host flags.
+once: an OIDC/cloud token for a provider, an inline value, the contents of
+fromPath, or a freshly signed JWT for jwkPath/jwkValue. By default every host in
+the config is logged in; restrict with one or more --host flags.
 
 The config is read from --config, else $FLUX_MIRROR_CONFIG, else
 {{CONFIG_DEFAULT}}

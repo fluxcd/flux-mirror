@@ -17,17 +17,27 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	"github.com/fluxcd/pkg/envsubst"
+
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
-// Decode reads YAML from r into a Config without validating it.
+// Decode reads YAML from r into a Config without validating it. Before parsing,
+// environment variable references of the form ${VAR} (and ${VAR:=default}) are
+// substituted anywhere in the document — values and keys alike — from the
+// process environment. A reference to an unset variable is an error; use
+// ${VAR:=default} to default it. To keep a literal "$", write "$$".
 func Decode(r io.Reader) (*apiv1.Config, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
+	substituted, err := envsubst.EvalEnv(string(data), true)
+	if err != nil {
+		return nil, fmt.Errorf("substitute environment variables: %w", err)
+	}
 	var cfg apiv1.Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := yaml.Unmarshal([]byte(substituted), &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 	return &cfg, nil
@@ -140,6 +150,9 @@ func validateHost(h apiv1.RegistryHost) error {
 	if provider != "" && h.TLS != nil {
 		return fmt.Errorf("provider and tls are mutually exclusive")
 	}
+	if strings.TrimSpace(h.Username) != "" && h.Credential == nil {
+		return fmt.Errorf("username can only be set with credential")
+	}
 	if h.Credential != nil {
 		if err := validateCredential(*h.Credential); err != nil {
 			return fmt.Errorf("credential: %w", err)
@@ -203,11 +216,10 @@ func validateTLS(t apiv1.TLS) error {
 func validateTLSServerAuth(s apiv1.TLSServerAuth) error {
 	if countTrue(
 		strings.TrimSpace(s.FromPath) != "",
-		strings.TrimSpace(s.FromEnv) != "",
-		strings.TrimSpace(s.FromBytes) != "",
+		strings.TrimSpace(s.Value) != "",
 		s.SPIFFE != nil,
 	) != 1 {
-		return fmt.Errorf("exactly one of fromPath, fromEnv, fromBytes, or spiffe must be set")
+		return fmt.Errorf("exactly one of fromPath, value, or spiffe must be set")
 	}
 	if s.SPIFFE != nil {
 		if err := validateSPIFFE(*s.SPIFFE); err != nil {
@@ -221,22 +233,18 @@ func validateTLSServerAuth(s apiv1.TLSServerAuth) error {
 func validateTLSData(d apiv1.TLSData) error {
 	if countTrue(
 		strings.TrimSpace(d.FromPath) != "",
-		strings.TrimSpace(d.FromEnv) != "",
-		strings.TrimSpace(d.FromBytes) != "",
+		strings.TrimSpace(d.Value) != "",
 	) != 1 {
-		return fmt.Errorf("exactly one of fromPath, fromEnv, or fromBytes must be set")
+		return fmt.Errorf("exactly one of fromPath or value must be set")
 	}
 	return nil
 }
 
-// validateTLSKey checks that exactly one source is set. A private key cannot be
-// inlined.
+// validateTLSKey checks that the key source is set. A private key cannot be
+// inlined, so it is read from fromPath only.
 func validateTLSKey(k apiv1.TLSKey) error {
-	if countTrue(
-		strings.TrimSpace(k.FromPath) != "",
-		strings.TrimSpace(k.FromEnv) != "",
-	) != 1 {
-		return fmt.Errorf("exactly one of fromPath or fromEnv must be set")
+	if strings.TrimSpace(k.FromPath) == "" {
+		return fmt.Errorf("fromPath is required")
 	}
 	return nil
 }
@@ -293,13 +301,13 @@ func validateSPIFFE(s apiv1.SPIFFETLS) error {
 
 func validateCredential(j apiv1.RegistryCredential) error {
 	provider := strings.TrimSpace(j.Provider)
-	fromEnv := strings.TrimSpace(j.FromEnv)
+	value := strings.TrimSpace(j.Value)
 	fromPath := strings.TrimSpace(j.FromPath)
 	jwkPath := strings.TrimSpace(j.JWKPath)
-	jwkEnv := strings.TrimSpace(j.JWKEnv)
+	jwkValue := strings.TrimSpace(j.JWKValue)
 
-	if countTrue(provider != "", fromEnv != "", fromPath != "", jwkPath != "", jwkEnv != "") != 1 {
-		return fmt.Errorf("exactly one of provider, fromEnv, fromPath, jwkPath, or jwkEnv must be set")
+	if countTrue(provider != "", value != "", fromPath != "", jwkPath != "", jwkValue != "") != 1 {
+		return fmt.Errorf("exactly one of provider, value, fromPath, jwkPath, or jwkValue must be set")
 	}
 
 	hasIss := strings.TrimSpace(j.Iss) != ""
@@ -308,12 +316,12 @@ func validateCredential(j apiv1.RegistryCredential) error {
 	hasExp := j.Exp != nil
 
 	switch {
-	case jwkPath != "", jwkEnv != "":
+	case jwkPath != "", jwkValue != "":
 		if !hasIss {
-			return fmt.Errorf("iss is required with jwkPath or jwkEnv")
+			return fmt.Errorf("iss is required with jwkPath or jwkValue")
 		}
 		if !hasSub {
-			return fmt.Errorf("sub is required with jwkPath or jwkEnv")
+			return fmt.Errorf("sub is required with jwkPath or jwkValue")
 		}
 		if hasExp && j.Exp.Duration <= 0 {
 			return fmt.Errorf("exp must be a positive duration")
@@ -326,20 +334,20 @@ func validateCredential(j apiv1.RegistryCredential) error {
 				provider, apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo, apiv1.JWTProviderGCP, apiv1.JWTProviderAzure, apiv1.JWTProviderAWS, apiv1.JWTProviderJWTSVID)
 		}
 		if hasIss || hasSub {
-			return fmt.Errorf("iss and sub can only be set with jwkPath or jwkEnv")
+			return fmt.Errorf("iss and sub can only be set with jwkPath or jwkValue")
 		}
 		if hasExp {
-			return fmt.Errorf("exp can only be set with jwkPath or jwkEnv")
+			return fmt.Errorf("exp can only be set with jwkPath or jwkValue")
 		}
-	case fromEnv != "", fromPath != "":
+	case value != "", fromPath != "":
 		if hasIss || hasSub {
-			return fmt.Errorf("iss and sub can only be set with jwkPath or jwkEnv")
+			return fmt.Errorf("iss and sub can only be set with jwkPath or jwkValue")
 		}
 		if hasAud {
-			return fmt.Errorf("aud can only be set with jwkPath, jwkEnv, or provider")
+			return fmt.Errorf("aud can only be set with jwkPath, jwkValue, or provider")
 		}
 		if hasExp {
-			return fmt.Errorf("exp can only be set with jwkPath or jwkEnv")
+			return fmt.Errorf("exp can only be set with jwkPath or jwkValue")
 		}
 	}
 	return nil

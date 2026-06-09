@@ -172,7 +172,7 @@
       "description": "Hosts configures per-host authentication for OCI registry requests, both\nsource pulls and destination pushes.",
       "items": {
         "additionalProperties": false,
-        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential (mutually exclusive).\nTLS configures the transport-layer TLS/mTLS settings: it composes with\nCredential, but is mutually exclusive with Provider — a cloud registry\nprovider is a managed registry whose transport flux-mirror does not customize.\nAt least one of Credential, Provider, TLS, or MaxChunkSize must be set.",
+        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential (mutually exclusive).\nTLS configures the transport-layer TLS/mTLS settings: it composes with\nCredential, but is mutually exclusive with Provider — a cloud registry\nprovider is a managed registry whose transport flux-mirror does not customize.\nAt least one of Credential, Provider, TLS, or MaxChunkSize must be set.\n\nUsername changes how a Credential is presented and may only be set alongside\none. When unset, the credential is a bearer token: sync sends it as an HTTP\nBearer (no auth challenge), and login/secret write it to the Docker config's\nregistrytoken field. When set, the credential becomes the password of a\nusername/password pair: sync goes through the standard registry auth challenge\n(like the cloud providers), and login/secret write username/password/auth.",
         "properties": {
           "credential": {
             "additionalProperties": false,
@@ -183,27 +183,23 @@
                 "type": "string"
               },
               "exp": {
-                "description": "Exp is the jwkPath/jwkEnv JWT lifetime. Defaults to 60s.",
-                "type": "string"
-              },
-              "fromEnv": {
-                "description": "FromEnv sends a static JWT read from the named environment variable.",
+                "description": "Exp is the jwkPath/jwkValue JWT lifetime. Defaults to 60s.",
                 "type": "string"
               },
               "fromPath": {
-                "description": "FromPath sends a static JWT read from the file at the path.",
+                "description": "FromPath sends a static credential read from the file at the path.",
                 "type": "string"
               },
               "iss": {
-                "description": "Iss is the issuer claim for jwkPath/jwkEnv-signed tokens.",
-                "type": "string"
-              },
-              "jwkEnv": {
-                "description": "JWKEnv signs a fresh JWT with the private JSON Web Key read from the named\nenvironment variable.",
+                "description": "Iss is the issuer claim for jwkPath/jwkValue-signed tokens.",
                 "type": "string"
               },
               "jwkPath": {
                 "description": "JWKPath signs a fresh JWT with the private JSON Web Key at the path.",
+                "type": "string"
+              },
+              "jwkValue": {
+                "description": "JWKValue signs a fresh JWT with the private JSON Web Key given inline\n(typically via environment variable substitution, e.g. jwkValue: ${SOME_ENV_VAR}).",
                 "type": "string"
               },
               "provider": {
@@ -219,11 +215,11 @@
                 "type": "string"
               },
               "sub": {
-                "description": "Sub is the subject claim for jwkPath/jwkEnv-signed tokens.",
+                "description": "Sub is the subject claim for jwkPath/jwkValue-signed tokens.",
                 "type": "string"
               },
-              "username": {
-                "description": "Username presents the credential as a username/password pair.",
+              "value": {
+                "description": "Value is a static credential given inline (typically via environment\nvariable substitution, e.g. value: ${SOME_ENV_VAR}).",
                 "type": "string"
               }
             },
@@ -259,16 +255,12 @@
                     "additionalProperties": false,
                     "description": "Certificate is the static client certificate chain.",
                     "properties": {
-                      "fromBytes": {
-                        "description": "FromBytes inlines the PEM-encoded value.",
-                        "type": "string"
-                      },
-                      "fromEnv": {
-                        "description": "FromEnv reads the value from the named environment variable.",
-                        "type": "string"
-                      },
                       "fromPath": {
                         "description": "FromPath reads the value from the file at the path.",
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "Value is the PEM-encoded value given inline (typically via environment\nvariable substitution, e.g. value: ${SOME_ENV_VAR}).",
                         "type": "string"
                       }
                     },
@@ -278,10 +270,6 @@
                     "additionalProperties": false,
                     "description": "Key is the static client private key.",
                     "properties": {
-                      "fromEnv": {
-                        "description": "FromEnv reads the private key from the named environment variable.",
-                        "type": "string"
-                      },
                       "fromPath": {
                         "description": "FromPath reads the private key from the file at the path.",
                         "type": "string"
@@ -303,14 +291,6 @@
                 "additionalProperties": false,
                 "description": "ServerAuth verifies the registry's server certificate.",
                 "properties": {
-                  "fromBytes": {
-                    "description": "FromBytes inlines the PEM-encoded CA bundle.",
-                    "type": "string"
-                  },
-                  "fromEnv": {
-                    "description": "FromEnv reads the CA bundle from the named environment variable.",
-                    "type": "string"
-                  },
                   "fromPath": {
                     "description": "FromPath reads the CA bundle from the file at the path.",
                     "type": "string"
@@ -333,12 +313,20 @@
                       }
                     },
                     "type": "object"
+                  },
+                  "value": {
+                    "description": "Value is the PEM-encoded CA bundle given inline (typically via environment\nvariable substitution, e.g. value: ${SOME_ENV_VAR}).",
+                    "type": "string"
                   }
                 },
                 "type": "object"
               }
             },
             "type": "object"
+          },
+          "username": {
+            "description": "Username presents the Credential as a username/password pair instead of a\nbearer token. Only valid together with Credential.",
+            "type": "string"
           }
         },
         "required": [

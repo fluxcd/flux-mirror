@@ -81,28 +81,16 @@ func TestJWTTransportOptions(t *testing.T) {
 		g.Expect(err).ToNot(HaveOccurred())
 	})
 
-	t.Run("fromEnv reads the named env var", func(t *testing.T) {
+	t.Run("value wires a static bearer token", func(t *testing.T) {
 		g := NewWithT(t)
-		t.Setenv("MY_CI_TOKEN", "env-token")
 		hosts := []apiv1.RegistryHost{{
 			Host:       "static.example",
-			Credential: &apiv1.RegistryCredential{FromEnv: "MY_CI_TOKEN"},
+			Credential: &apiv1.RegistryCredential{Value: "static-token"},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
 		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
-	})
-
-	t.Run("fromEnv with unset env var errors", func(t *testing.T) {
-		g := NewWithT(t)
-		t.Setenv("MY_CI_TOKEN", "")
-		hosts := []apiv1.RegistryHost{{
-			Host:       "static.example",
-			Credential: &apiv1.RegistryCredential{FromEnv: "MY_CI_TOKEN"},
-		}}
-		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
-		g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
 	})
 
 	t.Run("fromPath builds a token-file transport", func(t *testing.T) {
@@ -208,16 +196,15 @@ func TestJWTTransportOptions(t *testing.T) {
 		g.Expect(err).To(MatchError(ContainSubstring("parse JWK")))
 	})
 
-	t.Run("jwkEnv signs from the named env var", func(t *testing.T) {
+	t.Run("jwkValue signs from an inline JWK", func(t *testing.T) {
 		g := NewWithT(t)
-		t.Setenv("REGISTRY_JWK", string(mustMarshalJWK(t)))
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
 			Credential: &apiv1.RegistryCredential{
-				JWKEnv: "REGISTRY_JWK",
-				Iss:    "https://issuer.example",
-				Sub:    "client-id",
-				Aud:    "registry.example",
+				JWKValue: string(mustMarshalJWK(t)),
+				Iss:      "https://issuer.example",
+				Sub:      "client-id",
+				Aud:      "registry.example",
 			},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -226,16 +213,15 @@ func TestJWTTransportOptions(t *testing.T) {
 		g.Expect(err).ToNot(HaveOccurred())
 	})
 
-	t.Run("jwkEnv with custom exp signs from the named env var", func(t *testing.T) {
+	t.Run("jwkValue with custom exp signs from an inline JWK", func(t *testing.T) {
 		g := NewWithT(t)
-		t.Setenv("REGISTRY_JWK", string(mustMarshalJWK(t)))
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
 			Credential: &apiv1.RegistryCredential{
-				JWKEnv: "REGISTRY_JWK",
-				Iss:    "https://issuer.example",
-				Sub:    "client-id",
-				Exp:    &metav1.Duration{Duration: time.Hour},
+				JWKValue: string(mustMarshalJWK(t)),
+				Iss:      "https://issuer.example",
+				Sub:      "client-id",
+				Exp:      &metav1.Duration{Duration: time.Hour},
 			},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -244,30 +230,14 @@ func TestJWTTransportOptions(t *testing.T) {
 		g.Expect(err).ToNot(HaveOccurred())
 	})
 
-	t.Run("jwkEnv with unset env var errors", func(t *testing.T) {
+	t.Run("jwkValue rejects malformed JWK", func(t *testing.T) {
 		g := NewWithT(t)
-		t.Setenv("REGISTRY_JWK", "")
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
 			Credential: &apiv1.RegistryCredential{
-				JWKEnv: "REGISTRY_JWK",
-				Iss:    "https://issuer.example",
-				Sub:    "client-id",
-			},
-		}}
-		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
-		g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
-	})
-
-	t.Run("jwkEnv rejects malformed JWK", func(t *testing.T) {
-		g := NewWithT(t)
-		t.Setenv("REGISTRY_JWK", "not json")
-		hosts := []apiv1.RegistryHost{{
-			Host: "registry.example",
-			Credential: &apiv1.RegistryCredential{
-				JWKEnv: "REGISTRY_JWK",
-				Iss:    "https://issuer.example",
-				Sub:    "client-id",
+				JWKValue: "not json",
+				Iss:      "https://issuer.example",
+				Sub:      "client-id",
 			},
 		}}
 		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -276,9 +246,8 @@ func TestJWTTransportOptions(t *testing.T) {
 
 	t.Run("multiple hosts of mixed kinds build one transport", func(t *testing.T) {
 		g := NewWithT(t)
-		t.Setenv("MY_CI_TOKEN", "env-token")
 		hosts := []apiv1.RegistryHost{
-			{Host: "static.example", Credential: &apiv1.RegistryCredential{FromEnv: "MY_CI_TOKEN"}},
+			{Host: "static.example", Credential: &apiv1.RegistryCredential{Value: "static-token"}},
 			{Host: "mint.example", Credential: &apiv1.RegistryCredential{Provider: apiv1.JWTProviderGitHub}},
 			{Host: "registry.example", Credential: &apiv1.RegistryCredential{
 				JWKPath: writeJWK(t), Iss: "https://issuer.example", Sub: "client-id",

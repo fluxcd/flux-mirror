@@ -13,6 +13,7 @@ require (
 	github.com/distribution/distribution/v3 v3.1.1
 	github.com/docker/cli v29.5.3+incompatible
 	github.com/fluxcd/pkg/auth v0.52.0
+	github.com/fluxcd/pkg/envsubst v1.7.0
 	github.com/fluxcd/pkg/helmtestserver v0.39.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/golang-jwt/jwt/v5 v5.3.1

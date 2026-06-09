@@ -80,7 +80,7 @@ const (
 	// defaultLimit is the chart/selector limit applied when unset.
 	defaultLimit = 1
 
-	// defaultJWKExp is the jwkPath/jwkEnv JWT lifetime when exp is unset. It matches
+	// defaultJWKExp is the jwkPath/jwkValue JWT lifetime when exp is unset. It matches
 	// cijwt's per-request signing lifetime, keeping the default behavior of
 	// short-lived, freshly signed tokens.
 	defaultJWKExp = 60 * time.Second
@@ -119,9 +119,21 @@ type Config struct {
 // Credential, but is mutually exclusive with Provider — a cloud registry
 // provider is a managed registry whose transport flux-mirror does not customize.
 // At least one of Credential, Provider, TLS, or MaxChunkSize must be set.
+//
+// Username changes how a Credential is presented and may only be set alongside
+// one. When unset, the credential is a bearer token: sync sends it as an HTTP
+// Bearer (no auth challenge), and login/secret write it to the Docker config's
+// registrytoken field. When set, the credential becomes the password of a
+// username/password pair: sync goes through the standard registry auth challenge
+// (like the cloud providers), and login/secret write username/password/auth.
 type RegistryHost struct {
 	// Host is the registry host (and optional port) the auth applies to.
 	Host string `json:"host"`
+
+	// Username presents the Credential as a username/password pair instead of a
+	// bearer token. Only valid together with Credential.
+	// +optional
+	Username string `json:"username,omitempty"`
 
 	// Credential configures the HTTP-layer registry credential for the host.
 	// +optional
@@ -149,33 +161,29 @@ type RegistryHost struct {
 }
 
 // RegistryCredential configures a per-host credential. Exactly one of Provider,
-// FromEnv, FromPath, JWKPath, or JWKEnv selects how the credential is obtained:
+// Value, FromPath, JWKPath, or JWKValue selects how the private credential
+// material is obtained; whether it is then sent as a bearer token or as a
+// password is decided by the host-level Username (see RegistryHost).
 //
 //   - Provider mints a per-request credential for Aud (an OIDC token for the
 //     OIDC providers, or a signed sts:GetCallerIdentity envelope for aws; see
 //     JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,
 //     JWTProviderAWS).
-//   - FromEnv sends a static JWT read as-is from the named environment variable
-//     (e.g. a GitLab CI id_token).
-//   - FromPath sends a static JWT read from the file at the path, with leading
-//     and trailing whitespace trimmed.
+//   - Value is a static credential given inline. Combined with environment
+//     variable substitution (value: ${SOME_ENV_VAR}) it covers reading a static
+//     token from the environment (e.g. a GitLab CI id_token).
+//   - FromPath sends a static credential read from the file at the path, with
+//     leading and trailing whitespace trimmed.
 //   - JWKPath signs a fresh JWT with the private JSON Web Key at the path.
-//   - JWKEnv signs a fresh JWT with the private JSON Web Key read from the named
-//     environment variable. It is the in-environment counterpart to JWKPath.
+//   - JWKValue signs a fresh JWT with the private JSON Web Key given inline. It
+//     is the inline counterpart to JWKPath (typically jwkValue: ${SOME_ENV_VAR}).
 //
-// Iss and Sub are required for, and may only be set with, JWKPath or JWKEnv. Aud
-// is optional and may only be set with JWKPath, JWKEnv, or Provider; it defaults
-// to Host. Exp sets the JWT lifetime and may only be set with JWKPath or JWKEnv,
-// the sources whose lifetime flux-mirror controls; it defaults to a short 60s.
-// Every other source's lifetime is fixed by an external issuer or is an opaque
-// static token, so Exp is rejected for them.
-//
-// Username changes how the credential is presented. When unset, the credential
-// is a bearer token: sync stamps it as Authorization: Bearer (no auth
-// challenge), and login/create write it to the Docker config's registrytoken
-// field. When set, the credential becomes the password of a username/password
-// pair: sync goes through the standard registry auth challenge (like the cloud
-// providers), and login/create write username/password/auth.
+// Iss and Sub are required for, and may only be set with, JWKPath or JWKValue.
+// Aud is optional and may only be set with JWKPath, JWKValue, or Provider; it
+// defaults to Host. Exp sets the JWT lifetime and may only be set with JWKPath or
+// JWKValue, the sources whose lifetime flux-mirror controls; it defaults to a
+// short 60s. Every other source's lifetime is fixed by an external issuer or is
+// an opaque static token, so Exp is rejected for them.
 type RegistryCredential struct {
 	// Provider mints a per-request credential for the audience, one of
 	// JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,
@@ -184,11 +192,12 @@ type RegistryCredential struct {
 	// +kubebuilder:validation:Enum=github;forgejo;gcp;azure;aws;jwt-svid
 	Provider string `json:"provider,omitempty"`
 
-	// FromEnv sends a static JWT read from the named environment variable.
+	// Value is a static credential given inline (typically via environment
+	// variable substitution, e.g. value: ${SOME_ENV_VAR}).
 	// +optional
-	FromEnv string `json:"fromEnv,omitempty"`
+	Value string `json:"value,omitempty"`
 
-	// FromPath sends a static JWT read from the file at the path.
+	// FromPath sends a static credential read from the file at the path.
 	// +optional
 	FromPath string `json:"fromPath,omitempty"`
 
@@ -196,16 +205,16 @@ type RegistryCredential struct {
 	// +optional
 	JWKPath string `json:"jwkPath,omitempty"`
 
-	// JWKEnv signs a fresh JWT with the private JSON Web Key read from the named
-	// environment variable.
+	// JWKValue signs a fresh JWT with the private JSON Web Key given inline
+	// (typically via environment variable substitution, e.g. jwkValue: ${SOME_ENV_VAR}).
 	// +optional
-	JWKEnv string `json:"jwkEnv,omitempty"`
+	JWKValue string `json:"jwkValue,omitempty"`
 
-	// Iss is the issuer claim for jwkPath/jwkEnv-signed tokens.
+	// Iss is the issuer claim for jwkPath/jwkValue-signed tokens.
 	// +optional
 	Iss string `json:"iss,omitempty"`
 
-	// Sub is the subject claim for jwkPath/jwkEnv-signed tokens.
+	// Sub is the subject claim for jwkPath/jwkValue-signed tokens.
 	// +optional
 	Sub string `json:"sub,omitempty"`
 
@@ -213,17 +222,13 @@ type RegistryCredential struct {
 	// +optional
 	Aud string `json:"aud,omitempty"`
 
-	// Exp is the jwkPath/jwkEnv JWT lifetime. Defaults to 60s.
+	// Exp is the jwkPath/jwkValue JWT lifetime. Defaults to 60s.
 	// +optional
 	Exp *metav1.Duration `json:"exp,omitempty"`
-
-	// Username presents the credential as a username/password pair.
-	// +optional
-	Username string `json:"username,omitempty"`
 }
 
-// EffectiveExp returns the jwkPath/jwkEnv JWT lifetime with the documented
-// default (60s) applied. Only meaningful for jwkPath/jwkEnv credentials.
+// EffectiveExp returns the jwkPath/jwkValue JWT lifetime with the documented
+// default (60s) applied. Only meaningful for jwkPath/jwkValue credentials.
 func (c RegistryCredential) EffectiveExp() time.Duration {
 	if c.Exp != nil {
 		return c.Exp.Duration
@@ -255,22 +260,19 @@ type TLS struct {
 }
 
 // TLSServerAuth verifies the registry's server certificate. Exactly one of the
-// fields is set: FromPath/FromEnv/FromBytes provide a custom CA bundle (one or
-// more concatenated PEM certificates), or SPIFFE verifies the server's
-// X.509-SVID against the SPIFFE trust bundle. When ServerAuth is unset entirely,
-// the system trust pool is used.
+// fields is set: FromPath/Value provide a custom CA bundle (one or more
+// concatenated PEM certificates), or SPIFFE verifies the server's X.509-SVID
+// against the SPIFFE trust bundle. When ServerAuth is unset entirely, the system
+// trust pool is used.
 type TLSServerAuth struct {
 	// FromPath reads the CA bundle from the file at the path.
 	// +optional
 	FromPath string `json:"fromPath,omitempty"`
 
-	// FromEnv reads the CA bundle from the named environment variable.
+	// Value is the PEM-encoded CA bundle given inline (typically via environment
+	// variable substitution, e.g. value: ${SOME_ENV_VAR}).
 	// +optional
-	FromEnv string `json:"fromEnv,omitempty"`
-
-	// FromBytes inlines the PEM-encoded CA bundle.
-	// +optional
-	FromBytes string `json:"fromBytes,omitempty"`
+	Value string `json:"value,omitempty"`
 
 	// SPIFFE verifies the server's X.509-SVID against the SPIFFE trust bundle.
 	// +optional
@@ -278,32 +280,24 @@ type TLSServerAuth struct {
 }
 
 // TLSData is a single PEM-encoded public value (a client cert chain or a CA
-// bundle) obtained from exactly one of FromPath, FromEnv, or FromBytes.
+// bundle) obtained from exactly one of FromPath or Value.
 type TLSData struct {
 	// FromPath reads the value from the file at the path.
 	// +optional
 	FromPath string `json:"fromPath,omitempty"`
 
-	// FromEnv reads the value from the named environment variable.
+	// Value is the PEM-encoded value given inline (typically via environment
+	// variable substitution, e.g. value: ${SOME_ENV_VAR}).
 	// +optional
-	FromEnv string `json:"fromEnv,omitempty"`
-
-	// FromBytes inlines the PEM-encoded value.
-	// +optional
-	FromBytes string `json:"fromBytes,omitempty"`
+	Value string `json:"value,omitempty"`
 }
 
 // TLSKey is a private key source. Unlike the public certificate and CA values it
-// is a secret, so it cannot be inlined in the config (no FromBytes): exactly one
-// of FromPath or FromEnv.
+// is a secret, so it cannot be inlined in the config: it is read from FromPath.
 type TLSKey struct {
 	// FromPath reads the private key from the file at the path.
 	// +optional
 	FromPath string `json:"fromPath,omitempty"`
-
-	// FromEnv reads the private key from the named environment variable.
-	// +optional
-	FromEnv string `json:"fromEnv,omitempty"`
 }
 
 // TLSClientAuth presents a client certificate (mTLS). Either Provider is set

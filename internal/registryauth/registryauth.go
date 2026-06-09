@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 
@@ -88,8 +87,8 @@ func ResolveHostAuth(ctx context.Context, h apiv1.RegistryHost) (HostAuth, error
 	if err != nil {
 		return HostAuth{}, err
 	}
-	if h.Credential.Username != "" {
-		return HostAuth{Username: h.Credential.Username, Password: cred}, nil
+	if h.Username != "" {
+		return HostAuth{Username: h.Username, Password: cred}, nil
 	}
 	return HostAuth{RegistryToken: cred}, nil
 }
@@ -163,7 +162,7 @@ func (m mintingAuthenticator) AuthorizationContext(ctx context.Context) (*authn.
 	if err != nil {
 		return nil, err
 	}
-	return &authn.AuthConfig{Username: m.host.Credential.Username, Password: cred}, nil
+	return &authn.AuthConfig{Username: m.host.Username, Password: cred}, nil
 }
 
 // BuildKeychain returns a keychain that serves the hosts which authenticate
@@ -181,7 +180,7 @@ func BuildKeychain(ctx context.Context, hosts []apiv1.RegistryHost) (authn.Keych
 				return nil, err
 			}
 			auths[h.Host] = a
-		case h.Credential != nil && h.Credential.Username != "":
+		case h.Credential != nil && h.Username != "":
 			auths[h.Host] = mintingAuthenticator{host: h}
 		}
 	}
@@ -197,7 +196,7 @@ func BuildKeychain(ctx context.Context, hosts []apiv1.RegistryHost) (authn.Keych
 // keychain instead.
 func NeedsCredentialTransport(hosts []apiv1.RegistryHost) bool {
 	for _, h := range hosts {
-		if h.Credential != nil && h.Credential.Username == "" {
+		if h.Credential != nil && h.Username == "" {
 			return true
 		}
 	}
@@ -215,29 +214,15 @@ func NewCredentialTransport(inner http.RoundTripper, hosts []apiv1.RegistryHost)
 	return cijwt.NewTransport(opts...)
 }
 
-// requireEnv reads a required environment variable, erroring if it is unset or
-// empty. It is shared by every credential source that reads straight from the
-// environment (fromEnv, jwkEnv, and the tls fromEnv source).
-func requireEnv(name string) (string, error) {
-	v := os.Getenv(name)
-	if v == "" {
-		return "", fmt.Errorf("environment variable %q is not set or empty", name)
-	}
-	return v, nil
-}
-
-// readJWK returns the private JWK for a jwkPath or jwkEnv credential, reading it
-// from the file (jwkPath) or the named environment variable (jwkEnv). Exactly
-// one of the two is set by the time this is called (enforced by validation).
+// readJWK returns the private JWK for a jwkPath or jwkValue credential, reading
+// it from the file (jwkPath) or directly from the inline value (jwkValue).
+// Exactly one of the two is set by the time this is called (enforced by
+// validation).
 func readJWK(j *apiv1.RegistryCredential) (string, error) {
-	if j.JWKEnv != "" {
-		raw, err := requireEnv(j.JWKEnv)
+	if j.JWKValue != "" {
+		jwk, err := jwkio.ReadPrivateJWKFromBytes([]byte(j.JWKValue))
 		if err != nil {
-			return "", err
-		}
-		jwk, err := jwkio.ReadPrivateJWKFromBytes([]byte(raw))
-		if err != nil {
-			return "", fmt.Errorf("read jwkEnv: %w", err)
+			return "", fmt.Errorf("read jwkValue: %w", err)
 		}
 		return jwk, nil
 	}
@@ -249,16 +234,16 @@ func readJWK(j *apiv1.RegistryCredential) (string, error) {
 }
 
 // JWTTransportOptions turns the validated hosts config into cijwt options,
-// reading FromEnv environment variables and JWKPath files at this point and
-// wiring each Provider to its token-minting closure. FromPath is wired straight
-// to cijwt, which re-reads the file on every request. It assumes the config has
-// passed validation, so it only reports errors that need runtime state: an
-// unset env var or an unreadable key file.
+// reading JWKPath files at this point and wiring each Provider to its
+// token-minting closure. A static Value is wired as a fixed bearer token;
+// FromPath is wired straight to cijwt, which re-reads the file on every request.
+// It assumes the config has passed validation, so it only reports errors that
+// need runtime state: an unreadable key file.
 func JWTTransportOptions(inner http.RoundTripper, hosts []apiv1.RegistryHost) ([]cijwt.Option, error) {
 	opts := []cijwt.Option{cijwt.WithInner(inner)}
 
 	for _, h := range hosts {
-		if h.Credential == nil || h.Credential.Username != "" {
+		if h.Credential == nil || h.Username != "" {
 			// Provider hosts and username credentials authenticate via the
 			// keychain (standard challenge), not the cijwt bearer-stamp.
 			continue
@@ -272,15 +257,11 @@ func JWTTransportOptions(inner http.RoundTripper, hosts []apiv1.RegistryHost) ([
 				return nil, fmt.Errorf("auth host %q: %w", h.Host, err)
 			}
 			opts = append(opts, cijwt.WithHostTokenFunc(h.Host, fn))
-		case j.FromEnv != "":
-			token, err := requireEnv(j.FromEnv)
-			if err != nil {
-				return nil, fmt.Errorf("auth host %q: %w", h.Host, err)
-			}
-			opts = append(opts, cijwt.WithHostToken(h.Host, token))
+		case j.Value != "":
+			opts = append(opts, cijwt.WithHostToken(h.Host, j.Value))
 		case j.FromPath != "":
 			opts = append(opts, cijwt.WithHostTokenFile(h.Host, j.FromPath))
-		case j.JWKPath != "", j.JWKEnv != "":
+		case j.JWKPath != "", j.JWKValue != "":
 			jwk, err := readJWK(j)
 			if err != nil {
 				return nil, fmt.Errorf("auth host %q: %w", h.Host, err)

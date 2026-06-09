@@ -43,9 +43,9 @@ charts:
     limit: 2
 hosts:
   - host: quay.io
+    username: 'my-org+robot-user'
     credential:
-      username: 'my-org+robot-user'
-      fromEnv: 'QUAY_TOKEN'
+      value: ${QUAY_TOKEN}
 ```
 
 In the above example:
@@ -58,9 +58,9 @@ In the above example:
 - The `podinfo` Helm chart is pulled from the HTTP/S repository at
   `https://stefanprodan.github.io/podinfo` and published as an OCI Helm chart to
   `quay.io/my-org/charts/podinfo`. The two highest `6.x` versions are mirrored.
-- Requests to `quay.io` authenticate with the Quay robot token read from the
-  `QUAY_TOKEN` environment variable, presented as a username/password pair
-  because `username` is set.
+- Requests to `quay.io` authenticate with the Quay robot token, substituted from
+  the `QUAY_TOKEN` environment variable into `.credential.value`, and presented
+  as a username/password pair because the host-level `username` is set.
 
 You can run this with:
 
@@ -77,6 +77,27 @@ At least one `artifacts` or `charts` entry is required, except for
 [`flux-mirror login`](../guides/login.md) and
 [`flux-mirror secret`](../guides/secret.md), which read only the `hosts` section
 and accept a `hosts`-only config.
+
+### Environment variable substitution
+
+Before the config is parsed, `${VAR}` references anywhere in the document — in
+both values and keys — are replaced with the value of the named environment
+variable. This is the idiomatic way to inject secrets such as registry tokens
+(e.g. `value: ${GH_TOKEN}`) without writing them into the file.
+
+- A reference to an **unset** variable is an error. Provide a fallback with
+  `${VAR:=default}` to make it optional.
+- To keep a literal `$`, write `$$`. Only the `${...}` form is substituted, so a
+  bare `$` — such as the `$` in a [selector regex](#tag-selection) like
+  `^latest$` or an `extract: $version` — is already left untouched.
+
+```yaml
+hosts:
+  - host: registry.example.com
+    username: ${REGISTRY_USER:=ci}   # default to "ci" when unset
+    credential:
+      value: ${REGISTRY_TOKEN}       # required: errors if unset
+```
 
 ### Artifacts
 
@@ -271,16 +292,23 @@ unique across `hosts`. Beyond that, an entry configures **either** a
 [`.provider`](#cloud-registry-providers) — the two are mutually exclusive. A
 `credential` host (or a host with neither) may also set a
 [`.tls`](#transport-tls) block; `tls` is not allowed with `provider`, because a
-cloud registry is managed and its transport is not customized.
+cloud registry is managed and its transport is not customized. A
+[`.username`](#bearer-token-vs-usernamepassword) changes how a `.credential` is
+presented and is valid only alongside one.
 [`.maxChunkSize`](#blob-upload-chunking) tunes blob uploads independently of auth.
 At least one of `credential`, `provider`, `tls`, or `maxChunkSize` must be set.
 
 ```yaml
 hosts:
-  # A per-host credential (HTTP-layer token).
+  # A credential sent as a bearer token (no username).
   - host: registry.example.com
     credential:
       provider: github
+  # A credential sent as a username/password pair (username is host-level).
+  - host: ghcr.io
+    username: my-org
+    credential:
+      value: ${GH_TOKEN}
   # A cloud registry provider, via ambient workload identity.
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
     provider: ecr
@@ -296,9 +324,10 @@ Exactly one **token source** subfield selects how the credential is obtained:
   `forgejo`, `gcp`, `azure`, `aws`, or `jwt-svid` — see
   [Token providers](#token-providers) for what each obtains and what the registry
   must accept.
-- `.fromEnv`, sends the JSON Web Token read from the named environment variable
-  as-is (e.g. a GitLab CI `id_token`). It is read once and errors if the variable
-  is unset or empty.
+- `.value`, a static credential given inline. Combined with
+  [environment variable substitution](#environment-variable-substitution)
+  (`value: ${SOME_ENV_VAR}`) this reads a static token from the environment (e.g.
+  a GitLab CI `id_token`).
 - `.fromPath`, sends the token read from the file at the path, with surrounding
   whitespace trimmed. The file is re-read on every request, so the token can be
   rotated without restarting (useful for a projected ServiceAccount token).
@@ -306,25 +335,26 @@ Exactly one **token source** subfield selects how the credential is obtained:
   file at the path. The key may be a bare JWK or a single-key JWK set
   (`{"keys":[...]}`), and its `kid` is carried in the JWT header. Generate a key
   pair with [`flux-mirror keygen`](../guides/keygen.md).
-- `.jwkEnv`, the in-environment counterpart to `.jwkPath`: it reads the private
-  JWK from the named environment variable instead of a file.
+- `.jwkValue`, the inline counterpart to `.jwkPath`: it takes the private JWK
+  directly (typically via `jwkValue: ${SOME_ENV_VAR}`) instead of from a file.
 
 The signed and minted sources take additional claim subfields:
 
 - `.iss` and `.sub`, the issuer and subject claims. Both are **required** with
-  `.jwkPath` or `.jwkEnv`, and not allowed with the other sources.
-- `.aud`, the audience claim. Allowed with `.jwkPath`, `.jwkEnv`, or `.provider`,
+  `.jwkPath` or `.jwkValue`, and not allowed with the other sources.
+- `.aud`, the audience claim. Allowed with `.jwkPath`, `.jwkValue`, or `.provider`,
   and defaults to the host. The audience pins the credential to a specific
   registry, so it must match what the registry (or the cloud identity provider)
   expects.
 - `.exp`, the signed JWT lifetime, as a
   [duration](https://pkg.go.dev/time#ParseDuration). Allowed only with `.jwkPath`
-  or `.jwkEnv` — the sources whose lifetime `flux-mirror` controls — and defaults
+  or `.jwkValue` — the sources whose lifetime `flux-mirror` controls — and defaults
   to `60s`. A longer-lived token is cached and re-minted at half its lifetime.
   Every other source's lifetime is fixed by its issuer.
-- `.username`, controls how the resolved credential is transported, and therefore
-  what the registry must accept — see
-  [Bearer token vs. username/password](#bearer-token-vs-usernamepassword).
+
+How the resolved credential is then presented to the registry — as a bearer
+token or as a password — is decided by the host-level
+[`.username`](#bearer-token-vs-usernamepassword), not by the credential.
 
 ##### Token providers
 
@@ -370,8 +400,10 @@ directory is used as the confinement root instead.
 
 ##### Bearer token vs. username/password
 
-`.hosts[].credential.username` controls how the resolved credential is
-transported, and therefore what the registry on the other side must accept:
+`.hosts[].username` controls how the resolved credential is transported, and
+therefore what the registry on the other side must accept. It sits at the host
+level (alongside `.credential`, not inside it) and is valid only with a
+`.credential`:
 
 - **`username` unset (default)** — the credential is treated as a **bearer
   token**. `sync` sends it as an HTTP Bearer credential on every request, with no
@@ -423,15 +455,15 @@ and ignore it. It is not allowed on a `provider` host. The field has two
 independent halves, of which at least one must be set:
 
 - `.serverAuth`, how the registry's server certificate is verified. Set exactly
-  one of `.fromPath` / `.fromEnv` / `.fromBytes` to supply a custom CA bundle
-  (one or more concatenated PEM certificates), or `.spiffe` to verify the
-  server's X.509-SVID against the SPIFFE trust bundle. When `.serverAuth` is
-  omitted entirely, the system trust pool is used.
+  one of `.fromPath` / `.value` to supply a custom CA bundle (one or more
+  concatenated PEM certificates), or `.spiffe` to verify the server's X.509-SVID
+  against the SPIFFE trust bundle. When `.serverAuth` is omitted entirely, the
+  system trust pool is used.
 - `.clientAuth`, the client certificate for mTLS. Set exactly one of `.provider:
   x509-svid` (present a SPIFFE X.509-SVID from the Workload API) or the static
-  `.certificate` + `.key` pair. The `.certificate` is one of
-  `.fromPath`/`.fromEnv`/`.fromBytes`; the `.key` is one of `.fromPath`/`.fromEnv`
-  (a private key cannot be inlined, so there is no `.fromBytes`).
+  `.certificate` + `.key` pair. The `.certificate` is one of `.fromPath`/`.value`;
+  the `.key` is read from `.fromPath` only (a private key cannot be inlined, so it
+  has no `.value`).
 
 Each half chooses SPIFFE or non-SPIFFE independently, so SPIFFE can authenticate
 the client while a normal or custom CA verifies the server, or vice versa. Under

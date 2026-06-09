@@ -127,8 +127,10 @@ jobs:
 ### Log in to GHCR from GitHub Actions
 
 GHCR authorizes by the token and ignores the username value, but it still expects
-a username/password login — so set `username` to any value (for example a
-`github.*` context key) and pass `GITHUB_TOKEN` as the password via `fromEnv`:
+a username/password login — so set the host `username` to any value (for example
+a `github.*` context key) and put `GITHUB_TOKEN` in `.credential.value`. Both are
+substituted from the environment. `GITHUB_REPOSITORY_OWNER` is a default Actions
+environment variable, so it needs no explicit `env:`:
 
 ```yaml
 # hosts.yaml
@@ -136,9 +138,9 @@ apiVersion: mirror.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: ghcr.io
+    username: ${GITHUB_REPOSITORY_OWNER}   # ignored by GHCR; any value works
     credential:
-      username: ${GITHUB_REPOSITORY_OWNER}   # ignored by GHCR; any value works
-      fromEnv: GH_TOKEN
+      value: ${GH_TOKEN}
 ```
 
 ```yaml
@@ -152,8 +154,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: fluxcd/flux-mirror/actions/setup@main
-      - run: envsubst '${GITHUB_REPOSITORY_OWNER}' < hosts.yaml > rendered.yaml
-      - run: flux-mirror login -f ./rendered.yaml
+      - run: flux-mirror login -f ./hosts.yaml
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: |
@@ -163,8 +164,9 @@ jobs:
 
 ### Log in to Docker Hub from GitHub Actions
 
-Docker Hub uses a standard username/password login. Set `username` to the Docker
-Hub account and pass an access token as the password via `fromEnv`:
+Docker Hub uses a standard username/password login. Set the host `username` to
+the Docker Hub account and put an access token in `.credential.value`; both are
+substituted from the environment:
 
 ```yaml
 # hosts.yaml
@@ -172,9 +174,9 @@ apiVersion: mirror.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: docker.io
+    username: ${DOCKERHUB_USERNAME}
     credential:
-      username: ${DOCKERHUB_USERNAME}
-      fromEnv: DOCKERHUB_TOKEN
+      value: ${DOCKERHUB_TOKEN}
 ```
 
 ```yaml
@@ -185,11 +187,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: fluxcd/flux-mirror/actions/setup@main
-      - run: envsubst '${DOCKERHUB_USERNAME}' < hosts.yaml > rendered.yaml
+      - run: flux-mirror login -f ./hosts.yaml
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      - run: flux-mirror login -f ./rendered.yaml
-        env:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       - run: |
           flux push artifact oci://docker.io/$DOCKERHUB_USERNAME/manifests/app:v1.0.0 \
@@ -220,10 +220,10 @@ flux-mirror login --plaintext
 ## Notes
 
 - The credential is short-lived (a freshly minted provider token, a signed JWT,
-  or whatever `fromEnv`/`fromPath` holds). Re-run `login` before it expires; for
+  or whatever `value`/`fromPath` holds). Re-run `login` before it expires; for
   `provider` sources the registry re-validates each request, so a stored
   credential stops working once it lapses. To mint a longer-lived login token,
-  use a `jwkPath`/`jwkEnv` credential with a longer `exp` — see
+  use a `jwkPath`/`jwkValue` credential with a longer `exp` — see
   [keygen](./keygen.md).
 - For `aws`, the credential is a JWT-shaped envelope wrapping a signed
   `sts:GetCallerIdentity` request, not an OIDC token. The destination registry

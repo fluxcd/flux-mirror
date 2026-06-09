@@ -121,10 +121,11 @@ func loginStore(t *testing.T, configRef, input string) (string, error) {
 	return pass, nil
 }
 
-func TestLogin_FromEnv(t *testing.T) {
+func TestLogin_Value(t *testing.T) {
 	g := NewWithT(t)
+	// value supports ${VAR} substitution from the environment (done at decode).
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t, "      value: ${MY_LOGIN_TOKEN}\n")
 
 	cred, err := loginStore(t, cfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
@@ -191,7 +192,7 @@ kind: Config
 hosts:
   - host: registry.example.com
     credential:
-      fromEnv: MY_LOGIN_TOKEN
+      value: ${MY_LOGIN_TOKEN}
 `
 	cred, err := loginStore(t, "-", src)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -207,7 +208,7 @@ kind: Config
 hosts:
   - host: registry.example.com
     credential:
-      fromEnv: MY_LOGIN_TOKEN
+      value: ${MY_LOGIN_TOKEN}
 `
 	path := filepath.Join(t.TempDir(), "auth-only.yaml")
 	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
@@ -224,7 +225,7 @@ hosts:
 func TestLogin_StoresRegistryToken(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t, "      value: ${MY_LOGIN_TOKEN}\n")
 	dockerDir := t.TempDir()
 
 	out, err := executeCommand([]string{
@@ -256,7 +257,17 @@ func TestLogin_StoresRegistryToken(t *testing.T) {
 func TestLogin_UsernameStoresUserPassword(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n      username: robot\n")
+	// username is a host-level field, sitting alongside (not under) credential.
+	src := `apiVersion: mirror.fluxcd.io/v1beta1
+kind: Config
+hosts:
+  - host: registry.example.com
+    username: robot
+    credential:
+      value: ${MY_LOGIN_TOKEN}
+`
+	cfg := filepath.Join(t.TempDir(), "config.yaml")
+	g.Expect(os.WriteFile(cfg, []byte(src), 0o600)).To(Succeed())
 	dockerDir := t.TempDir()
 
 	_, err := executeCommand([]string{
@@ -290,10 +301,10 @@ kind: Config
 hosts:
   - host: a.example.com
     credential:
-      fromEnv: TOKEN_A
+      value: ${TOKEN_A}
   - host: b.example.com
     credential:
-      fromEnv: TOKEN_B
+      value: ${TOKEN_B}
 `
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	g.Expect(os.WriteFile(cfgPath, []byte(src), 0o600)).To(Succeed())
@@ -317,7 +328,7 @@ hosts:
 
 func TestLogin_HostNotFound(t *testing.T) {
 	g := NewWithT(t)
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	cfg := writeLoginConfig(t, "      value: static-token\n")
 
 	_, err := executeCommand([]string{"login", "--host", "other.example.com", "--config", cfg})
 	g.Expect(err).To(MatchError(ContainSubstring(`host "other.example.com" not found`)))
@@ -341,13 +352,13 @@ artifacts:
 	g.Expect(err).To(MatchError(ContainSubstring("no hosts")))
 }
 
-func TestLogin_FromEnvUnset(t *testing.T) {
+func TestLogin_ValueUnsetEnv(t *testing.T) {
 	g := NewWithT(t)
-	t.Setenv("MY_LOGIN_TOKEN", "")
-	cfg := writeLoginConfig(t, "      fromEnv: MY_LOGIN_TOKEN\n")
+	// Referencing an unset variable fails at decode (strict substitution).
+	cfg := writeLoginConfig(t, "      value: ${DEFINITELY_UNSET_LOGIN_TOKEN}\n")
 
 	_, err := executeCommand([]string{"login", "--config", cfg})
-	g.Expect(err).To(MatchError(ContainSubstring("is not set or empty")))
+	g.Expect(err).To(MatchError(ContainSubstring("substitute environment variables")))
 }
 
 func TestLogin_SkipsTLSOnlyHost(t *testing.T) {
@@ -360,7 +371,7 @@ hosts:
   - host: tls.example.com
     tls:
       serverAuth:
-        fromBytes: dummy
+        value: dummy
 `
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
