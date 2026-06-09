@@ -296,9 +296,10 @@ func validateCredential(j apiv1.RegistryCredential) error {
 	fromEnv := strings.TrimSpace(j.FromEnv)
 	fromPath := strings.TrimSpace(j.FromPath)
 	jwkPath := strings.TrimSpace(j.JWKPath)
+	jwkEnv := strings.TrimSpace(j.JWKEnv)
 
-	if countTrue(provider != "", fromEnv != "", fromPath != "", jwkPath != "") != 1 {
-		return fmt.Errorf("exactly one of provider, fromEnv, fromPath, or jwkPath must be set")
+	if countTrue(provider != "", fromEnv != "", fromPath != "", jwkPath != "", jwkEnv != "") != 1 {
+		return fmt.Errorf("exactly one of provider, fromEnv, fromPath, jwkPath, or jwkEnv must be set")
 	}
 
 	hasIss := strings.TrimSpace(j.Iss) != ""
@@ -307,12 +308,12 @@ func validateCredential(j apiv1.RegistryCredential) error {
 	hasExp := j.Exp != nil
 
 	switch {
-	case jwkPath != "":
+	case jwkPath != "", jwkEnv != "":
 		if !hasIss {
-			return fmt.Errorf("iss is required with jwkPath")
+			return fmt.Errorf("iss is required with jwkPath or jwkEnv")
 		}
 		if !hasSub {
-			return fmt.Errorf("sub is required with jwkPath")
+			return fmt.Errorf("sub is required with jwkPath or jwkEnv")
 		}
 		if hasExp && j.Exp.Duration <= 0 {
 			return fmt.Errorf("exp must be a positive duration")
@@ -325,20 +326,20 @@ func validateCredential(j apiv1.RegistryCredential) error {
 				provider, apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo, apiv1.JWTProviderGCP, apiv1.JWTProviderAzure, apiv1.JWTProviderAWS, apiv1.JWTProviderJWTSVID)
 		}
 		if hasIss || hasSub {
-			return fmt.Errorf("iss and sub can only be set with jwkPath")
+			return fmt.Errorf("iss and sub can only be set with jwkPath or jwkEnv")
 		}
 		if hasExp {
-			return fmt.Errorf("exp can only be set with jwkPath")
+			return fmt.Errorf("exp can only be set with jwkPath or jwkEnv")
 		}
 	case fromEnv != "", fromPath != "":
 		if hasIss || hasSub {
-			return fmt.Errorf("iss and sub can only be set with jwkPath")
+			return fmt.Errorf("iss and sub can only be set with jwkPath or jwkEnv")
 		}
 		if hasAud {
-			return fmt.Errorf("aud can only be set with jwkPath or provider")
+			return fmt.Errorf("aud can only be set with jwkPath, jwkEnv, or provider")
 		}
 		if hasExp {
-			return fmt.Errorf("exp can only be set with jwkPath")
+			return fmt.Errorf("exp can only be set with jwkPath or jwkEnv")
 		}
 	}
 	return nil
@@ -441,9 +442,10 @@ func validateChartSource(s string) error {
 		return fmt.Errorf("invalid URL: %w", err)
 	}
 	switch u.Scheme {
-	case "http", "https", "oci":
+	case "http", "https":
 	default:
-		return fmt.Errorf("scheme %q must be one of: http, https, oci", u.Scheme)
+		return fmt.Errorf("scheme %q must be one of: http, https "+
+			"(use 'artifacts' to mirror an OCI Helm chart to another OCI repository)", u.Scheme)
 	}
 	if u.Host == "" {
 		return fmt.Errorf("URL %q is missing a host", s)

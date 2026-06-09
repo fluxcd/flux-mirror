@@ -203,9 +203,9 @@ func readPEMSource(fromPath, fromEnv, fromBytes string) ([]byte, error) {
 		}
 		return b, nil
 	case fromEnv != "":
-		v := os.Getenv(fromEnv)
-		if v == "" {
-			return nil, fmt.Errorf("environment variable %q is not set or empty", fromEnv)
+		v, err := requireEnv(fromEnv)
+		if err != nil {
+			return nil, err
 		}
 		return []byte(v), nil
 	case fromBytes != "":

@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 
+	"github.com/fluxcd/pkg/auth"
+	"github.com/fluxcd/pkg/auth/azure"
 	"github.com/fluxcd/pkg/auth/utils"
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
@@ -115,7 +117,13 @@ func providerAuthenticator(ctx context.Context, h apiv1.RegistryHost) (authn.Aut
 	if err != nil {
 		return nil, err
 	}
-	a, err := utils.GetArtifactRegistryCredentials(ctx, name, h.Host)
+	var opts []auth.Option
+	if name == azure.ProviderName {
+		// ACR token exchange shells out to fetch an ARM access token; without
+		// this the azure provider cannot mint registry credentials.
+		opts = append(opts, auth.WithAllowShellOut())
+	}
+	a, err := utils.GetArtifactRegistryCredentials(ctx, name, h.Host, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("get %s registry credentials for %q: %w", h.Provider, h.Host, err)
 	}
@@ -207,6 +215,39 @@ func NewCredentialTransport(inner http.RoundTripper, hosts []apiv1.RegistryHost)
 	return cijwt.NewTransport(opts...)
 }
 
+// requireEnv reads a required environment variable, erroring if it is unset or
+// empty. It is shared by every credential source that reads straight from the
+// environment (fromEnv, jwkEnv, and the tls fromEnv source).
+func requireEnv(name string) (string, error) {
+	v := os.Getenv(name)
+	if v == "" {
+		return "", fmt.Errorf("environment variable %q is not set or empty", name)
+	}
+	return v, nil
+}
+
+// readJWK returns the private JWK for a jwkPath or jwkEnv credential, reading it
+// from the file (jwkPath) or the named environment variable (jwkEnv). Exactly
+// one of the two is set by the time this is called (enforced by validation).
+func readJWK(j *apiv1.RegistryCredential) (string, error) {
+	if j.JWKEnv != "" {
+		raw, err := requireEnv(j.JWKEnv)
+		if err != nil {
+			return "", err
+		}
+		jwk, err := jwkio.ReadPrivateJWKFromBytes([]byte(raw))
+		if err != nil {
+			return "", fmt.Errorf("read jwkEnv: %w", err)
+		}
+		return jwk, nil
+	}
+	jwk, err := jwkio.ReadPrivateJWK(j.JWKPath)
+	if err != nil {
+		return "", fmt.Errorf("read jwkPath: %w", err)
+	}
+	return jwk, nil
+}
+
 // JWTTransportOptions turns the validated hosts config into cijwt options,
 // reading FromEnv environment variables and JWKPath files at this point and
 // wiring each Provider to its token-minting closure. FromPath is wired straight
@@ -232,17 +273,17 @@ func JWTTransportOptions(inner http.RoundTripper, hosts []apiv1.RegistryHost) ([
 			}
 			opts = append(opts, cijwt.WithHostTokenFunc(h.Host, fn))
 		case j.FromEnv != "":
-			token := os.Getenv(j.FromEnv)
-			if token == "" {
-				return nil, fmt.Errorf("auth host %q: environment variable %q is not set or empty", h.Host, j.FromEnv)
+			token, err := requireEnv(j.FromEnv)
+			if err != nil {
+				return nil, fmt.Errorf("auth host %q: %w", h.Host, err)
 			}
 			opts = append(opts, cijwt.WithHostToken(h.Host, token))
 		case j.FromPath != "":
 			opts = append(opts, cijwt.WithHostTokenFile(h.Host, j.FromPath))
-		case j.JWKPath != "":
-			jwk, err := jwkio.ReadPrivateJWK(j.JWKPath)
+		case j.JWKPath != "", j.JWKEnv != "":
+			jwk, err := readJWK(j)
 			if err != nil {
-				return nil, fmt.Errorf("auth host %q: read jwkPath: %w", h.Host, err)
+				return nil, fmt.Errorf("auth host %q: %w", h.Host, err)
 			}
 			if j.Exp == nil {
 				// Default: cijwt signs a fresh 60s token per request.
@@ -252,7 +293,7 @@ func JWTTransportOptions(inner http.RoundTripper, hosts []apiv1.RegistryHost) ([
 			// Custom exp: sign it ourselves and let cijwt cache per its exp.
 			fn, err := jwkTokenFunc(jwk, j.Iss, j.Sub, aud, j.Exp.Duration)
 			if err != nil {
-				return nil, fmt.Errorf("auth host %q: parse jwkPath: %w", h.Host, err)
+				return nil, fmt.Errorf("auth host %q: parse JWK: %w", h.Host, err)
 			}
 			opts = append(opts, cijwt.WithHostTokenFunc(h.Host, fn))
 		}

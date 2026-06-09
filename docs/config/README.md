@@ -43,7 +43,7 @@ hosts:
 | `apiVersion` | string |         | Must be `mirror.fluxcd.io/v1beta1`.                                                         |
 | `kind`       | string |         | Must be `Config`.                                                                           |
 | `artifacts`  | list   | `[]`    | OCI artifacts (images, OCI Helm charts, Flux artifacts, etc.). See [Artifacts](#artifacts). |
-| `charts`     | list   | `[]`    | Helm charts from HTTP/S or OCI Helm repositories. See [Charts](#charts).                    |
+| `charts`     | list   | `[]`    | Helm charts from HTTP/S Helm repositories. See [Charts](#charts).                           |
 | `hosts`      | list   | `[]`    | Per-host authentication for OCI registry requests. See [Hosts](#hosts).                     |
 
 At least one of `artifacts` or `charts` must be set, except for
@@ -187,11 +187,14 @@ artifacts:
 
 ## Charts
 
-The `charts` section mirrors Helm charts from HTTP/S Helm repositories or OCI
-Helm registries to an OCI destination. For each selected version, the chart
-`.tgz` is downloaded from the source and re-published to the destination as
-a Helm OCI artifact (config blob with the chart metadata, layer with the
-tarball bytes).
+The `charts` section mirrors Helm charts from HTTP/S Helm repositories to an OCI
+destination. For each selected version, the chart `.tgz` is downloaded from the
+source and re-published to the destination as a Helm OCI artifact (config blob
+with the chart metadata, layer with the tarball bytes).
+
+To mirror a Helm chart that already lives in an OCI registry, use the
+[`artifacts`](#artifacts) section instead — an OCI Helm chart is mirrored as a
+plain OCI artifact (an OCI-to-OCI copy), not through this section.
 
 Charts use the same outcomes (`copied`, `skipped`, `overwritten`, `drifted`)
 and the same `--overwrite` / `--dry-run` semantics as artifacts. Drift is
@@ -204,7 +207,7 @@ idempotent.
 | Field         | Type   | Default | Description                                                                                                                     |
 |---------------|--------|---------|---------------------------------------------------------------------------------------------------------------------------------|
 | `name`        | string |         | Chart name within the source repository.                                                                                        |
-| `source`      | string |         | Source repository URL. Scheme must be `http`, `https`, or `oci`.                                                                |
+| `source`      | string |         | Source Helm repository URL. Scheme must be `http` or `https`. To mirror a chart already in an OCI registry, use [`artifacts`](#artifacts). |
 | `destination` | string |         | Destination OCI base URL. Scheme must be `oci`. The chart `name` is appended automatically.                                     |
 | `version`     | string | `*`     | Semver constraint (e.g. `>=2.7.0 <3.0.0`). Versions outside the range are dropped.                                              |
 | `limit`       | int    | `1`     | Number of versions to mirror, taken from the highest matching versions. `0` disables the cap.                                   |
@@ -212,15 +215,14 @@ idempotent.
 
 ### Source scheme
 
-- `http` / `https`: classic Helm repository serving `index.yaml` plus chart
-  tarballs. Auth is loaded automatically from the ambient Helm repositories
-  config (`repositories.yaml`, or `HELM_REPOSITORY_CONFIG` when set); no auth
-  fields are needed in the flux-mirror YAML.
-- `oci`: OCI Helm registry. Each chart name is its own OCI repository at
-  `<source>/<name>`. Tags whose OCI manifest is not a Helm chart (cosign
-  signatures, SBOMs, other artifacts in the same repository) are filtered
-  out before the semver constraint is applied. Authentication uses the
-  ambient Docker config.
+The source must be an `http` / `https` classic Helm repository serving
+`index.yaml` plus chart tarballs. Auth is loaded automatically from the ambient
+Helm repositories config (`repositories.yaml`, or `HELM_REPOSITORY_CONFIG` when
+set); no auth fields are needed in the flux-mirror YAML.
+
+A Helm chart that already lives in an OCI registry is mirrored OCI-to-OCI: list
+it under [`artifacts`](#artifacts), where it is copied as a plain OCI artifact
+(authenticated through the [`hosts`](#hosts) section).
 
 ### Destination convention
 
@@ -246,20 +248,6 @@ charts:
 The 5 highest `15.x` versions of the `nginx` chart are mirrored to
 `quay.io/example/charts/nginx:<version>`.
 
-#### OCI Helm registry
-
-```yaml
-charts:
-  - name: my-app
-    source: oci://ghcr.io/example/charts
-    destination: oci://quay.io/example/charts
-    version: ">=1.0.0"
-    limit: 3
-```
-
-The source repo is resolved to `ghcr.io/example/charts/my-app`; the
-destination is `quay.io/example/charts/my-app:<version>`.
-
 ## Hosts
 
 The optional `hosts` section configures per-host registry authentication. A host
@@ -282,20 +270,21 @@ hosts:
   # Form 1: a per-host credential (JWT-based).
   - host: registry.example.com
     credential:
-      # Exactly one of the following four selects how the credential is obtained.
+      # Exactly one of the following five selects how the credential is obtained.
       provider: github           # mint a token (github, forgejo, gcp, azure, aws, or jwt-svid)
       fromEnv: SOME_ENV_VAR      # send a static JWT read from this env var
       fromPath: /path/to/token   # send a static JWT read from this file
       jwkPath: /path/to/jwk.json # sign a fresh JWT per request with this key
+      jwkEnv: SOME_JWK_ENV_VAR   # sign a fresh JWT per request with the key in this env var
 
-      # Required for, and allowed only with, jwkPath.
+      # Required for, and allowed only with, jwkPath or jwkEnv.
       iss: https://example.com/issuer
       sub: client-id
 
-      # Optional; allowed only with jwkPath or provider. Defaults to host.
+      # Optional; allowed only with jwkPath, jwkEnv, or provider. Defaults to host.
       aud: registry.example.com
 
-      # Optional; allowed only with jwkPath. JWT lifetime; defaults to 60s.
+      # Optional; allowed only with jwkPath or jwkEnv. JWT lifetime; defaults to 60s.
       exp: 1h
 
       # Optional. Changes how the credential is presented (see below).
@@ -346,6 +335,7 @@ exclusive with `credential`.
 | `fromEnv`  | Sends the JWT read from the named environment variable as-is (e.g. a GitLab CI `id_token`). Errors at runtime if the variable is unset or empty.                                                                                                                                                                                                                                                                           |
 | `fromPath` | Sends the JWT read from the file at the path, with surrounding whitespace trimmed. The file is re-read on every request.                                                                                                                                                                                                                                                                                                   |
 | `jwkPath`  | Signs a fresh JWT with the private Ed25519/ECDSA key in the JWK file at this path. By default each request gets a new 60-second token; set `exp` to issue longer-lived tokens (then cached and reminted at half-life). The file may be a bare JWK or a JWK set (`{"keys":[...]}`) containing exactly one key. The key id is set in the `kid` header. Generate a key pair with [`flux-mirror keygen`](../guides/keygen.md). |
+| `jwkEnv`   | Like `jwkPath`, but reads the private JWK from the named environment variable instead of a file. Same signing behavior, claims (`iss`/`sub`/`aud`), and `exp` semantics. Errors at runtime if the variable is unset or empty.                                                                                                                                                                                              |
 
 Path values (`fromPath`, `jwkPath`, and the `tls` path fields) are resolved relative to the config file's directory.
 A config can only reference files under its own directory tree.
@@ -394,19 +384,20 @@ A `hosts[]` entry. At least one of `credential`, `provider`, `tls`, or
 ### Credential fields
 
 The `credential` object on a host. It selects exactly one token source
-(`provider`, `fromEnv`, `fromPath`, or `jwkPath`); see [Token sources](#token-sources)
+(`provider`, `fromEnv`, `fromPath`, `jwkPath`, or `jwkEnv`); see [Token sources](#token-sources)
 for what each does.
 
 | Field      | Type     | Default | Description                                                                                                                                                                                                                                                                                                     |
 |------------|----------|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `provider` | string   |         | Token provider, one of `github`, `forgejo`, `gcp`, `azure`, `aws`, `jwt-svid`. Mutually exclusive with `fromEnv`, `fromPath`, and `jwkPath`. See [Token providers](#token-providers).                                                                                                                           |
-| `fromEnv`  | string   |         | Environment variable holding a static JWT. Mutually exclusive with `provider`, `fromPath`, and `jwkPath`.                                                                                                                                                                                                       |
-| `fromPath` | string   |         | Path to a file holding a static JWT. Mutually exclusive with `provider`, `fromEnv`, and `jwkPath`.                                                                                                                                                                                                              |
-| `jwkPath`  | string   |         | Path to a private JSON Web Key, as a bare JWK or a single-key JWK set. Mutually exclusive with `provider`, `fromEnv`, and `fromPath`.                                                                                                                                                                           |
-| `iss`      | string   |         | Token issuer. Required with `jwkPath`; not allowed otherwise.                                                                                                                                                                                                                                                   |
-| `sub`      | string   |         | Token subject. Required with `jwkPath`; not allowed otherwise.                                                                                                                                                                                                                                                  |
-| `aud`      | string   | `host`  | Token audience. Allowed only with `jwkPath` or `provider`; defaults to `host`.                                                                                                                                                                                                                                  |
-| `exp`      | duration | `60s`   | JWT lifetime (e.g. `1h`). Allowed only with `jwkPath` — the one source whose lifetime flux-mirror controls. Must be positive. Other sources' lifetimes are fixed by their issuer.                                                                                                                               |
+| `provider` | string   |         | Token provider, one of `github`, `forgejo`, `gcp`, `azure`, `aws`, `jwt-svid`. Mutually exclusive with `fromEnv`, `fromPath`, `jwkPath`, and `jwkEnv`. See [Token providers](#token-providers).                                                                                                                 |
+| `fromEnv`  | string   |         | Environment variable holding a static JWT. Mutually exclusive with `provider`, `fromPath`, `jwkPath`, and `jwkEnv`.                                                                                                                                                                                             |
+| `fromPath` | string   |         | Path to a file holding a static JWT. Mutually exclusive with `provider`, `fromEnv`, `jwkPath`, and `jwkEnv`.                                                                                                                                                                                                    |
+| `jwkPath`  | string   |         | Path to a private JSON Web Key, as a bare JWK or a single-key JWK set. Mutually exclusive with `provider`, `fromEnv`, `fromPath`, and `jwkEnv`.                                                                                                                                                                 |
+| `jwkEnv`   | string   |         | Environment variable holding a private JSON Web Key (same shapes as `jwkPath`). Mutually exclusive with `provider`, `fromEnv`, `fromPath`, and `jwkPath`.                                                                                                                                                       |
+| `iss`      | string   |         | Token issuer. Required with `jwkPath` or `jwkEnv`; not allowed otherwise.                                                                                                                                                                                                                                       |
+| `sub`      | string   |         | Token subject. Required with `jwkPath` or `jwkEnv`; not allowed otherwise.                                                                                                                                                                                                                                      |
+| `aud`      | string   | `host`  | Token audience. Allowed only with `jwkPath`, `jwkEnv`, or `provider`; defaults to `host`.                                                                                                                                                                                                                       |
+| `exp`      | duration | `60s`   | JWT lifetime (e.g. `1h`). Allowed only with `jwkPath` or `jwkEnv` — the sources whose lifetime flux-mirror controls. Must be positive. Other sources' lifetimes are fixed by their issuer.                                                                                                                      |
 | `username` | string   |         | When unset, the credential is a bearer token (`registrytoken` / `Authorization: Bearer`). When set, the credential is the password of a `username`/`password` pair, using the standard registry auth challenge. See [Bearer token vs. username/password](#bearer-token-vs-usernamepassword-credentialusername). |
 
 ### TLS
