@@ -80,6 +80,35 @@ func TestApplySecret_CreateThenReplace(t *testing.T) {
 	g.Expect(parsed.Auths["a.example"].Password).To(Equal("v2"))
 }
 
+func TestApplySecret_PreservesExistingMetadataOnReplace(t *testing.T) {
+	g := NewWithT(t)
+	ctx := context.Background()
+	client := fake.NewClientset()
+
+	s1, err := buildDockerConfigSecret("regcreds", "flux-system", map[string]registryauth.HostAuth{
+		"a.example": {Username: "robot", Password: "v1"},
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+	s1.Labels = map[string]string{"app.kubernetes.io/managed-by": "cronjob"}
+	s1.Annotations = map[string]string{"example.com/rotated-by": "flux-mirror"}
+	created, err := applySecret(ctx, client, s1, false)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(created).To(BeTrue())
+
+	s2, err := buildDockerConfigSecret("regcreds", "flux-system", map[string]registryauth.HostAuth{
+		"a.example": {Username: "robot", Password: "v2"},
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+	created, err = applySecret(ctx, client, s2, false)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(created).To(BeFalse())
+
+	got, err := client.CoreV1().Secrets("flux-system").Get(ctx, "regcreds", metav1.GetOptions{})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(got.Labels).To(HaveKeyWithValue("app.kubernetes.io/managed-by", "cronjob"))
+	g.Expect(got.Annotations).To(HaveKeyWithValue("example.com/rotated-by", "flux-mirror"))
+}
+
 func TestApplySecret_CreateOnlyConflict(t *testing.T) {
 	g := NewWithT(t)
 	ctx := context.Background()
