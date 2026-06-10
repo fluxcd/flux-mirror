@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -182,6 +183,8 @@ func applySecret(ctx context.Context, client kubernetes.Interface, secret *corev
 		return false, fmt.Errorf("get existing secret: %w", err)
 	}
 	secret.ResourceVersion = existing.ResourceVersion
+	secret.Labels = maps.Clone(existing.Labels)
+	secret.Annotations = maps.Clone(existing.Annotations)
 	if _, err := secrets.Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
 		return false, fmt.Errorf("replace secret: %w", err)
 	}

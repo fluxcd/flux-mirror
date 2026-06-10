@@ -54,7 +54,8 @@ for `provider` sources involves a network call to mint the token. The global
 - Works both locally (kubeconfig) and in-cluster (falls back to the in-cluster
   config and ServiceAccount namespace).
 - By default the Secret is upserted (created, or replaced if it exists). With
-  `--create`, an existing Secret of the same name is an error.
+  `--create`, an existing Secret of the same name is an error. On replace,
+  existing labels and annotations are preserved.
 - With no `--host`, every host in `hosts` is included. A `--host` that is not
   present in the config is an error.
 - The Secret's `.dockerconfigjson` holds one `auths` entry per host. A cloud
