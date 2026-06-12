@@ -544,6 +544,28 @@ func TestValidate_Table(t *testing.T) {
 			errMsg: "credential and provider are mutually exclusive",
 		},
 		{
+			name: "auth username with credential is valid",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "h.example", Username: "bob",
+					Credential: &RegistryCredential{Value: "TOKEN"},
+				}}},
+		},
+		{
+			name: "auth username without credential",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{Host: "h.example", Username: "bob", MaxChunkSize: 1024}}},
+			errMsg: "username requires credential",
+		},
+		{
+			name: "auth username with tls but no credential",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{Host: "h.example", Username: "bob",
+					TLS: &TLS{ServerAuth: &TLSServerAuth{FromPath: "/ca.crt"}},
+				}}},
+			errMsg: "username requires credential",
+		},
+		{
 			name: "auth duplicate host",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{
