@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -243,11 +244,16 @@ func TestRunner_EntriesAreSequential(t *testing.T) {
 	r := newRunner(t)
 	r.Concurrency = 4
 
-	var order []string
+	var (
+		mu    sync.Mutex
+		order []string
+	)
 	makeJob := func(label string) Job {
 		return Job{ID: label, Run: func(_ context.Context) (JobResult, error) {
 			time.Sleep(10 * time.Millisecond)
+			mu.Lock()
 			order = append(order, label)
+			mu.Unlock()
 			return JobResult{Status: StatusCopied}, nil
 		}}
 	}
