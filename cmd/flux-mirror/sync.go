@@ -115,8 +115,9 @@ func init() {
 }
 
 func syncCmdRun(cmd *cobra.Command, args []string) error {
-	if syncArgs.driftExitCode < 0 || syncArgs.driftExitCode > syncMaxCustomDriftExitCode {
-		return fmt.Errorf("--drift-exit-code must be between 0 and %d", syncMaxCustomDriftExitCode)
+	timeout := resolveSyncTimeout(cmd)
+	if err := validateSyncArgs(timeout); err != nil {
+		return err
 	}
 
 	cfgPath, err := resolveConfigPath(args)
@@ -127,8 +128,6 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-
-	timeout := resolveSyncTimeout(cmd)
 
 	// Verbose enables our own structured logs (sync started, entry started,
 	// mirroring tag, tag done, entry summary, sync complete) AND wires
@@ -237,6 +236,22 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return classifyExit(res, syncArgs.driftExitCode)
+}
+
+func validateSyncArgs(timeout time.Duration) error {
+	if syncArgs.concurrency <= 0 {
+		return fmt.Errorf("--concurrency must be greater than 0")
+	}
+	if syncArgs.retries < 0 {
+		return fmt.Errorf("--retries must be greater than or equal to 0")
+	}
+	if timeout <= 0 {
+		return fmt.Errorf("--timeout must be greater than 0")
+	}
+	if syncArgs.driftExitCode < 0 || syncArgs.driftExitCode > syncMaxCustomDriftExitCode {
+		return fmt.Errorf("--drift-exit-code must be between 0 and %d", syncMaxCustomDriftExitCode)
+	}
+	return nil
 }
 
 func resolveSyncTimeout(cmd *cobra.Command) time.Duration {

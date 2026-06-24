@@ -388,6 +388,55 @@ func TestSync_DriftExitCodeValidation(t *testing.T) {
 	g.Expect(err.Error()).To(ContainSubstring("--drift-exit-code must be between 0 and 255"))
 }
 
+func TestSync_FlagValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		setup     func(*testing.T)
+		wantError string
+	}{
+		{
+			name:      "rejects non-positive concurrency",
+			args:      []string{"sync", "config.yaml", "--concurrency", "0"},
+			wantError: "--concurrency must be greater than 0",
+		},
+		{
+			name:      "rejects negative retries",
+			args:      []string{"sync", "config.yaml", "--retries", "-1"},
+			wantError: "--retries must be greater than or equal to 0",
+		},
+		{
+			name:      "rejects non-positive sync timeout",
+			args:      []string{"sync", "config.yaml", "--timeout", "0s"},
+			wantError: "--timeout must be greater than 0",
+		},
+		{
+			name: "rejects non-positive inherited root timeout",
+			args: []string{"sync", "config.yaml"},
+			setup: func(t *testing.T) {
+				t.Helper()
+				_ = rootCmd.PersistentFlags().Set("timeout", "0s")
+			},
+			wantError: "--timeout must be greater than 0",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			defer resetCmdArgs()
+
+			if tt.setup != nil {
+				tt.setup(t)
+			}
+
+			_, err := executeCommand(tt.args)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(err.Error()).To(ContainSubstring(tt.wantError))
+		})
+	}
+}
+
 func TestSyncHelp_UsesEffectiveTimeoutDefault(t *testing.T) {
 	g := NewWithT(t)
 
