@@ -295,6 +295,14 @@ func TestValidate_Table(t *testing.T) {
 			errMsg: "limit must be >= 0",
 		},
 		{
+			name: "chart missing name",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Charts: []ChartEntry{{
+				Source: "https://charts.example.com", Destination: "oci://ghcr.io/x",
+				Name: "",
+			}}},
+			errMsg: "name is required",
+		},
+		{
 			name: "artifact bad source",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: []ArtifactEntry{{
 				Source: "not a repo!", Destination: "ghcr.io/c/d",
@@ -308,6 +316,14 @@ func TestValidate_Table(t *testing.T) {
 				Selector: Selector{Regex: &RegexFilter{Pattern: "(unclosed"}},
 			}}},
 			errMsg: "does not compile",
+		},
+		{
+			name: "selector empty regex pattern",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Selector: Selector{Regex: &RegexFilter{Pattern: ""}},
+			}}},
+			errMsg: "regex.pattern is required",
 		},
 		{
 			name: "selector bad semver",
@@ -361,6 +377,19 @@ func TestValidate_Table(t *testing.T) {
 				},
 			}}},
 			errMsg: "issuer is required",
+		},
+		{
+			name: "verify missing subject",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Verify: &ArtifactVerification{
+					Provider: VerifyProviderCosign,
+					MatchOIDCIdentity: []OIDCIdentity{{
+						Issuer: "https://token.actions.githubusercontent.com",
+					}},
+				},
+			}}},
+			errMsg: "subject is required",
 		},
 		{
 			name: "verify bad subject regex",
