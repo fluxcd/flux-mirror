@@ -1,15 +1,20 @@
+---
+weight: 50
+linkTitle: Keygen Command
+---
+
 # Flux Mirror Keygen Command
 
-The `flux-mirror keygen` command generates an EdDSA (Ed25519) JSON Web Key pair
-for [JWK-based registry auth](../config/README.md#per-host-credential). The output
+The `flux mirror keygen` command generates an EdDSA (Ed25519) JSON Web Key pair
+for [JWK-based registry auth](config.md#per-host-credential). The output
 files plug directly into the
-[`hosts[].credential.jwkPath`](../config/README.md#per-host-credential) config field,
-which [`sync`](./sync.md) and [`login`](./login.md) use to sign JWTs.
+[`hosts[].credential.jwkPath`](config.md#per-host-credential) config field,
+which [`sync`](sync.md) and [`login`](login.md) use to sign JWTs.
 
 ## Synopsis
 
 ```
-flux-mirror keygen [flags]
+flux mirror keygen [flags]
 ```
 
 It writes the key pair into a directory as two JWK sets:
@@ -39,10 +44,10 @@ public set.
 
 ```bash
 # Write a key pair into the current directory.
-flux-mirror keygen
+flux mirror keygen
 
 # Write a key pair into ./keys/registry (created if missing).
-flux-mirror keygen -o ./keys/registry
+flux mirror keygen -o ./keys/registry
 ```
 
 Output:
@@ -56,14 +61,14 @@ Output:
 
 Unlike `provider`/`value` credentials — whose lifetime is fixed by an external
 issuer — a `jwkPath` credential is signed locally, so you control its lifetime
-through [`exp`](../config/README.md#per-host-credential). This makes a key pair plus
+through [`exp`](config.md#per-host-credential). This makes a key pair plus
 `login` a convenient way to mint a single, long-lived bearer token (for example,
 a year-long token for a CI system or an air-gapped agent).
 
 **1. Generate the key pair.**
 
 ```bash
-flux-mirror keygen -o ./keys/registry
+flux mirror keygen -o ./keys/registry
 ```
 
 **2. Reference the private key from a host credential, with a long `exp`.** Set
@@ -88,7 +93,7 @@ hosts:
 **3. Log in once to mint and store the token.**
 
 ```bash
-flux-mirror login -f ./config.yaml
+flux mirror login -f ./config.yaml
 ```
 
 `login` signs one JWT valid for `exp` and writes it to the Docker config, so

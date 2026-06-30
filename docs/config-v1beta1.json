@@ -1,5 +1,5 @@
 {
-  "$id": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/config/config-v1beta1.json",
+  "$id": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/config-v1beta1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Config is the flux-mirror configuration file.",

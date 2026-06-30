@@ -1,14 +1,19 @@
+---
+weight: 20
+linkTitle: Sync Command
+---
+
 # Flux Mirror Sync Command
 
-The `flux-mirror sync` command mirrors Helm charts and OCI artifacts between
-registries based on a declarative [`Config`](../config/README.md). It is
+The `flux mirror sync` command mirrors Helm charts and OCI artifacts between
+registries based on a declarative [`Config`](config.md). It is
 idempotent: re-running against the same config produces the same destination
 state, copying only what is missing or drifted.
 
 ## Synopsis
 
 ```
-flux-mirror sync [CONFIG|-] [flags]
+flux mirror sync [CONFIG|-] [flags]
 ```
 
 ## Configuration source
@@ -18,13 +23,13 @@ The config path is resolved in the following order:
 1. The first positional argument (`-` reads the config from stdin).
 2. The `FLUX_MIRROR_CONFIG` environment variable.
 
-If neither is set, the command errors. Unlike [`login`](./login.md) and
-[`secret`](./secret.md), `sync` has no executable-relative default path.
+If neither is set, the command errors. Unlike [`login`](login.md) and
+[`secret`](secret.md), `sync` has no executable-relative default path.
 
 ```bash
-flux-mirror sync ./flux-mirror.yaml
-flux-mirror sync - < ./flux-mirror.yaml
-FLUX_MIRROR_CONFIG=./flux-mirror.yaml flux-mirror sync
+flux mirror sync ./flux-mirror.yaml
+flux mirror sync - < ./flux-mirror.yaml
+FLUX_MIRROR_CONFIG=./flux-mirror.yaml flux mirror sync
 ```
 
 ## Authentication
@@ -32,18 +37,18 @@ FLUX_MIRROR_CONFIG=./flux-mirror.yaml flux-mirror sync
 `sync` authenticates OCI registry requests — `artifacts` source/destination and
 `charts` `oci://` destinations — per registry host:
 
-1. Hosts listed under [`hosts`](../config/README.md#hosts) use their configured
+1. Hosts listed under [`hosts`](config.md#hosts) use their configured
    authentication:
-   - [`provider: ecr|acr|gar`](../config/README.md#cloud-registry-providers) obtains the
+   - [`provider: ecr|acr|gar`](config.md#cloud-registry-providers) obtains the
      registry's native credentials from the cloud provider's workload identity.
-   - [`credential`](../config/README.md#per-host-credential) resolves a per-host
+   - [`credential`](config.md#per-host-credential) resolves a per-host
      token from a cloud/CI identity, a JWK signature, or an environment variable
      or file. With no `username` it is sent as an HTTP Bearer credential; with a
      `username` it is the password in the standard registry auth challenge.
 2. Hosts not listed under `hosts` use the ambient Docker config and credential
    helpers (`~/.docker/config.json`, or `$DOCKER_CONFIG` when set).
 
-A non-`provider` host may also set [`tls`](../config/README.md#transport-tls) to
+A non-`provider` host may also set [`tls`](config.md#transport-tls) to
 configure transport-layer TLS for its registry connections: a custom CA, a client
 certificate (mTLS), or SPIFFE X.509-SVID mTLS.
 
@@ -54,18 +59,18 @@ auth and always comes from the ambient Helm repositories config:
 - The `username`/`password`, `certFile`, `keyFile`, `caFile`,
   `insecure_skip_tls_verify`, and `pass_credentials_all` fields are honored.
 
-Add repositories with `helm repo add` and `flux-mirror` picks up matching HTTP/S
+Add repositories with `helm repo add` and `flux mirror` picks up matching HTTP/S
 repository credentials automatically.
 
 ## Flags
 
 | Flag                            | Default | Description                                                                                                                          |
 |---------------------------------|---------|------------------------------------------------------------------------------------------------------------------------------------|
-| `-o, --output text\|yaml\|json` | `text`  | Output format. `text` is human-friendly; `yaml` and `json` print the structured [sync report](../report/README.md) to stdout.       |
+| `-o, --output text\|yaml\|json` | `text`  | Output format. `text` is human-friendly; `yaml` and `json` print the structured [sync report](report.md) to stdout.       |
 | `--concurrency N`               | `4`     | Maximum number of copy operations to run in parallel per job. Must be greater than `0`.                                            |
 | `--retries N`                   | `3`     | Maximum number of retry attempts per job, within the `--timeout` budget. Must be greater than or equal to `0`.                     |
 | `--timeout DURATION`            | `5m`    | Per-job total budget covering all retry attempts. Must be greater than `0`.                                                         |
-| `--overwrite`                   | `false` | Force `overwrite: true` on every entry, regardless of per-entry config. See [Overwrite and drift behavior](../config/README.md#overwrite-and-drift-behavior). |
+| `--overwrite`                   | `false` | Force `overwrite: true` on every entry, regardless of per-entry config. See [Overwrite and drift behavior](config.md#overwrite-and-drift-behavior). |
 | `--drift-exit-code N`           | `2`     | Exit code to use when drift is detected without failures (0–255). Set to `0` for immutable destinations that should not fail CI on drift. |
 | `--dry-run`                     | `false` | Run the plan and comparison pipeline without performing any writes. Reported as `would-copy` / `would-overwrite`.                   |
 | `--verbose`                     | `false` | Log every operation and the involved digests on stderr. Suppresses the spinner.                                                     |
@@ -113,17 +118,17 @@ missing-blob, or push-rejection issues.
 `tags[]` array of per-tag rows. Every row has a `status` and, when known, a
 source `digest`; skipped rows carry a `reason`; verified rows carry a
 `verification` block; and, with `includeReferrers: true`, a `referrers[]` array.
-The envelope is documented by the [sync report schema](../report/README.md).
+The envelope is documented by the [sync report schema](report.md).
 
 ```bash
 # Status of every tag, per entry
-flux-mirror sync config.yaml -o json | jq '.report.results[].tags[] | {tag, status}'
+flux mirror sync config.yaml -o json | jq '.report.results[].tags[] | {tag, status}'
 
 # Tags that were copied
-flux-mirror sync config.yaml -o json | jq '.report.results[].tags[] | select(.status == "copied") | .tag'
+flux mirror sync config.yaml -o json | jq '.report.results[].tags[] | select(.status == "copied") | .tag'
 
 # Aggregate counts
-flux-mirror sync config.yaml -o json | jq '.report.summary'
+flux mirror sync config.yaml -o json | jq '.report.summary'
 ```
 
 ## Status
@@ -178,7 +183,7 @@ immutable and drift should be logged without failing CI.
 
 Many common Kubernetes ecosystem components are still published only to classic
 HTTP/S Helm repositories and do not offer OCI Helm charts. The
-[`charts`](../config/README.md#charts) section pulls those charts over HTTP/S and
+[`charts`](config.md#charts) section pulls those charts over HTTP/S and
 re-publishes them as OCI Helm charts so a cluster can consume them from a single
 OCI registry.
 
@@ -246,9 +251,9 @@ jobs:
 ### Mirror OCI Helm charts into OCI Helm charts
 
 A Helm chart that already lives in an OCI registry is mirrored OCI-to-OCI as a
-plain OCI artifact. The [`artifacts`](../config/README.md#artifacts) section is
+plain OCI artifact. The [`artifacts`](config.md#artifacts) section is
 the only way to mirror an OCI Helm chart between OCI repositories — the
-[`charts`](../config/README.md#charts) section is exclusively for HTTP/S sources.
+[`charts`](config.md#charts) section is exclusively for HTTP/S sources.
 
 ```yaml
 apiVersion: mirror.plugin.fluxcd.io/v1beta1
@@ -330,7 +335,7 @@ jobs:
 
 To mirror container images, OCI Helm charts, and Flux OCI artifacts into a cloud
 registry, authenticate to the cloud provider with its GitHub Actions OIDC login
-action, then set [`hosts[].provider`](../config/README.md#cloud-registry-providers) on the
+action, then set [`hosts[].provider`](config.md#cloud-registry-providers) on the
 destination host so `flux-mirror` reuses that ambient identity. The source here
 is GHCR, authenticated with `GITHUB_TOKEN`.
 
@@ -416,7 +421,7 @@ jobs:
 
 Inside a cluster, a `CronJob` can mirror on a schedule using the pod's workload
 identity. The destination cloud registry is authenticated with
-[`hosts[].provider`](../config/README.md#cloud-registry-providers) (which uses the ambient
+[`hosts[].provider`](config.md#cloud-registry-providers) (which uses the ambient
 cloud credential chain — IRSA, AKS Workload Identity, or GKE Workload Identity).
 The source registry here accepts the cluster's ServiceAccount OIDC tokens, so it
 is authenticated with a projected ServiceAccount token sent as an HTTP Bearer
@@ -460,7 +465,7 @@ metadata:
 
 The config authenticates the destination with `provider` and the source with the
 projected token. Because [file-path fields are confined to the config's own
-directory](../config/README.md#resolving-file-paths), the config and the token
+directory](config.md#resolving-file-paths), the config and the token
 are mounted together (below) so a relative `fromPath` resolves:
 
 ```yaml
@@ -532,10 +537,10 @@ spec:
 This `CronJob` pulls container images from a registry that authenticates the
 caller's AWS identity, and pushes them to a registry that requires SPIFFE
 X.509-SVID mTLS. The source host uses the
-[`aws` credential provider](../config/README.md#token-providers), which signs an
+[`aws` credential provider](config.md#token-providers), which signs an
 `sts:GetCallerIdentity` request the source registry replays to AWS STS, so the
 pod needs AWS credentials via IRSA. The destination host uses
-[`tls`](../config/README.md#transport-tls) with a SPIFFE client certificate and
+[`tls`](config.md#transport-tls) with a SPIFFE client certificate and
 SPIFFE server verification, and no HTTP credential — the registry authorizes the
 client by its X.509-SVID. The SPIFFE SVIDs and trust bundle come from the
 Workload API, which the SPIFFE CSI driver exposes to the pod; go-spiffe locates
@@ -625,11 +630,11 @@ spec:
 
 ```bash
 # Preview the plan without writing to the destination.
-flux-mirror sync ./flux-mirror.yaml --dry-run -o yaml
+flux mirror sync ./flux-mirror.yaml --dry-run -o yaml
 
 # Force-resync every drifted tag.
-flux-mirror sync ./flux-mirror.yaml --overwrite
+flux mirror sync ./flux-mirror.yaml --overwrite
 
 # CI-friendly: no spinner. For immutable destinations, keep CI green on drift.
-flux-mirror sync ./flux-mirror.yaml --no-progress --drift-exit-code=0
+flux mirror sync ./flux-mirror.yaml --no-progress --drift-exit-code=0
 ```
