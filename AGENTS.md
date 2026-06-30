@@ -75,20 +75,20 @@ CI (`.github/workflows/test.yaml`) runs `make test`, `make lint`, `make build`, 
 User-facing changes (flags, commands, config fields, report shape, GitHub Action inputs) must be reflected in the docs. The tree is:
 
 - `README.md` - features list, install, quickstart, CI usage, GitHub Action example, and doc links.
-- `docs/config/README.md` + `docs/config/config-v1beta1.json` - the single config doc: YAML specification (hosts, artifacts, charts, selectors, overwrite behavior, signature verification, defaults), envelope reference, and generated JSON Schema.
-- `docs/report/README.md` + `docs/report/report-v1beta1.json` - sync report envelope reference and its generated JSON Schema.
-- `docs/guides/sync.md` - `sync` command reference, config source resolution, authentication, flags, output, outcomes, exit codes, and dry-run behavior.
-- `docs/guides/login.md`, `docs/guides/secret.md`, `docs/guides/keygen.md` - auth login, Kubernetes Secret generation, and JWK key generation command references.
+- `docs/config.md` + `docs/config-v1beta1.json` - the single config doc: YAML specification (hosts, artifacts, charts, selectors, overwrite behavior, signature verification, defaults), envelope reference, and generated JSON Schema.
+- `docs/report.md` + `docs/report-v1beta1.json` - sync report envelope reference and its generated JSON Schema.
+- `docs/sync.md` - `sync` command reference, config source resolution, authentication, flags, output, outcomes, exit codes, and dry-run behavior.
+- `docs/login.md`, `docs/secret.md`, `docs/keygen.md` - auth login, Kubernetes Secret generation, and JWK key generation command references.
 - `actions/setup/README.md` + `actions/setup/action.yaml` - GitHub Action inputs and example workflows.
 - `examples/` - runnable config examples that should stay aligned with supported config fields and defaults.
 
 Apply these rules:
 
-- New or changed CLI flag: update the flag table in `docs/guides/sync.md` and any relevant examples in `README.md`.
-- New or changed config field: add it to the `api/v1beta1.Config` types (with kubebuilder markers), run `make generate`, then update `internal/config` validation/tests, `docs/config/README.md`, and examples when appropriate.
-- New or changed report field: add it to the `api/v1beta1` report types, run `make generate`, then update `internal/sync` assembly/tests and `docs/report/README.md`.
+- New or changed CLI flag: update the flag table in `docs/sync.md` and any relevant examples in `README.md`.
+- New or changed config field: add it to the `api/v1beta1.Config` types (with kubebuilder markers), run `make generate`, then update `internal/config` validation/tests, `docs/config.md`, and examples when appropriate.
+- New or changed report field: add it to the `api/v1beta1` report types, run `make generate`, then update `internal/sync` assembly/tests and `docs/report.md`.
 - New command: add or update README command guidance and create a dedicated reference doc under `docs/` if the command has meaningful flags or output.
-- Auth command changes: update `docs/guides/login.md`, `docs/guides/secret.md`, or `docs/guides/keygen.md` as applicable.
-- Output or outcome shape change: update `docs/guides/sync.md`, README examples, and tests that assert text/YAML/JSON output.
+- Auth command changes: update `docs/login.md`, `docs/secret.md`, or `docs/keygen.md` as applicable.
+- Output or outcome shape change: update `docs/sync.md`, README examples, and tests that assert text/YAML/JSON output.
 - GitHub Action change: when `actions/setup/action.yaml` inputs or behavior change, refresh `actions/setup/README.md`.
 - Registry auth, Helm auth, OIDC/JWT, or cosign verification behavior changes must be documented in the authentication or verification sections, not only in flag help.

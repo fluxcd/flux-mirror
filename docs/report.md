@@ -1,6 +1,10 @@
+---
+weight: 60
+---
+
 # Flux Mirror Report
 
-The `flux-mirror sync` command can emit a structured report of the mirror
+The `flux mirror sync` command can emit a structured report of the mirror
 results by setting `--output` to `json` or `yaml`. The envelope shape is
 versioned and documented by the JSON Schema in
 [`report-v1beta1.json`](report-v1beta1.json).
@@ -8,12 +12,12 @@ versioned and documented by the JSON Schema in
 ## Usage
 
 ```shell
-flux-mirror sync config.yaml -o json
+flux mirror sync config.yaml -o json
 ```
 
 Structured output always emits every entry regardless of `--verbose`.
 Filtering belongs downstream (`jq`, `yq`). The process exit code still
-reflects whether any tag failed or drifted (see [exit codes](../guides/sync.md#exit-codes)).
+reflects whether any tag failed or drifted (see [exit codes](sync.md#exit-codes)).
 
 ## Envelope
 
@@ -151,7 +155,7 @@ did not match the signed identity):
 
 ## Example
 
-A report from `flux-mirror sync … -o json` against a config with cosign
+A report from `flux mirror sync … -o json` against a config with cosign
 verification (`minAge: 48h`) and `includeReferrers: true`. The first entry
 completed: tag `6.13.0` was deferred because its signature is younger than
 `minAge`, while `6.12.0` was copied along with its cosign signature bundle. The
@@ -161,7 +165,7 @@ second entry failed at plan time because the source repository does not exist.
 {
   "apiVersion": "mirror.plugin.fluxcd.io/v1beta1",
   "kind": "Report",
-  "$schema": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report/report-v1beta1.json",
+  "$schema": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report-v1beta1.json",
   "report": {
     "reporter": "flux-mirror/v0.1.0",
     "timestamp": "2026-06-06T20:12:25Z",

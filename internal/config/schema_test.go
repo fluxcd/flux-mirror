@@ -22,7 +22,7 @@ func validateConfigSchema(t *testing.T, raw string) {
 	var doc any
 	g.Expect(k8syaml.Unmarshal([]byte(raw), &doc)).To(Succeed())
 
-	abs, err := filepath.Abs(filepath.Join("..", "..", "docs", "config", "config-v1beta1.json"))
+	abs, err := filepath.Abs(filepath.Join("..", "..", "docs", "config-v1beta1.json"))
 	g.Expect(err).ToNot(HaveOccurred())
 
 	compiler := jsonschema.NewCompiler()

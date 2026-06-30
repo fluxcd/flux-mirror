@@ -1,10 +1,15 @@
+---
+weight: 40
+linkTitle: Secret Command
+---
+
 # Flux Mirror Secret Command
 
-The `flux-mirror secret <name>` command resolves the credentials configured under
-[`hosts`](../config/README.md#hosts) for each selected host and writes them into a
+The `flux mirror secret <name>` command resolves the credentials configured under
+[`hosts`](config.md#hosts) for each selected host and writes them into a
 Kubernetes Secret of type `kubernetes.io/dockerconfigjson` — the same shape
 `kubectl create secret docker-registry` produces. These are the *same*
-credentials [`sync`](./sync.md) and [`login`](./login.md) resolve, so the Secret
+credentials [`sync`](sync.md) and [`login`](login.md) resolve, so the Secret
 can be referenced as an `imagePullSecret`, or by a Flux
 `OCIRepository`/`HelmRepository` `.spec.secretRef`, to pull from a registry that
 understands the configured identity.
@@ -14,7 +19,7 @@ Its main use case is rotating short-lived pull Secrets from a `CronJob`.
 ## Synopsis
 
 ```
-flux-mirror secret <name> [flags]
+flux mirror secret <name> [flags]
 ```
 
 `<name>` is the name of the Secret to create or replace.
@@ -27,7 +32,7 @@ exists, matching `kubectl create secret docker-registry`.
 
 The config path is resolved as: the `--config`/`-f` flag, else
 `$FLUX_MIRROR_CONFIG`, else `<executable>.config`. `-f -` reads the config from
-stdin. Like `login`, `secret` reads only the [`hosts`](../config/README.md#hosts)
+stdin. Like `login`, `secret` reads only the [`hosts`](config.md#hosts)
 section and accepts a `hosts`-only config.
 
 ## Flags
@@ -59,12 +64,12 @@ for `provider` sources involves a network call to mint the token. The global
 - With no `--host`, every host in `hosts` is included. A `--host` that is not
   present in the config is an error.
 - The Secret's `.dockerconfigjson` holds one `auths` entry per host. A cloud
-  [`provider`](../config/README.md#cloud-registry-providers) host, and a
-  [`credential`](../config/README.md#per-host-credential) host with `username` set,
+  [`provider`](config.md#cloud-registry-providers) host, and a
+  [`credential`](config.md#per-host-credential) host with `username` set,
   write `username`/`password`/`auth` (understood by `kubelet` and Flux). A
   `credential` host without `username` writes the bearer `registrytoken` field
   (understood by go-containerregistry and Flux, **not** by `kubelet`). See
-  [Bearer token vs. username/password](../config/README.md#bearer-token-vs-usernamepassword).
+  [Bearer token vs. username/password](config.md#bearer-token-vs-usernamepassword).
 - A TLS-only host (only `tls`, no `credential`/`provider`) has nothing to put in
   the Secret and is skipped with a `• skipping <host>` message.
 - Credentials are short-lived (provider tokens, freshly signed JWTs). Re-run the
@@ -77,7 +82,7 @@ for `provider` sources involves a network call to mint the token. The global
 
 A cloud registry such as ECR, ACR, or GAR issues only short-lived credentials, so
 a `CronJob` regenerates the pull Secret on a schedule using the pod's workload
-identity. A [`provider`](../config/README.md#cloud-registry-providers) host mints the
+identity. A [`provider`](config.md#cloud-registry-providers) host mints the
 registry's native username/password from the ambient cloud identity, and `secret`
 writes it as a `dockerconfigjson` Secret usable as an `imagePullSecret`.
 
@@ -200,7 +205,7 @@ both as a pod `imagePullSecret` and as a Flux `OCIRepository`/`HelmRepository`
 
 When the target registry validates the cluster's ServiceAccount OIDC tokens
 directly, project a ServiceAccount token whose audience is the registry host and
-feed it to a [`credential`](../config/README.md#per-host-credential) host via
+feed it to a [`credential`](config.md#per-host-credential) host via
 `fromPath`. Setting `username` writes the token as the password of a
 username/password pair (`username`/`password`/`auth`), so the resulting Secret
 works as a pod `imagePullSecret` (which `kubelet` can use) as well as a Flux
@@ -212,7 +217,7 @@ Reuse the ServiceAccount and RBAC from the previous example (here the
 ServiceAccount needs no cloud annotations — the registry trusts the cluster
 issuer directly). The config references the token by a relative path, and because
 [file-path fields are confined to the config's own
-directory](../config/README.md#resolving-file-paths), the config and the token
+directory](config.md#resolving-file-paths), the config and the token
 are mounted together:
 
 ```yaml
@@ -266,7 +271,7 @@ spec:
 ### Rotate credentials using a SPIFFE JWT-SVID
 
 When the registry accepts SPIFFE JWT-SVIDs, use the
-[`jwt-svid` credential provider](../config/README.md#token-providers): it fetches
+[`jwt-svid` credential provider](config.md#token-providers): it fetches
 a JWT-SVID for the audience (the registry host) from the SPIFFE Workload API.
 Setting `username` writes the JWT-SVID as the password of a username/password
 pair, so the resulting Secret works as a pod `imagePullSecret` (which `kubelet`
@@ -338,12 +343,12 @@ The resulting Secret holds `username`/`password`/`auth`, so it works as a pod
 
 ```bash
 # Upsert a Secret for all hosts in the default config, in the current namespace.
-flux-mirror secret regcreds
+flux mirror secret regcreds
 
 # Fail if the Secret already exists, like 'kubectl create secret docker-registry'.
-flux-mirror secret regcreds --create
+flux mirror secret regcreds --create
 
 # Specific hosts, a specific namespace and kubeconfig context.
-flux-mirror secret regcreds -n flux-system --context prod \
+flux mirror secret regcreds -n flux-system --context prod \
   --host registry.example.com --host other.example.com -f ./flux-mirror.yaml
 ```

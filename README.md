@@ -18,13 +18,6 @@ versions are republished as OCI Helm artifacts that `HelmRelease` consumes
 via an `OCIRepository` in `spec.chartRef`, dropping the runtime dependency
 on upstream chart repositories.
 
-> [!NOTE]
-> This repository is in early development and the plugin system is not yet
-> available in a stable release of Flux. Instructions for installing and
-> using `flux-mirror` as a Flux CLI plugin will be added here once
-> [RFC-0013](https://github.com/fluxcd/flux2/blob/main/rfcs/0013-cli-plugin-system/README.md)
-> ships in Flux 2.9 or later.
-
 ## Features
 
 - **OCI artifacts** — mirror container images, OCI Helm charts, Flux OCI
@@ -55,11 +48,10 @@ on upstream chart repositories.
 
 ## Install
 
-Download the binary for your platform from the [releases page](https://github.com/fluxcd/flux-mirror/releases),
-or build from source:
+Install the plugin with the Flux CLI:
 
 ```shell
-go install github.com/fluxcd/flux-mirror/cmd/flux-mirror@latest
+flux plugin install mirror
 ```
 
 ## Quickstart
@@ -100,33 +92,33 @@ artifacts:
 Run the sync:
 
 ```shell
-flux-mirror sync flux-mirror.yaml
+flux mirror sync flux-mirror.yaml
 ```
 
 You can also read the config from stdin:
 
 ```shell
-flux-mirror sync - < flux-mirror.yaml
+flux mirror sync - < flux-mirror.yaml
 ```
 
 Preview without writing:
 
 ```shell
-flux-mirror sync flux-mirror.yaml --dry-run
+flux mirror sync flux-mirror.yaml --dry-run
 ```
 
 Force a resync of drifted tags e.g. `latest`:
 
 ```shell
-flux-mirror sync flux-mirror.yaml --overwrite
+flux mirror sync flux-mirror.yaml --overwrite
 ```
 
 See [`examples/`](examples) for more configurations and
-[`docs/guides/sync.md`](docs/guides/sync.md) for the full flag reference.
+[`docs/sync.md`](docs/sync.md) for the full flag reference.
 
 ## Running in CI
 
-`flux-mirror sync` is designed for unattended runs. The exit code separates
+`flux mirror sync` is designed for unattended runs. The exit code separates
 real failures from drift, so a CI gate can react to each independently:
 
 | Code | Meaning                                                                                                    |
@@ -138,20 +130,20 @@ real failures from drift, so a CI gate can react to each independently:
 The `--no-progress` flag suppresses the live spinner so log output stays clean in CI:
 
 ```shell
-flux-mirror sync flux-mirror.yaml --no-progress
+flux mirror sync flux-mirror.yaml --no-progress
 ```
 
 When the destination registry is known to be immutable, drift can be reported
 without failing the CI job:
 
 ```shell
-flux-mirror sync flux-mirror.yaml --no-progress --drift-exit-code=0
+flux mirror sync flux-mirror.yaml --no-progress --drift-exit-code=0
 ```
 
 For downstream tooling, emit a structured report:
 
 ```shell
-flux-mirror sync flux-mirror.yaml -o json | jq '.report.results[].tags'
+flux mirror sync flux-mirror.yaml -o json | jq '.report.results[].tags'
 ```
 
 ### GitHub Actions
@@ -210,29 +202,29 @@ destination registry credentials from a `Secret` created via
 
 | Command                     | Description                                                                               |
 |-----------------------------|-------------------------------------------------------------------------------------------|
-| `flux-mirror sync [CONFIG]` | Mirror Helm charts and OCI artifacts described by a YAML config.                          |
-| `flux-mirror login`         | Store configured credentials in the Docker config (or OS keychain).                       |
-| `flux-mirror secret <name>` | Create/replace (upsert) a `dockerconfigjson` Kubernetes Secret with per-host credentials. |
-| `flux-mirror keygen`        | Generate an EdDSA JWK pair for JWK-based registry auth.                                   |
-| `flux-mirror version`       | Print the CLI version.                                                                    |
-| `flux-mirror completion`    | Generate shell completion for bash, fish, powershell and zsh.                             |
+| `flux mirror sync [CONFIG]` | Mirror Helm charts and OCI artifacts described by a YAML config.                          |
+| `flux mirror login`         | Store configured credentials in the Docker config (or OS keychain).                       |
+| `flux mirror secret <name>` | Create/replace (upsert) a `dockerconfigjson` Kubernetes Secret with per-host credentials. |
+| `flux mirror keygen`        | Generate an EdDSA JWK pair for JWK-based registry auth.                                   |
+| `flux mirror version`       | Print the CLI version.                                                                    |
+| `flux mirror completion`    | Generate shell completion for bash, fish, powershell and zsh.                             |
 
-Run `flux-mirror <command> --help` for the full flag list.
+Run `flux mirror <command> --help` for the full flag list.
 
 ## Documentation
 
-- [Sync command reference](docs/guides/sync.md) — flags, output modes, outcomes,
+- [Sync command reference](docs/sync.md) — flags, output modes, outcomes,
   exit codes, and example invocations.
-- [Config specification](docs/config/README.md) — YAML schema for `hosts`,
+- [Config specification](docs/config.md) — YAML schema for `hosts`,
   `artifacts`, and `charts` entries, selector pipeline, overwrite semantics,
-  defaults, and the published [JSON Schema](docs/config/config-v1beta1.json).
-- [Sync report reference](docs/report/README.md) — report envelope and its
-  published [JSON Schema](docs/report/report-v1beta1.json) for `-o json` / `-o yaml`.
-- [Keygen command reference](docs/guides/keygen.md) — generate EdDSA JWK pairs for
+  defaults, and the published [JSON Schema](docs/config-v1beta1.json).
+- [Sync report reference](docs/report.md) — report envelope and its
+  published [JSON Schema](docs/report-v1beta1.json) for `-o json` / `-o yaml`.
+- [Keygen command reference](docs/keygen.md) — generate EdDSA JWK pairs for
   JWK-based registry auth.
-- [Login command reference](docs/guides/login.md) — store configured credentials in
+- [Login command reference](docs/login.md) — store configured credentials in
   the Docker config or OS keychain.
-- [Secret command reference](docs/guides/secret.md) — upsert per-host credentials into
+- [Secret command reference](docs/secret.md) — upsert per-host credentials into
   a Kubernetes `dockerconfigjson` Secret.
 - [Examples](examples/) — runnable configs for common mirror scenarios.
 

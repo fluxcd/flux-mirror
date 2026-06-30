@@ -1,16 +1,21 @@
+---
+weight: 30
+linkTitle: Login Command
+---
+
 # Flux Mirror Login Command
 
-The `flux-mirror login` command resolves the credentials configured under
-[`hosts`](../config/README.md#hosts) and stores them in the Docker config, the
+The `flux mirror login` command resolves the credentials configured under
+[`hosts`](config.md#hosts) and stores them in the Docker config, the
 same way `docker login` does. It mints the *same* credentials
-[`flux-mirror sync`](./sync.md) would attach, but once — so any tool that reads
+[`flux mirror sync`](sync.md) would attach, but once — so any tool that reads
 the Docker config (`docker`, `crane`, `flux push artifact`, `helm`) can then
 authenticate as those identities.
 
 ## Synopsis
 
 ```
-flux-mirror login [flags]
+flux mirror login [flags]
 ```
 
 ## Configuration source
@@ -19,7 +24,7 @@ The config path is resolved as: the `--config`/`-f` flag, else
 `$FLUX_MIRROR_CONFIG`, else a path next to the executable (`<executable>.config`).
 `-f -` reads the config from stdin.
 
-`login` reads only the [`hosts`](../config/README.md#hosts) section, so — unlike
+`login` reads only the [`hosts`](config.md#hosts) section, so — unlike
 `sync` — it accepts a config with no `artifacts` or `charts`.
 
 ## Flags
@@ -49,13 +54,13 @@ exactly like `docker login`:
 
 What gets written depends on the host:
 
-- A cloud [`provider`](../config/README.md#cloud-registry-providers) host, or a
-  [`credential`](../config/README.md#per-host-credential) host with `username` set,
+- A cloud [`provider`](config.md#cloud-registry-providers) host, or a
+  [`credential`](config.md#per-host-credential) host with `username` set,
   writes `username`/`password`/`auth`.
 - A `credential` host without `username` writes the bearer `registrytoken` field
   instead. Because credential helpers only store username/secret pairs, a
   `registrytoken` always goes to the config file (never a keychain helper). See
-  [Bearer token vs. username/password](../config/README.md#bearer-token-vs-usernamepassword).
+  [Bearer token vs. username/password](config.md#bearer-token-vs-usernamepassword).
 
 Pass `--plaintext` to force the base64 `config.json` entry and bypass any
 configured or auto-detected helper (this applies to the username/password case;
@@ -69,7 +74,7 @@ configured or auto-detected helper (this applies to the username/password case;
 ### Log in to ECR, ACR, or GAR from GitHub Actions
 
 Authenticate to the cloud provider with its GitHub Actions OIDC login action,
-then `flux-mirror login` with a [`provider`](../config/README.md#cloud-registry-providers)
+then `flux-mirror login` with a [`provider`](config.md#cloud-registry-providers)
 host. `login` mints the registry's native credentials from that ambient identity
 and writes them into the Docker config. Afterwards `flux push artifact` (and any
 other Docker-config-aware tool) authenticates **without** a `--provider` flag,
@@ -202,19 +207,19 @@ jobs:
 
 ```bash
 # Log in to every host in the default config.
-flux-mirror login
+flux mirror login
 
 # Specific hosts from a specific config file.
-flux-mirror login --host registry.example.com --host other.example.com -f ./flux-mirror.yaml
+flux mirror login --host registry.example.com --host other.example.com -f ./flux-mirror.yaml
 
 # Read the config from stdin.
-flux-mirror login -f - < flux-mirror.yaml
+flux mirror login -f - < flux-mirror.yaml
 
 # Use an alternate Docker config directory, like 'docker --config'.
-flux-mirror login --docker-config /tmp/docker
+flux mirror login --docker-config /tmp/docker
 
 # Force a plaintext config.json entry instead of the OS keychain.
-flux-mirror login --plaintext
+flux mirror login --plaintext
 ```
 
 ## Notes
@@ -224,7 +229,7 @@ flux-mirror login --plaintext
   `provider` sources the registry re-validates each request, so a stored
   credential stops working once it lapses. To mint a longer-lived login token,
   use a `jwkPath`/`jwkValue` credential with a longer `exp` — see
-  [keygen](./keygen.md).
+  [keygen](keygen.md).
 - For `aws`, the credential is a JWT-shaped envelope wrapping a signed
   `sts:GetCallerIdentity` request, not an OIDC token. The destination registry
-  must understand this scheme — see [Token providers](../config/README.md#token-providers).
+  must understand this scheme — see [Token providers](config.md#token-providers).

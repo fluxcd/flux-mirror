@@ -1,6 +1,11 @@
+---
+linkTitle: Configuration
+weight: 10
+---
+
 # Flux Mirror Config
 
-The `Config` API defines what `flux-mirror` mirrors and how it authenticates to
+The `Config` API defines what `flux mirror` mirrors and how it authenticates to
 the registries involved. A single config lists the registry **hosts** to
 authenticate, the **OCI artifacts** to copy between OCI registries, and the
 **Helm charts** to pull from HTTP/S Helm repositories and publish to an OCI
@@ -13,8 +18,8 @@ always OCI registries.
 
 The config shape is published as a JSON Schema in
 [`config-v1beta1.json`](config-v1beta1.json) and is consumed by
-[`flux-mirror sync`](../guides/sync.md), [`flux-mirror login`](../guides/login.md),
-and [`flux-mirror secret`](../guides/secret.md).
+[`flux mirror sync`](sync.md), [`flux mirror login`](login.md),
+and [`flux mirror secret`](secret.md).
 
 ## Example
 
@@ -67,7 +72,7 @@ In the above example:
 You can run this with:
 
 ```bash
-flux-mirror sync ./config.yaml
+flux mirror sync ./config.yaml
 ```
 
 ## Writing a Config spec
@@ -76,8 +81,8 @@ A config is a single YAML document with `apiVersion: mirror.plugin.fluxcd.io/v1b
 `kind: Config`, and any of the `artifacts`, `charts`, and `hosts` lists.
 
 At least one `artifacts` or `charts` entry is required, except for
-[`flux-mirror login`](../guides/login.md) and
-[`flux-mirror secret`](../guides/secret.md), which read only the `hosts` section
+[`flux mirror login`](login.md) and
+[`flux mirror secret`](secret.md), which read only the `hosts` section
 and accept a `hosts`-only config.
 
 ### Artifacts
@@ -234,7 +239,7 @@ Each entry offers the following subfields:
 Helm repository authentication is **not** configured under `hosts`. It is loaded
 automatically from the ambient Helm repositories config — Helm's default
 `repositories.yaml`, or `$HELM_REPOSITORY_CONFIG` when set — so adding the
-repository with `helm repo add` is enough for `flux-mirror` to pick up matching
+repository with `helm repo add` is enough for `flux mirror` to pick up matching
 credentials. To mirror a chart that already lives in an OCI registry, list it
 under [`.artifacts`](#artifacts) instead, where it is copied OCI-to-OCI as a
 plain OCI artifact (authenticated through [`hosts`](#hosts)).
@@ -305,7 +310,7 @@ Exactly one **token source** subfield selects how the credential is obtained:
 - `.jwkPath`, signs a fresh JWT per request with the private JSON Web Key in the
   file at the path. The key may be a bare JWK or a single-key JWK set
   (`{"keys":[...]}`), and its `kid` is carried in the JWT header. Generate a key
-  pair with [`flux-mirror keygen`](../guides/keygen.md).
+  pair with [`flux mirror keygen`](keygen.md).
 - `.jwkValue`, signs a fresh JWT per request with the private JSON Web Key configured inline. Use `${VAR}` to substitute it from the environment while loading the config.
 
 The signed and minted sources take additional claim subfields:
@@ -318,7 +323,7 @@ The signed and minted sources take additional claim subfields:
   expects.
 - `.exp`, the signed JWT lifetime, as a
   [duration](https://pkg.go.dev/time#ParseDuration). Allowed only with `.jwkPath`
-  or `.jwkValue` — the sources whose lifetime `flux-mirror` controls — and defaults
+  or `.jwkValue` — the sources whose lifetime `flux mirror` controls — and defaults
   to `60s`. A longer-lived token is cached and re-minted at half its lifetime.
   Every other source's lifetime is fixed by its issuer.
 - `.hosts[].username`, controls how the resolved credential is transported, and therefore
@@ -346,7 +351,7 @@ what the registry on the other side has to accept:
   environment credentials). The audience is requested as the `<aud>/.default`
   scope, so `.aud` must be the application ID URI (or client ID) of a registered
   Entra application the registry validates tokens against.
-- `aws` is not an OIDC token. AWS mints no JWT, so `flux-mirror` signs an
+- `aws` is not an OIDC token. AWS mints no JWT, so `flux mirror` signs an
   `sts:GetCallerIdentity` request with the ambient role credentials (IRSA, EC2
   instance role, environment, ...) and wraps it in a JWT-shaped envelope whose
   header is `{"alg":"none","typ":"aws-sigv4-getcalleridentity"}`. The audience is
@@ -410,8 +415,8 @@ supported values are:
 
 The resolved credentials are presented to the registry as a username/password
 pair through the standard registry auth challenge, and written as
-`username`/`password`/`auth` by [`login`](../guides/login.md) and
-[`secret`](../guides/secret.md).
+`username`/`password`/`auth` by [`login`](login.md) and
+[`secret`](secret.md).
 
 #### Transport TLS
 
@@ -486,7 +491,7 @@ uploads. It defaults to `0`, which disables chunking and sends one monolithic
 
 `.artifacts[].overwrite` and `.charts[].overwrite` are optional fields that
 control what happens when a tag or version already exists at the destination.
-`flux-mirror` does not overwrite by default, which keeps the safe path the
+`flux mirror` does not overwrite by default, which keeps the safe path the
 default on immutable registries (ECR with `IMMUTABLE` tag mutability, GAR with
 tag immutability, Harbor with retention rules) and avoids redundant writes on
 mutable ones.
@@ -504,8 +509,8 @@ are compared:
 
 The drift warning is useful even on immutable registries where the divergence
 cannot be resolved automatically: it surfaces in the run output and the
-[exit code](../guides/sync.md#exit-codes), which audit and alerting can hook
-into. The [`--overwrite`](../guides/sync.md#flags) CLI flag forces `overwrite:
+[exit code](sync.md#exit-codes), which audit and alerting can hook
+into. The [`--overwrite`](sync.md#flags) CLI flag forces `overwrite:
 true` for every entry, overriding per-entry values, for one-off resyncs.
 
 With `includeReferrers: true`, the same rule applies to referrers. Referrers
