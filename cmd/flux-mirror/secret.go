@@ -83,6 +83,12 @@ func secretCmdRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	ctx, cancel, err := commandContextWithRootTimeout(cmd)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+
 	// Resolve cluster + namespace before minting credentials so a broken
 	// kubeconfig fails fast.
 	ns, _, err := secretKubeFlags.ToRawKubeConfigLoader().Namespace()
@@ -106,7 +112,7 @@ func secretCmdRun(cmd *cobra.Command, args []string) error {
 			cmd.Printf("• skipping %s: no credential configured (TLS-only host)\n", h.Host)
 			continue
 		}
-		ha, err := registryauth.ResolveHostAuth(cmd.Context(), h)
+		ha, err := resolveHostAuth(ctx, h)
 		if err != nil {
 			return fmt.Errorf("host %q: %w", h.Host, err)
 		}
@@ -117,7 +123,7 @@ func secretCmdRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	created, err := applySecret(cmd.Context(), clientset, secret, secretArgs.create)
+	created, err := applySecret(ctx, clientset, secret, secretArgs.create)
 	if err != nil {
 		return err
 	}
