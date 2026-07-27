@@ -6,12 +6,15 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/fluxcd/flux-mirror/internal/registryauth"
 )
 
 var (
@@ -39,6 +42,8 @@ var rootArgs = rootFlags{
 	timeout: time.Minute,
 }
 
+var resolveHostAuth = registryauth.ResolveHostAuth
+
 func init() {
 	rootCmd.PersistentFlags().DurationVar(&rootArgs.timeout, "timeout", rootArgs.timeout,
 		"The length of time to wait before giving up on the current operation.")
@@ -46,6 +51,14 @@ func init() {
 		"Disable environment variable substitution in config files.")
 
 	rootCmd.SetOut(os.Stdout)
+}
+
+func commandContextWithRootTimeout(cmd *cobra.Command) (context.Context, context.CancelFunc, error) {
+	if rootArgs.timeout <= 0 {
+		return nil, nil, fmt.Errorf("--timeout must be greater than 0")
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), rootArgs.timeout)
+	return ctx, cancel, nil
 }
 
 // exitCoder lets a command return a non-default exit code (e.g. sync's

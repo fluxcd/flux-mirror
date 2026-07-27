@@ -4,8 +4,10 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	"github.com/fluxcd/flux-mirror/internal/registryauth"
 	gojwt "github.com/golang-jwt/jwt/v5"
 	. "github.com/onsi/gomega"
 )
@@ -407,4 +411,42 @@ hosts:
 	out, err := executeCommand([]string{"login", "--config", path, "--docker-config", dockerDir, "--plaintext"})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(out).To(ContainSubstring("skipping tls.example.com"))
+}
+
+func TestLogin_RejectsNonPositiveRootTimeout(t *testing.T) {
+	g := NewWithT(t)
+	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
+	cfg := writeLoginConfig(t)
+
+	_, err := executeCommand([]string{"--timeout", "0s", "login", "--config", cfg})
+	g.Expect(err).To(MatchError("--timeout must be greater than 0"))
+}
+
+func TestLogin_RootTimeoutCancelsCredentialResolution(t *testing.T) {
+	g := NewWithT(t)
+	t.Setenv("MY_LOGIN_TOKEN", "static-token-value")
+	cfg := writeLoginConfig(t)
+
+	oldResolveHostAuth := resolveHostAuth
+	resolveHostAuth = func(ctx context.Context, _ apiv1.RegistryHost) (registryauth.HostAuth, error) {
+		select {
+		case <-ctx.Done():
+			return registryauth.HostAuth{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+			return registryauth.HostAuth{}, errors.New("credential resolution was not canceled by --timeout")
+		}
+	}
+	defer func() {
+		resolveHostAuth = oldResolveHostAuth
+	}()
+
+	_, err := executeCommand([]string{
+		"--timeout", "1ms",
+		"login",
+		"--host", "registry.example.com",
+		"--config", cfg,
+		"--docker-config", t.TempDir(),
+		"--plaintext",
+	})
+	g.Expect(err).To(MatchError(ContainSubstring("context deadline exceeded")))
 }
