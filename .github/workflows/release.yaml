@@ -14,7 +14,7 @@ jobs:
       attestations: write # for GitHub Attestations.
       artifact-metadata: write # for GitHub SLSA provenance.
       packages: write # for pushing and signing container images.
-    uses: fluxcd/gha-workflows/.github/workflows/cli-plugin-release.yaml@v0.10.0
+    uses: fluxcd/gha-workflows/.github/workflows/cli-plugin-release.yaml@v0.13.0
     with:
       go-version: 1.26.x
     secrets:
