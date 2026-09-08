@@ -2,6 +2,12 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'image tag prefix'
+        default: 'rc'
+        required: true
 
 permissions:
   contents: read
@@ -14,8 +20,9 @@ jobs:
       attestations: write # for GitHub Attestations.
       artifact-metadata: write # for GitHub SLSA provenance.
       packages: write # for pushing and signing container images.
-    uses: fluxcd/gha-workflows/.github/workflows/cli-plugin-release.yaml@v0.10.0
+    uses: fluxcd/gha-workflows/.github/workflows/cli-plugin-release.yaml@v0.15.0
     with:
       go-version: 1.26.x
+      release-candidate-prefix: ${{ github.event.inputs.tag }}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
