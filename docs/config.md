@@ -465,10 +465,11 @@ hosts:
         provider: x509-svid
       serverAuth:
         spiffe:
-          serverID: spiffe://example.org/registry
-          # trustDomain: example.org   # or any SVID in this trust domain
-          # trustDomain: self          # or any SVID in our own trust domain
-          # authorizeAny: true         # or any SVID at all (discouraged)
+          # Pick exactly one server authorization rule:
+          serverID: spiffe://example.org/registry # exact SPIFFE ID
+          # trustDomain: example.org              # any SVID in this trust domain
+          # trustDomain: self                     # any SVID in our own trust domain
+          # authorizeAny: true                    # any SVID the bundle validates (discouraged)
 
   # Client-only SPIFFE: SPIFFE client cert, server verified by a public/custom CA.
   - host: public.example.com
