@@ -173,6 +173,9 @@ type RegistryHost struct {
 // the sources whose lifetime flux-mirror controls; it defaults to a short 60s.
 // Every other source's lifetime is fixed by an external issuer or is an opaque
 // static token, so Exp is rejected for them.
+//
+// Envelope is an optional transform applied to the resolved credential on top of
+// whichever source is selected; see its field comment.
 type RegistryCredential struct {
 	// Provider mints a per-request credential for the audience, one of
 	// JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,
@@ -212,6 +215,15 @@ type RegistryCredential struct {
 	// Exp is the jwkPath/jwkValue JWT lifetime. Defaults to 60s.
 	// +optional
 	Exp *metav1.Duration `json:"exp,omitempty"`
+
+	// Envelope transforms the resolved credential before it is sent to the
+	// registry. It is a Go template whose data is a single Token field holding
+	// the credential, with two functions available: base64 (standard base64)
+	// and hex (lowercase hexadecimal). For example, "token-{{ hex .Token }}"
+	// sends the hex-encoded credential with a token- prefix. An unset envelope
+	// sends the credential unchanged.
+	// +optional
+	Envelope string `json:"envelope,omitempty"`
 }
 
 // EffectiveExp returns the jwkPath/jwkValue JWT lifetime with the documented

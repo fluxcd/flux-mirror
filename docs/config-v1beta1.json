@@ -182,6 +182,10 @@
                 "description": "Aud is the audience claim. Defaults to Host.",
                 "type": "string"
               },
+              "envelope": {
+                "description": "Envelope transforms the resolved credential before it is sent to the\nregistry. It is a Go template whose data is a single Token field holding\nthe credential, with two functions available: base64 (standard base64)\nand hex (lowercase hexadecimal). For example, \"token-{{ hex .Token }}\"\nsends the hex-encoded credential with a token- prefix. An unset envelope\nsends the credential unchanged.",
+                "type": "string"
+              },
               "exp": {
                 "description": "Exp is the jwkPath/jwkValue JWT lifetime. Defaults to 60s.",
                 "type": "string"

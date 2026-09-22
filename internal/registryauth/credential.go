@@ -34,43 +34,52 @@ import (
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	"github.com/fluxcd/flux-mirror/internal/envelope"
 )
 
 // resolveCredential mints or reads the credential for a single credential host,
 // mirroring what jwtTransportOptions wires into the sync transport but returning
 // the value directly. It assumes the config has passed validation (exactly one
-// source).
+// source). The host's Envelope, if any, is applied to the resolved credential.
 func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error) {
 	c := h.Credential
 	aud := h.EffectiveAud()
+	var (
+		token string
+		err   error
+	)
 	switch {
 	case c.Provider != "":
-		fn, err := providerTokenFunc(c.Provider, aud)
-		if err != nil {
-			return "", err
+		fn, ferr := providerTokenFunc(c.Provider, aud)
+		if ferr != nil {
+			return "", ferr
 		}
-		return fn(ctx)
+		token, err = fn(ctx)
 	case c.Value != "":
-		return c.Value, nil
+		token = c.Value
 	case c.FromPath != "":
-		b, err := os.ReadFile(c.FromPath)
-		if err != nil {
-			return "", fmt.Errorf("read fromPath: %w", err)
+		b, rerr := os.ReadFile(c.FromPath)
+		if rerr != nil {
+			return "", fmt.Errorf("read fromPath: %w", rerr)
 		}
-		return strings.TrimSpace(string(b)), nil
+		token = strings.TrimSpace(string(b))
 	case c.JWKPath != "", c.JWKValue != "":
-		raw, err := readJWK(c)
-		if err != nil {
-			return "", err
+		raw, rerr := readJWK(c)
+		if rerr != nil {
+			return "", rerr
 		}
-		fn, err := jwkTokenFunc(raw, c.Iss, c.Sub, aud, c.EffectiveExp())
-		if err != nil {
-			return "", fmt.Errorf("parse JWK: %w", err)
+		fn, ferr := jwkTokenFunc(raw, c.Iss, c.Sub, aud, c.EffectiveExp())
+		if ferr != nil {
+			return "", fmt.Errorf("parse JWK: %w", ferr)
 		}
-		return fn(ctx)
+		token, err = fn(ctx)
 	default:
 		return "", fmt.Errorf("credential has no source")
 	}
+	if err != nil {
+		return "", err
+	}
+	return envelope.Apply(c.Envelope, token)
 }
 
 // jwkTokenFunc parses a private JWK once and returns a cijwt.TokenFunc that
