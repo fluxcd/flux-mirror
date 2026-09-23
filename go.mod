@@ -21,6 +21,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/onsi/gomega v1.43.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	github.com/sigstore/protobuf-specs v0.5.1
+	github.com/sigstore/rekor v1.5.3
 	github.com/sigstore/sigstore-go v1.3.0
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.2
@@ -188,8 +190,6 @@ require (
 	github.com/secure-systems-lab/go-securesystemslib v0.11.0 // indirect
 	github.com/shibumi/go-pathspec v1.3.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
-	github.com/sigstore/protobuf-specs v0.5.1 // indirect
-	github.com/sigstore/rekor v1.5.3 // indirect
 	github.com/sigstore/rekor-tiles/v2 v2.3.0 // indirect
 	github.com/sigstore/sigstore v1.10.8 // indirect
 	github.com/sigstore/timestamp-authority/v2 v2.1.3 // indirect
