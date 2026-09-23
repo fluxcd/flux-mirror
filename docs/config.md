@@ -326,6 +326,16 @@ The signed and minted sources take additional claim subfields:
   or `.jwkValue` — the sources whose lifetime `flux mirror` controls — and defaults
   to `60s`. A longer-lived token is cached and re-minted at half its lifetime.
   Every other source's lifetime is fixed by its issuer.
+- `.envelope`, an optional Go template applied to the resolved credential just
+  before it is sent to the registry, for registries that expect the token in a
+  specific serialized form. The template data is a single `.Token` field holding
+  the credential, and two functions are available: `base64` (standard base64)
+  and `hex` (lowercase hexadecimal). For example,
+  `envelope: "token-{{ hex .Token }}"` sends the hex-encoded credential with a
+  `token-` prefix. The envelope applies to every token source and to both
+  [transport styles](#bearer-token-vs-usernamepassword): it transforms the bearer
+  token, or the password when `.hosts[].username` is set. An unset envelope
+  sends the credential unchanged.
 - `.hosts[].username`, controls how the resolved credential is transported, and therefore
   what the registry must accept — see
   [Bearer token vs. username/password](#bearer-token-vs-usernamepassword).
@@ -534,6 +544,7 @@ first mirrored. Referrers that exist with a different digest are skipped
 | `charts[].overwrite`             | `false`  |
 | `hosts[].credential.aud`         | `host`   |
 | `hosts[].credential.exp`         | `60s`    |
+| `hosts[].credential.envelope`    | unset    |
 | `hosts[].maxChunkSize`           | `0`      |
 
 A `limit` of `0` disables the cap and mirrors every matching tag or version. Use

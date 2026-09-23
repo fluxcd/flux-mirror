@@ -5,9 +5,18 @@ package registryauth
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/json"
+	"net/http"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
@@ -112,4 +121,126 @@ func TestHasCredentialAndTLSOnly(t *testing.T) {
 	// A TLS-only host returns a clear error instead of panicking.
 	_, err := ResolveHostAuth(context.Background(), tlsOnly)
 	g.Expect(err).To(MatchError(ContainSubstring("no credential or provider configured")))
+}
+
+func TestResolveCredential_Envelope(t *testing.T) {
+	g := NewWithT(t)
+	h := apiv1.RegistryHost{Host: "h.example", Credential: &apiv1.RegistryCredential{
+		Value:    "abc",
+		Envelope: "token-{{ hex .Token }}",
+	}}
+	got, err := resolveCredential(context.Background(), h)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(got).To(Equal("token-616263"))
+}
+
+// roundTripFunc adapts a function to http.RoundTripper.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestEnvelopeTransport(t *testing.T) {
+	g := NewWithT(t)
+	hosts := []apiv1.RegistryHost{
+		{Host: "h.example", Credential: &apiv1.RegistryCredential{
+			Value: "abc", Envelope: "token-{{ hex .Token }}",
+		}},
+		{Host: "plain.example", Credential: &apiv1.RegistryCredential{Value: "abc"}},
+	}
+
+	var got http.Header
+	inner := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r.Header.Clone()
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+	})
+	et, err := newEnvelopeTransport(inner, hosts)
+	g.Expect(err).ToNot(HaveOccurred())
+
+	req, err := http.NewRequest(http.MethodGet, "https://h.example/v2/", nil)
+	g.Expect(err).ToNot(HaveOccurred())
+	req.Header.Set("Authorization", "Bearer abc")
+	_, err = et.RoundTrip(req)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(got.Get("Authorization")).To(Equal("Bearer token-616263"))
+	g.Expect(req.Header.Get("Authorization")).To(Equal("Bearer abc")) // caller's request is not mutated.
+
+	// A host without an envelope passes through unchanged.
+	req, _ = http.NewRequest(http.MethodGet, "https://plain.example/v2/", nil)
+	req.Header.Set("Authorization", "Bearer abc")
+	_, err = et.RoundTrip(req)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(got.Get("Authorization")).To(Equal("Bearer abc"))
+
+	// A non-bearer Authorization on an enveloped host passes through unchanged.
+	req, _ = http.NewRequest(http.MethodGet, "https://h.example/v2/", nil)
+	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
+	_, err = et.RoundTrip(req)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(got.Get("Authorization")).To(Equal("Basic dXNlcjpwYXNz"))
+
+	// A malformed envelope fails when the transport is built.
+	_, err = newEnvelopeTransport(inner, []apiv1.RegistryHost{{
+		Host: "bad.example", Credential: &apiv1.RegistryCredential{
+			Provider: apiv1.JWTProviderGitHub, Envelope: "{{ nope .Token }}",
+		},
+	}})
+	g.Expect(err).To(MatchError(ContainSubstring("parse envelope")))
+}
+
+func TestNewCredentialTransport_EnvelopeStatic(t *testing.T) {
+	g := NewWithT(t)
+	var got string
+	inner := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r.Header.Get("Authorization")
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+	})
+	tr, err := NewCredentialTransport(inner, []apiv1.RegistryHost{{
+		Host:       "h.example",
+		Credential: &apiv1.RegistryCredential{Value: "abc", Envelope: "token-{{ hex .Token }}"},
+	}})
+	g.Expect(err).ToNot(HaveOccurred())
+
+	req, err := http.NewRequest(http.MethodGet, "https://h.example/v2/", nil)
+	g.Expect(err).ToNot(HaveOccurred())
+	_, err = tr.RoundTrip(req)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(got).To(Equal("Bearer token-616263"))
+}
+
+// TestNewCredentialTransport_EnvelopePreservesExpParsing proves the cijwt
+// transport still sees the raw JWT (needed to parse its exp claim) while the
+// wire carries the enveloped string.
+func TestNewCredentialTransport_EnvelopePreservesExpParsing(t *testing.T) {
+	g := NewWithT(t)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	g.Expect(err).ToNot(HaveOccurred())
+	jwk, err := json.Marshal(jose.JSONWebKey{Key: priv, KeyID: "k", Algorithm: "EdDSA"})
+	g.Expect(err).ToNot(HaveOccurred())
+
+	var got string
+	inner := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = r.Header.Get("Authorization")
+		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+	})
+	tr, err := NewCredentialTransport(inner, []apiv1.RegistryHost{{
+		Host: "h.example",
+		Credential: &apiv1.RegistryCredential{
+			JWKValue: string(jwk),
+			Iss:      "https://issuer.example",
+			Sub:      "client-id",
+			Exp:      &metav1.Duration{Duration: time.Hour},
+			Envelope: "token-{{ .Token }}",
+		},
+	}})
+	g.Expect(err).ToNot(HaveOccurred())
+
+	req, err := http.NewRequest(http.MethodGet, "https://h.example/v2/", nil)
+	g.Expect(err).ToNot(HaveOccurred())
+	_, err = tr.RoundTrip(req)
+	g.Expect(err).ToNot(HaveOccurred())
+
+	raw, ok := strings.CutPrefix(got, "Bearer token-")
+	g.Expect(ok).To(BeTrue(), "envelope prefix should have been applied")
+	_, err = jwt.ParseSigned(raw, []jose.SignatureAlgorithm{jose.EdDSA})
+	g.Expect(err).ToNot(HaveOccurred())
 }

@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	"github.com/fluxcd/flux-mirror/internal/envelope"
 )
 
 // Decode reads YAML from r into a Config without validating it.
@@ -316,6 +317,10 @@ func validateCredential(j apiv1.RegistryCredential) error {
 
 	if countTrue(provider != "", value != "", fromPath != "", jwkPath != "", jwkValue != "") != 1 {
 		return fmt.Errorf("exactly one of provider, value, fromPath, jwkPath, or jwkValue must be set")
+	}
+
+	if err := envelope.Validate(j.Envelope); err != nil {
+		return err
 	}
 
 	hasIss := strings.TrimSpace(j.Iss) != ""

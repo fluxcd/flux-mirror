@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
+	"text/template"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	"github.com/fluxcd/flux-mirror/internal/envelope"
 	"github.com/fluxcd/flux-mirror/internal/jwkio"
 )
 
@@ -204,14 +207,69 @@ func NeedsCredentialTransport(hosts []apiv1.RegistryHost) bool {
 }
 
 // NewCredentialTransport wraps inner with a cijwt transport that stamps the
-// per-host JWT credential on each request. Provider hosts are skipped (they
-// authenticate through the keychain). Call only when HasCredentialHosts is true.
+// per-host JWT credential on each request, enveloping it first when the host
+// configures an envelope. Provider hosts are skipped (they authenticate through
+// the keychain). Call only when NeedsCredentialTransport is true.
 func NewCredentialTransport(inner http.RoundTripper, hosts []apiv1.RegistryHost) (http.RoundTripper, error) {
-	opts, err := JWTTransportOptions(inner, hosts)
+	et, err := newEnvelopeTransport(inner, hosts)
+	if err != nil {
+		return nil, err
+	}
+	opts, err := JWTTransportOptions(et, hosts)
 	if err != nil {
 		return nil, err
 	}
 	return cijwt.NewTransport(opts...)
+}
+
+// envelopeTransport rewrites the Authorization bearer token stamped by the
+// cijwt transport into the host's configured envelope. It sits between the
+// cijwt transport and the base transport, so cijwt sees the raw token — and can
+// still parse its exp claim to schedule re-minting — while the registry
+// receives the enveloped string. Requests without an Authorization bearer
+// header (e.g. a username/password host, which authenticates through the
+// keychain) pass through untouched.
+type envelopeTransport struct {
+	inner     http.RoundTripper
+	envelopes map[string]*template.Template
+}
+
+// newEnvelopeTransport builds an envelope transport for the credential hosts
+// that configure an envelope. It parses each template up front, so a malformed
+// envelope fails the run before any request.
+func newEnvelopeTransport(inner http.RoundTripper, hosts []apiv1.RegistryHost) (*envelopeTransport, error) {
+	envelopes := make(map[string]*template.Template)
+	for _, h := range hosts {
+		if h.Credential == nil || h.Credential.Envelope == "" {
+			continue
+		}
+		t, err := envelope.Parse(h.Credential.Envelope)
+		if err != nil {
+			return nil, fmt.Errorf("host %q: %w", h.Host, err)
+		}
+		envelopes[h.Host] = t
+	}
+	return &envelopeTransport{inner: inner, envelopes: envelopes}, nil
+}
+
+// RoundTrip implements http.RoundTripper.
+func (t *envelopeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	tmpl, ok := t.envelopes[req.URL.Host]
+	if !ok {
+		return t.inner.RoundTrip(req)
+	}
+	const prefix = "Bearer "
+	header := req.Header.Get("Authorization")
+	if !strings.HasPrefix(header, prefix) {
+		return t.inner.RoundTrip(req)
+	}
+	enveloped, err := envelope.Render(tmpl, strings.TrimPrefix(header, prefix))
+	if err != nil {
+		return nil, fmt.Errorf("host %q: %w", req.URL.Host, err)
+	}
+	cloned := req.Clone(req.Context())
+	cloned.Header.Set("Authorization", prefix+enveloped)
+	return t.inner.RoundTrip(cloned)
 }
 
 // readJWK returns the private JWK for a jwkPath or jwkValue credential. Exactly one of the two is set by the time this is called (enforced by validation).

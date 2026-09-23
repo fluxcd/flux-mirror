@@ -534,6 +534,29 @@ func TestValidate_Table(t *testing.T) {
 			errMsg: "host is required",
 		},
 		{
+			name: "auth valid envelope",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
+					Value: "TOKEN", Envelope: "token-{{ hex .Token }}",
+				}}}},
+		},
+		{
+			name: "auth invalid envelope function",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
+					Value: "TOKEN", Envelope: "{{ nope .Token }}",
+				}}}},
+			errMsg: "parse envelope",
+		},
+		{
+			name: "auth invalid envelope field",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{
+					Value: "TOKEN", Envelope: "{{ .Nope }}",
+				}}}},
+			errMsg: "render envelope",
+		},
+		{
 			name: "auth missing credential, provider, tls and maxChunkSize",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{Host: "h.example"}}},
