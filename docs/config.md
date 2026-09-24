@@ -17,7 +17,7 @@ Sources can be OCI registries or HTTP/S Helm repositories; destinations are
 always OCI registries.
 
 The config shape is published as a JSON Schema in
-[`config-v1beta1.json`](config-v1beta1.json) and is consumed by
+[`config-v1beta2.json`](config-v1beta2.json) and is consumed by
 [`flux mirror sync`](sync.md), [`flux mirror login`](login.md),
 and [`flux mirror secret`](secret.md).
 
@@ -27,7 +27,7 @@ The following config mirrors a container image and a Helm chart, and
 authenticates to the destination registry with a per-host credential:
 
 ```yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: docker.io/stefanprodan/podinfo
@@ -50,8 +50,9 @@ charts:
     limit: 2
 hosts:
   - host: quay.io
-    username: 'my-org+robot-user'
     credential:
+      type: jwt
+      username: 'my-org+robot-user'
       value: ${QUAY_TOKEN}
 ```
 
@@ -67,7 +68,7 @@ In the above example:
   `quay.io/my-org/charts/podinfo`. The two highest `6.x` versions are mirrored.
 - Requests to `quay.io` authenticate with the Quay robot token read from the
   `QUAY_TOKEN` environment variable, presented as a username/password pair
-  because `username` is set.
+  because `credential.username` is set.
 
 You can run this with:
 
@@ -77,13 +78,25 @@ flux mirror sync ./config.yaml
 
 ## Writing a Config spec
 
-A config is a single YAML document with `apiVersion: mirror.plugin.fluxcd.io/v1beta1`,
+A config is a single YAML document with `apiVersion: mirror.plugin.fluxcd.io/v1beta2`,
 `kind: Config`, and any of the `artifacts`, `charts`, and `hosts` lists.
 
 At least one `artifacts` or `charts` entry is required, except for
 [`flux mirror login`](login.md) and
 [`flux mirror secret`](secret.md), which read only the `hosts` section
 and accept a `hosts`-only config.
+
+### API version
+
+`mirror.plugin.fluxcd.io/v1beta2` is the current `apiVersion`. The previous
+`mirror.plugin.fluxcd.io/v1beta1` is deprecated: a config that still declares it
+still loads (it is converted to v1beta2 in memory), but prints a migration
+warning. v1beta2 is a breaking change that makes `credential.type` required,
+renames the credential claims (`aud`→`audiences`, `iss`→`issuer`,
+`sub`→`subject`, `exp`→`expiration`), moves `hosts[].username` under
+`credential`, and renames the SPIFFE credential and TLS providers
+(`jwt-svid`/`x509-svid`→`spiffe`). Update the `apiVersion` and the renamed fields
+to silence the warning.
 
 ### Artifacts
 
@@ -273,20 +286,21 @@ are not listed fall back to the Docker config and its credential helpers
 
 Each entry has one required field, `.host`, the registry host (with optional
 port) the entry applies to (e.g. `registry.example.com` or `localhost:5000`),
-unique across `hosts`. Beyond that, an entry configures **either** a
-[`.credential`](#per-host-credential) **or** a
-[`.provider`](#cloud-registry-providers) — the two are mutually exclusive. A
-`credential` host (or a host with neither) may also set a
-[`.tls`](#transport-tls) block; `tls` is not allowed with `provider`, because a
-cloud registry is managed and its transport is not customized.
-[`.maxChunkSize`](#blob-upload-chunking) tunes blob uploads independently of auth.
-At least one of `credential`, `provider`, `tls`, or `maxChunkSize` must be set.
+unique across `hosts`. Beyond that, an entry configures a
+[`.credential`](#per-host-credential) and/or a [`.tls`](#transport-tls) block, or
+a cloud [`.provider`](#cloud-registry-providers). A cloud `provider` is mutually
+exclusive with `credential` and `tls`, because a cloud registry is managed and
+its transport is not customized; the default `generic` provider is an ordinary
+registry and composes with both. [`.maxChunkSize`](#blob-upload-chunking) tunes
+blob uploads independently of auth. At least one of `credential`, a cloud
+`provider`, `tls`, or `maxChunkSize` must be set.
 
 ```yaml
 hosts:
   # A per-host credential (HTTP-layer token).
   - host: registry.example.com
     credential:
+      type: jwt
       provider: github
   # A cloud registry provider, via ambient workload identity.
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
@@ -296,11 +310,13 @@ hosts:
 #### Per-host credential
 
 `.hosts[].credential` configures an HTTP-layer registry credential for the host.
-Exactly one **token source** subfield selects how the credential is obtained:
+`.type` is required and selects the credential material; only `jwt` is supported
+today. Exactly one **token source** subfield selects how the credential is
+obtained:
 
-- `.provider`, mints a fresh, per-request credential for the audience using a
-  cloud or CI identity, then caches and refreshes it on demand. One of `github`,
-  `forgejo`, `gcp`, `azure`, `aws`, or `jwt-svid` — see
+- `.provider`, mints a fresh, per-request credential for the audiences using a
+  cloud, CI, or SPIFFE identity, then caches and refreshes it on demand. One of
+  `github`, `forgejo`, `gcp`, `azure`, `aws`, or `spiffe` — see
   [Token providers](#token-providers) for what each obtains and what the registry
   must accept.
 - `.value`, sends the JSON Web Token configured inline as-is (e.g. a GitLab CI/CD `id_token`). Use `${VAR}` to substitute it from the environment while loading the config.
@@ -315,35 +331,40 @@ Exactly one **token source** subfield selects how the credential is obtained:
 
 The signed and minted sources take additional claim subfields:
 
-- `.iss` and `.sub`, the issuer and subject claims. Both are **required** with
-  `.jwkPath` or `.jwkValue`, and not allowed with the other sources.
-- `.aud`, the audience claim. Allowed with `.jwkPath`, `.jwkValue`, or `.provider`,
-  and defaults to the host. The audience pins the credential to a specific
-  registry, so it must match what the registry (or the cloud identity provider)
-  expects.
-- `.exp`, the signed JWT lifetime, as a
+- `.issuer` and `.subject`, the issuer and subject claims. Both are **required**
+  with `.jwkPath` or `.jwkValue`, and not allowed with the other sources.
+- `.audiences`, the audience claim as a list. Allowed with `.jwkPath`,
+  `.jwkValue`, or `.provider`, and defaults to the host. The audience pins the
+  credential to a specific registry, so it must match what the registry (or the
+  cloud identity provider) expects. Every source accepts multiple values except
+  the `gcp` and `azure` providers, which mint a token with a single `aud` and
+  therefore reject a list longer than one.
+- `.expiration`, the signed JWT lifetime, as a
   [duration](https://pkg.go.dev/time#ParseDuration). Allowed only with `.jwkPath`
   or `.jwkValue` — the sources whose lifetime `flux mirror` controls — and defaults
   to `60s`. A longer-lived token is cached and re-minted at half its lifetime.
   Every other source's lifetime is fixed by its issuer.
+
+Two subfields apply to every token source:
+
 - `.envelope`, an optional Go template applied to the resolved credential just
   before it is sent to the registry, for registries that expect the token in a
   specific serialized form. The template data is a single `.Token` field holding
   the credential, and two functions are available: `base64` (standard base64)
   and `hex` (lowercase hexadecimal). For example,
   `envelope: "token-{{ hex .Token }}"` sends the hex-encoded credential with a
-  `token-` prefix. The envelope applies to every token source and to both
+  `token-` prefix. The envelope applies to both
   [transport styles](#bearer-token-vs-usernamepassword): it transforms the bearer
-  token, or the password when `.hosts[].username` is set. An unset envelope
+  token, or the password when `.credential.username` is set. An unset envelope
   sends the credential unchanged.
-- `.hosts[].username`, controls how the resolved credential is transported, and therefore
+- `.username`, controls how the resolved credential is transported, and therefore
   what the registry must accept — see
   [Bearer token vs. username/password](#bearer-token-vs-usernamepassword).
 
 ##### Token providers
 
 When `.credential.provider` is set, the credential is obtained from the
-provider's ambient identity for the audience (defaulting to the host). This is
+provider's ambient identity for the audiences (defaulting to the host). This is
 what the registry on the other side has to accept:
 
 - `github` and `forgejo` request an OIDC ID token from the CI Actions OIDC
@@ -351,32 +372,38 @@ what the registry on the other side has to accept:
   The registry must trust the GitHub/Forgejo Actions issuer and match the token's
   audience and subject (e.g. `repo:my-org/my-repo:ref:refs/heads/main`). The two
   mint tokens the same way today but are kept distinct so each platform can
-  diverge.
+  diverge. Each audience is sent as a repeated `audience` query parameter; how
+  the endpoint folds them into the token is up to the provider.
 - `gcp` obtains a Google ID token for the audience via Application Default
   Credentials (the GKE/GCE metadata server, a service account key, or workload
   identity federation). The registry must trust Google's OIDC issuer and the
   configured audience. User credentials (`authorized_user`, e.g. from
   `gcloud auth application-default login`) cannot mint a token for a custom
-  audience: with `.aud` set the run fails, and with `.aud` unset it falls back
-  to the default-audience ID token carried in the ADC response, whose audience
-  is the gcloud OAuth client ID and whose identity is the signed-in user.
+  audience: with `.audiences` set the run fails, and with `.audiences` unset it
+  falls back to the default-audience ID token carried in the ADC response, whose
+  audience is the gcloud OAuth client ID and whose identity is the signed-in
+  user.
 - `azure` obtains a Microsoft Entra ID access token via the default Azure
   credential chain (AKS/managed identity, workload identity federation,
   environment credentials). The audience is requested as the `<aud>/.default`
-  scope, so `.aud` must be the application ID URI (or client ID) of a registered
-  Entra application the registry validates tokens against.
+  scope, so `.audiences` must contain a single application ID URI (or client ID)
+  of a registered Entra application the registry validates tokens against.
 - `aws` is not an OIDC token. AWS mints no JWT, so `flux mirror` signs an
   `sts:GetCallerIdentity` request with the ambient role credentials (IRSA, EC2
   instance role, environment, ...) and wraps it in a JWT-shaped envelope whose
-  header is `{"alg":"none","typ":"aws-sigv4-getcalleridentity"}`. The audience is
-  carried as a signed `X-Audience` header that pins the target registry, not as
-  an OIDC audience claim. The registry verifies the caller by replaying the
-  signed request to AWS STS and reading the returned account/ARN, so the
-  destination **must** understand this scheme — a generic OIDC registry will not.
-- `jwt-svid` fetches a JWT-SVID for the audience from the SPIFFE Workload API
-  (`SPIFFE_ENDPOINT_SOCKET`) and sends it as the credential. The registry must
-  trust the SPIFFE trust domain's JWT bundle. This is the HTTP-layer counterpart
-  to the transport-layer SPIFFE X.509-SVID mTLS configured under
+  header is `{"alg":"none","typ":"aws-sigv4-getcalleridentity"}`. The audiences
+  are carried as signed `X-Audience` header values, not as an OIDC audience
+  claim: the registry accepts the request only if the signed list contains an
+  identity it recognizes, so a single audience ties the request to that one
+  registry while several authorize each registry listed. The registry verifies
+  the caller by replaying the signed request to AWS STS and reading the returned
+  account/ARN, so the destination **must** understand this scheme — a plain OIDC
+  registry will not.
+- `spiffe` fetches a JWT-SVID from the SPIFFE Workload API
+  (`SPIFFE_ENDPOINT_SOCKET`) for the audiences and sends it as the credential.
+  The extra audiences are carried as additional JWT-SVID audiences. The registry
+  must trust the SPIFFE trust domain's JWT bundle. This is the HTTP-layer
+  counterpart to the transport-layer SPIFFE X.509-SVID mTLS configured under
   [`.tls`](#transport-tls); the two are independent.
 
 ##### Resolving file paths
@@ -388,10 +415,10 @@ directory is used as the confinement root instead.
 
 ##### Bearer token vs. username/password
 
-`.hosts[].username` controls how the resolved credential is
+`.credential.username` controls how the resolved credential is
 transported, and therefore what the registry on the other side must accept:
 
-- **`username` unset (default)** — the credential is treated as a **bearer
+- **`credential.username` unset (default)** — the credential is treated as a **bearer
   token**. `sync` sends it as an HTTP Bearer credential on every request, with no
   auth challenge, and `login`/`secret` write it to the Docker config's
   `registrytoken` field. This suits registries that natively validate an OIDC
@@ -401,7 +428,7 @@ transported, and therefore what the registry on the other side must accept:
   image pulls. Because credential helpers only store username/secret pairs, a
   `registrytoken` is always written to the config file, never to a keychain
   helper.
-- **`username` set** — the credential becomes the **password** of a
+- **`credential.username` set** — the credential becomes the **password** of a
   username/password pair. `sync` goes through the standard registry auth
   challenge (credentials are exchanged at the token endpoint, like the cloud
   providers), and `login`/`secret` write `username`/`password`/`auth`. Use this
@@ -409,27 +436,32 @@ transported, and therefore what the registry on the other side must accept:
   username/password login even when the username is a placeholder the registry
   ignores.
 
-Choose `username` deliberately: set it when the registry expects a
+Choose `credential.username` deliberately: set it when the registry expects a
 username/password login (or the credential will be consumed by `kubelet`), and
 leave it unset when the registry validates a self-contained bearer token.
 
 #### Cloud registry providers
 
-`.hosts[].provider` authenticates the host with a cloud registry provider's
-ambient workload identity — the same mechanism the `flux push artifact` family
-uses — and obtains the registry's native credentials directly (no
-`credential`/JWT involved). It is mutually exclusive with `credential`. The
-supported values are:
+`.hosts[].provider` selects how the host's registry credentials are obtained. It
+defaults to `generic`, an ordinary registry for which `credential` and/or `tls`
+configure the connection directly. The other values authenticate the host with a
+cloud registry provider's ambient workload identity — the same mechanism the
+`flux push artifact` family uses — and obtain the registry's native credentials
+directly (no `credential`/JWT involved). A cloud provider is mutually exclusive
+with `credential` and `tls`. The supported values are:
 
+- `generic` (default), an ordinary registry whose authentication is configured
+  through `credential` and/or `tls`. It is the implicit value when `provider` is
+  omitted, and composes with both.
 - `ecr`, for Amazon ECR. It uses the AWS credential chain (IRSA, EC2 instance
   role, environment, SSO), reading the region from the host.
 - `acr`, for Azure ACR. It uses the default Azure credential chain (managed
   identity, workload identity, environment, ...).
 - `gar`, for Google GAR. It uses Google Application Default Credentials.
 
-The resolved credentials are presented to the registry as a username/password
-pair through the standard registry auth challenge, and written as
-`username`/`password`/`auth` by [`login`](login.md) and
+The cloud providers' resolved credentials are presented to the registry as a
+username/password pair through the standard registry auth challenge, and written
+as `username`/`password`/`auth` by [`login`](login.md) and
 [`secret`](secret.md).
 
 #### Transport TLS
@@ -437,27 +469,30 @@ pair through the standard registry auth challenge, and written as
 `.hosts[].tls` configures transport-layer TLS for the host's registry requests,
 separately from the HTTP-layer `credential`. It is applied by `sync` (which
 connects to the registry); `login` and `secret` do not open registry connections
-and ignore it. It is not allowed on a `provider` host. The field has two
+and ignore it. It is not allowed on a cloud `provider` host. The field has two
 independent halves, of which at least one must be set:
 
-- `.serverAuth`, how the registry's server certificate is verified. Set exactly
-  one of `.fromPath` / `.value` to supply a custom CA bundle
-  (one or more concatenated PEM certificates), or `.spiffe` to verify the
-  server's X.509-SVID against the SPIFFE trust bundle. When `.serverAuth` is
-  omitted entirely, the system trust pool is used.
-- `.clientAuth`, the client certificate for mTLS. Set exactly one of `.provider:
-  x509-svid` (present a SPIFFE X.509-SVID from the Workload API) or the static
-  `.certificate` + `.key` pair. The `.certificate` is one of
-  `.fromPath`/`.value`; the `.key` is one of `.fromPath`/`.value`.
+- `.serverAuth`, how the registry's server certificate is verified. With
+  `.provider` unset, set exactly one of `.fromPath` / `.value` to supply a custom
+  CA bundle (one or more concatenated PEM certificates); with `.provider: spiffe`,
+  set `.spiffe` to verify the server's X.509-SVID against the SPIFFE trust
+  bundle. When `.serverAuth` is omitted entirely, the system trust pool is used.
+- `.clientAuth`, the client certificate for mTLS. With `.provider` unset, set the
+  static `.certificate` + `.key` pair (`.certificate` is one of
+  `.fromPath`/`.value`; `.key` is one of `.fromPath`/`.value`); with `.provider:
+  spiffe`, present a SPIFFE X.509-SVID from the Workload API instead.
 
-Each half chooses SPIFFE or non-SPIFFE independently, so SPIFFE can authenticate
-the client while a normal or custom CA verifies the server, or vice versa. Under
-`.serverAuth.spiffe`, set exactly one of `.serverID` (authorize one exact SPIFFE
-ID), `.trustDomain` (authorize any SVID in that trust domain; the value `self`
-means the client's own trust domain, read from its X.509-SVID), or
-`.authorizeAny: true` (accept any SVID the bundle can validate — discouraged).
-With SPIFFE on either side, the client SVID and trust bundle come from the
-ambient Workload API socket (`SPIFFE_ENDPOINT_SOCKET`) and rotate automatically.
+As with the `credential` token sources, the non-SPIFFE path is selected by the
+fields themselves: `provider` only names the special case (`spiffe`), and its
+omission means the file-based fields. Each half chooses SPIFFE or non-SPIFFE
+independently, so SPIFFE can authenticate the client while a normal or custom CA
+verifies the server, or vice versa. Under `.serverAuth.spiffe`, set exactly one
+of `.serverID` (authorize one exact SPIFFE ID), `.trustDomain` (authorize any SVID
+in that trust domain; the value `self` means the client's own trust domain, read
+from its X.509-SVID), or `.authorizeAny: true` (accept any SVID the bundle can
+validate — discouraged). With SPIFFE on either side, the client SVID and trust
+bundle come from the ambient Workload API socket (`SPIFFE_ENDPOINT_SOCKET`) and
+rotate automatically.
 
 ```yaml
 hosts:
@@ -476,8 +511,9 @@ hosts:
   - host: spiffe.example.com
     tls:
       clientAuth:
-        provider: x509-svid
+        provider: spiffe
       serverAuth:
+        provider: spiffe
         spiffe:
           # Pick exactly one server authorization rule:
           serverID: spiffe://example.org/registry # exact SPIFFE ID
@@ -489,7 +525,7 @@ hosts:
   - host: public.example.com
     tls:
       clientAuth:
-        provider: x509-svid
+        provider: spiffe
       # serverAuth omitted → system trust pool verifies the server.
 ```
 
@@ -546,8 +582,9 @@ first mirrored. Referrers that exist with a different digest are skipped
 | `charts[].version`               | `*`      |
 | `charts[].limit`                 | `1`      |
 | `charts[].overwrite`             | `false`  |
-| `hosts[].credential.aud`         | `host`   |
-| `hosts[].credential.exp`         | `60s`    |
+| `hosts[].provider`               | `generic` |
+| `hosts[].credential.audiences`   | `host`   |
+| `hosts[].credential.expiration`  | `60s`    |
 | `hosts[].credential.envelope`    | unset    |
 | `hosts[].maxChunkSize`           | `0`      |
 

@@ -21,7 +21,7 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/tuf"
 	"github.com/sigstore/sigstore-go/pkg/verify"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 const (
@@ -80,7 +80,7 @@ func NewVerifier(client *Client) *Verifier {
 // both the info and a *SignatureTooNewError so the caller can record the
 // deferral with its metadata; any other failure returns (nil, err).
 func (v *Verifier) Verify(ctx context.Context, ref string, cfg apiv1.ArtifactVerification) (*VerificationInfo, error) {
-	if strings.TrimSpace(cfg.Provider) != apiv1.VerifyProviderCosign {
+	if cfg.Provider != apiv1.VerifyProviderCosign {
 		return nil, fmt.Errorf("unsupported verification provider %q", cfg.Provider)
 	}
 	if len(cfg.MatchOIDCIdentity) == 0 {

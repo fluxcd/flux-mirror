@@ -17,7 +17,7 @@ import (
 	craneLogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/spf13/cobra"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/artifacts"
 	"github.com/fluxcd/flux-mirror/internal/charts"
 	"github.com/fluxcd/flux-mirror/internal/config"
@@ -38,7 +38,7 @@ var syncCmd = &cobra.Command{
 	Use:   "sync [CONFIG|-]",
 	Short: "Mirror Helm charts and OCI artifacts to a destination registry",
 	Long: `Mirror Helm charts and OCI artifacts between registries based on a
-declarative YAML config (apiVersion: mirror.plugin.fluxcd.io/v1beta1, kind: Config).
+declarative YAML config (apiVersion: mirror.plugin.fluxcd.io/v1beta2, kind: Config).
 OCI registry auth is read from the ambient Docker config (~/.docker/config.json,
 $DOCKER_CONFIG, and configured credential helpers), or, for hosts listed in the
 config's 'hosts' section, from a per-host JWT. Helm HTTP/S repository auth is read
@@ -369,6 +369,9 @@ func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*apiv1.Co
 	cfg, err := decodeConfig(cmd, path)
 	if err != nil {
 		return nil, err
+	}
+	if warn := config.DeprecationWarning(cfg.APIVersion); warn != "" {
+		cmd.PrintErrf("warning: %s\n", warn)
 	}
 	if requireEntries {
 		err = config.Validate(cfg)

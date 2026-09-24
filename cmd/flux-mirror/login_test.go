@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/registryauth"
 	gojwt "github.com/golang-jwt/jwt/v5"
 	. "github.com/onsi/gomega"
@@ -29,24 +29,7 @@ func writeLoginConfig(t *testing.T) string {
 
 func writeLoginConfigWithUsername(t *testing.T, username, credBlock string) string {
 	t.Helper()
-	dir := t.TempDir()
-	g := NewWithT(t)
-	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
-kind: Config
-artifacts:
-  - source: ghcr.io/a/b
-    destination: ghcr.io/c/d
-    selector:
-      semver: ">=1.0.0"
-      limit: 1
-hosts:
-  - host: registry.example.com
-    username: ` + username + `
-    credential:
-` + credBlock
-	path := filepath.Join(dir, "config.yaml")
-	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
-	return path
+	return writeLoginConfigIn(t, t.TempDir(), "      username: "+username+"\n"+credBlock)
 }
 
 // writeLoginConfigIn writes the config into dir, so path fields in credBlock
@@ -54,7 +37,7 @@ hosts:
 func writeLoginConfigIn(t *testing.T, dir, credBlock string) string {
 	t.Helper()
 	g := NewWithT(t)
-	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: ghcr.io/a/b
@@ -65,6 +48,7 @@ artifacts:
 hosts:
   - host: registry.example.com
     credential:
+      type: jwt
 ` + credBlock
 	path := filepath.Join(dir, "config.yaml")
 	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
@@ -89,8 +73,8 @@ func jwkLoginConfig(t *testing.T, extra string) string {
 	jwk := writeJWKIn(t, dir)
 	return writeLoginConfigIn(t, dir,
 		"      jwkPath: "+jwk+"\n"+
-			"      iss: https://issuer.example\n"+
-			"      sub: client-id\n"+extra)
+			"      issuer: https://issuer.example\n"+
+			"      subject: client-id\n"+extra)
 }
 
 func parseUnverified(t *testing.T, token string) gojwt.MapClaims {
@@ -185,7 +169,7 @@ func TestLogin_FromPath(t *testing.T) {
 
 func TestLogin_JWKPath(t *testing.T) {
 	g := NewWithT(t)
-	cfg := jwkLoginConfig(t, "      aud: custom-aud\n")
+	cfg := jwkLoginConfig(t, "      audiences:\n        - custom-aud\n")
 
 	cred, err := loginStore(t, cfg, "")
 	g.Expect(err).ToNot(HaveOccurred())
@@ -208,7 +192,7 @@ func TestLogin_JWKPathExp(t *testing.T) {
 	g.Expect(time.Until(defExp.Time)).To(BeNumerically("<", 5*time.Minute))
 
 	// Explicit exp (1h): exp claim is far in the future.
-	expCred, err := loginStore(t, jwkLoginConfig(t, "      exp: 1h\n"), "")
+	expCred, err := loginStore(t, jwkLoginConfig(t, "      expiration: 1h\n"), "")
 	g.Expect(err).ToNot(HaveOccurred())
 	longExp, err := parseUnverified(t, expCred).GetExpirationTime()
 	g.Expect(err).ToNot(HaveOccurred())
@@ -224,14 +208,53 @@ func TestLogin_AudDefaultsToHost(t *testing.T) {
 	g.Expect(claims["aud"]).To(ContainElement("registry.example.com"))
 }
 
-func TestLogin_ConfigFromStdin(t *testing.T) {
+func TestLogin_DeprecatedV1Beta1Config(t *testing.T) {
 	g := NewWithT(t)
-	t.Setenv("MY_LOGIN_TOKEN", "stdin-token")
+
+	// A hosts-only v1beta1 config still logs in: it is migrated in memory and a
+	// warning is printed. The host-level username and v1beta1 credential claim
+	// names are honored.
 	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
 kind: Config
 hosts:
   - host: registry.example.com
+    username: robot
     credential:
+      value: static-token-value
+`
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	g.Expect(os.WriteFile(path, []byte(src), 0o600)).To(Succeed())
+
+	dir := t.TempDir()
+	out, err := executeCommand([]string{
+		"login", "--host", "registry.example.com", "--config", path,
+		"--docker-config", dir, "--plaintext",
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(out).To(ContainSubstring("mirror.plugin.fluxcd.io/v1beta1\" is deprecated"))
+
+	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	g.Expect(err).ToNot(HaveOccurred())
+	var parsed struct {
+		Auths map[string]struct {
+			Auth string `json:"auth"`
+		} `json:"auths"`
+	}
+	g.Expect(json.Unmarshal(data, &parsed)).To(Succeed())
+	dec, err := base64.StdEncoding.DecodeString(parsed.Auths["registry.example.com"].Auth)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(string(dec)).To(Equal("robot:static-token-value"))
+}
+
+func TestLogin_ConfigFromStdin(t *testing.T) {
+	g := NewWithT(t)
+	t.Setenv("MY_LOGIN_TOKEN", "stdin-token")
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta2
+kind: Config
+hosts:
+  - host: registry.example.com
+    credential:
+      type: jwt
       value: ${MY_LOGIN_TOKEN}
 `
 	cred, err := loginStore(t, "-", src)
@@ -243,11 +266,12 @@ func TestLogin_AuthOnlyConfig(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("MY_LOGIN_TOKEN", "auth-only-token")
 	// No charts or artifacts — valid for login, rejected by sync.
-	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 hosts:
   - host: registry.example.com
     credential:
+      type: jwt
       value: ${MY_LOGIN_TOKEN}
 `
 	path := filepath.Join(t.TempDir(), "auth-only.yaml")
@@ -326,14 +350,16 @@ func TestLogin_AllHostsByDefault(t *testing.T) {
 	g := NewWithT(t)
 	t.Setenv("TOKEN_A", "cred-a")
 	t.Setenv("TOKEN_B", "cred-b")
-	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 hosts:
   - host: a.example.com
     credential:
+      type: jwt
       value: ${TOKEN_A}
   - host: b.example.com
     credential:
+      type: jwt
       value: ${TOKEN_B}
 `
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
@@ -367,7 +393,7 @@ func TestLogin_HostNotFound(t *testing.T) {
 
 func TestLogin_NoHosts(t *testing.T) {
 	g := NewWithT(t)
-	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: ghcr.io/a/b
@@ -396,7 +422,7 @@ func TestLogin_SkipsTLSOnlyHost(t *testing.T) {
 	g := NewWithT(t)
 	// A TLS-only host has no credential to store: login skips it without error
 	// (and without panicking).
-	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta1
+	src := `apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 hosts:
   - host: tls.example.com

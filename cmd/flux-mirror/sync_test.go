@@ -22,7 +22,7 @@ import (
 
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/registryauth"
 	"github.com/fluxcd/flux-mirror/internal/testregistry"
 )
@@ -72,7 +72,7 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		hosts := []apiv1.RegistryHost{{
 			Host:       "mint.example",
-			Credential: &apiv1.RegistryCredential{Provider: apiv1.JWTProviderForgejo},
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Provider: apiv1.JWTProviderForgejo},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -85,7 +85,7 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		hosts := []apiv1.RegistryHost{{
 			Host:       "static.example",
-			Credential: &apiv1.RegistryCredential{Value: "env-token"},
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "env-token"},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -97,7 +97,7 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		hosts := []apiv1.RegistryHost{{
 			Host:       "static.example",
-			Credential: &apiv1.RegistryCredential{FromPath: "/run/secrets/token"},
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, FromPath: "/run/secrets/token"},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
 		g.Expect(err).ToNot(HaveOccurred())
@@ -109,11 +109,11 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
-			Credential: &apiv1.RegistryCredential{
-				JWKPath: writeJWK(t),
-				Iss:     "https://issuer.example",
-				Sub:     "client-id",
-				Aud:     "registry.example",
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
+				JWKPath:   writeJWK(t),
+				Issuer:    "https://issuer.example",
+				Subject:   "client-id",
+				Audiences: []string{"registry.example"},
 			},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -126,10 +126,10 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
-			Credential: &apiv1.RegistryCredential{
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
 				JWKPath: filepath.Join(t.TempDir(), "missing.json"),
-				Iss:     "https://issuer.example",
-				Sub:     "client-id",
+				Issuer:  "https://issuer.example",
+				Subject: "client-id",
 			},
 		}}
 		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -140,10 +140,10 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
-			Credential: &apiv1.RegistryCredential{
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
 				JWKPath: writeJWKS(t, 1),
-				Iss:     "https://issuer.example",
-				Sub:     "client-id",
+				Issuer:  "https://issuer.example",
+				Subject: "client-id",
 			},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -156,10 +156,10 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
-			Credential: &apiv1.RegistryCredential{
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
 				JWKPath: writeJWKS(t, 2),
-				Iss:     "https://issuer.example",
-				Sub:     "client-id",
+				Issuer:  "https://issuer.example",
+				Subject: "client-id",
 			},
 		}}
 		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -171,10 +171,10 @@ func TestJWTTransportOptions(t *testing.T) {
 		path := writeJWKFile(t, []byte(`{"keys":[]}`))
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
-			Credential: &apiv1.RegistryCredential{
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
 				JWKPath: path,
-				Iss:     "https://issuer.example",
-				Sub:     "client-id",
+				Issuer:  "https://issuer.example",
+				Subject: "client-id",
 			},
 		}}
 		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -186,10 +186,10 @@ func TestJWTTransportOptions(t *testing.T) {
 		path := writeJWKFile(t, []byte("not json"))
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
-			Credential: &apiv1.RegistryCredential{
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
 				JWKPath: path,
-				Iss:     "https://issuer.example",
-				Sub:     "client-id",
+				Issuer:  "https://issuer.example",
+				Subject: "client-id",
 			},
 		}}
 		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -200,11 +200,11 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
-			Credential: &apiv1.RegistryCredential{
-				JWKValue: string(mustMarshalJWK(t)),
-				Iss:      "https://issuer.example",
-				Sub:      "client-id",
-				Aud:      "registry.example",
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
+				JWKValue:  string(mustMarshalJWK(t)),
+				Issuer:    "https://issuer.example",
+				Subject:   "client-id",
+				Audiences: []string{"registry.example"},
 			},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -213,15 +213,15 @@ func TestJWTTransportOptions(t *testing.T) {
 		g.Expect(err).ToNot(HaveOccurred())
 	})
 
-	t.Run("jwkValue with custom exp signs from the inline value", func(t *testing.T) {
+	t.Run("jwkValue with custom expiration signs from the inline value", func(t *testing.T) {
 		g := NewWithT(t)
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
-			Credential: &apiv1.RegistryCredential{
-				JWKValue: string(mustMarshalJWK(t)),
-				Iss:      "https://issuer.example",
-				Sub:      "client-id",
-				Exp:      &metav1.Duration{Duration: time.Hour},
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
+				JWKValue:   string(mustMarshalJWK(t)),
+				Issuer:     "https://issuer.example",
+				Subject:    "client-id",
+				Expiration: &metav1.Duration{Duration: time.Hour},
 			},
 		}}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -234,10 +234,10 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		hosts := []apiv1.RegistryHost{{
 			Host: "registry.example",
-			Credential: &apiv1.RegistryCredential{
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
 				JWKValue: "not json",
-				Iss:      "https://issuer.example",
-				Sub:      "client-id",
+				Issuer:   "https://issuer.example",
+				Subject:  "client-id",
 			},
 		}}
 		_, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -248,10 +248,10 @@ func TestJWTTransportOptions(t *testing.T) {
 		g := NewWithT(t)
 		t.Setenv("MY_CI_TOKEN", "env-token")
 		hosts := []apiv1.RegistryHost{
-			{Host: "static.example", Credential: &apiv1.RegistryCredential{Value: "env-token"}},
-			{Host: "mint.example", Credential: &apiv1.RegistryCredential{Provider: apiv1.JWTProviderGitHub}},
-			{Host: "registry.example", Credential: &apiv1.RegistryCredential{
-				JWKPath: writeJWK(t), Iss: "https://issuer.example", Sub: "client-id",
+			{Host: "static.example", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "env-token"}},
+			{Host: "mint.example", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Provider: apiv1.JWTProviderGitHub}},
+			{Host: "registry.example", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
+				JWKPath: writeJWK(t), Issuer: "https://issuer.example", Subject: "client-id",
 			}},
 		}
 		opts, err := registryauth.JWTTransportOptions(http.DefaultTransport, hosts)
@@ -287,7 +287,7 @@ func writeConfig(t *testing.T, src, dst string) string {
 }
 
 func configBody(src, dst string) string {
-	return fmt.Sprintf(`apiVersion: mirror.plugin.fluxcd.io/v1beta1
+	return fmt.Sprintf(`apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: %s
@@ -305,6 +305,38 @@ func TestSync_NoConfigError(t *testing.T) {
 	_, err := executeCommand([]string{"sync"})
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("config required"))
+}
+
+func TestSync_DeprecatedAPIVersionWarns(t *testing.T) {
+	g := NewWithT(t)
+
+	// A v1beta1 config still syncs; the only change is a migration warning on
+	// stderr. Point both endpoints at the local registry so the run succeeds.
+	ensureRegistry(t)
+	src := dockerReg + "/dep-src-" + testregistry.RandSuffix()
+	dst := dockerReg + "/dep-dst-" + testregistry.RandSuffix()
+	testregistry.PushImage(t, src+":1.0.0")
+
+	body := fmt.Sprintf(`apiVersion: mirror.plugin.fluxcd.io/v1beta1
+kind: Config
+hosts:
+  - host: %s
+    username: robot
+    credential:
+      value: token
+artifacts:
+  - source: %s
+    destination: %s
+    selector:
+      semver: ">=0.0.0"
+`, dockerReg, src, dst)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	g.Expect(os.WriteFile(path, []byte(body), 0o600)).To(Succeed())
+
+	out, err := executeCommand([]string{"sync", path, "--insecure", "-o", "json"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(out).To(ContainSubstring("mirror.plugin.fluxcd.io/v1beta1\" is deprecated"))
+	g.Expect(out).To(ContainSubstring(`"status": "copied"`))
 }
 
 func TestSync_ConfigViaEnv(t *testing.T) {

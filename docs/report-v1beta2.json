@@ -1,5 +1,5 @@
 {
-  "$id": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report-v1beta1.json",
+  "$id": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report-v1beta2.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -8,7 +8,7 @@
       "type": "string"
     },
     "apiVersion": {
-      "const": "mirror.plugin.fluxcd.io/v1beta1",
+      "const": "mirror.plugin.fluxcd.io/v1beta2",
       "type": "string"
     },
     "kind": {
