@@ -25,7 +25,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/proto/spiffe/workload"
 	"google.golang.org/grpc"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 const (
@@ -128,8 +128,8 @@ func startFakeWorkloadAPI(t *testing.T, ca *testCA) {
 
 // TestSPIFFE_MTLSEndToEnd drives a real X.509-SVID mTLS handshake: a SPIFFE
 // server SVID on the server side, flux-mirror's tls.spiffe transport (fed by the
-// fake Workload API) on the client side, exercising trustDomain: self, an exact
-// serverID, and a serverID mismatch.
+// fake Workload API) on the client side, exercising the RFC-0014 serverIDs
+// forms: self trust domain, exact ID, ID prefix, trust domain, and mismatches.
 func TestSPIFFE_MTLSEndToEnd(t *testing.T) {
 	g := NewWithT(t)
 	ca := newTestCA(t)
@@ -154,21 +154,24 @@ func TestSPIFFE_MTLSEndToEnd(t *testing.T) {
 	host := mustHost(t, srv.URL)
 
 	cases := []struct {
-		name   string
-		spiffe *apiv1.SPIFFETLS
-		wantOK bool
+		name      string
+		serverIDs []string
+		wantOK    bool
 	}{
-		{"trustDomain self", &apiv1.SPIFFETLS{TrustDomain: apiv1.TrustDomainSelf}, true},
-		{"exact serverID", &apiv1.SPIFFETLS{ServerID: testServerID}, true},
-		{"serverID mismatch", &apiv1.SPIFFETLS{ServerID: "spiffe://example.org/wrong"}, false},
+		{"self trust domain", []string{"spiffe://self"}, true},
+		{"trust domain", []string{"spiffe://example.org"}, true},
+		{"exact serverID", []string{testServerID}, true},
+		{"serverID mismatch", []string{"spiffe://example.org/wrong"}, false},
+		{"serverID prefix", []string{"spiffe://example.org/server/"}, true},
+		{"serverID prefix mismatch", []string{"spiffe://example.org/other/"}, false},
+		{"any of several", []string{"spiffe://example.org/wrong", testServerID}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport,
 				[]apiv1.RegistryHost{{Host: host, TLS: &apiv1.TLS{
-					ClientAuth: &apiv1.TLSClientAuth{Provider: apiv1.TLSClientProviderX509SVID},
-					ServerAuth: &apiv1.TLSServerAuth{SPIFFE: tc.spiffe},
+					SPIFFE: &apiv1.SPIFFETLS{ServerIDs: tc.serverIDs},
 				}}})
 			g.Expect(err).ToNot(HaveOccurred())
 			defer closeFn()
@@ -184,49 +187,7 @@ func TestSPIFFE_MTLSEndToEnd(t *testing.T) {
 	}
 }
 
-// TestSPIFFE_ClientOnly drives mTLS where the client presents a SPIFFE X.509-SVID
-// but the server is verified with a normal CA bundle (not SPIFFE) — the
-// client-only case enabled by splitting serverAuth and clientAuth.
-func TestSPIFFE_ClientOnly(t *testing.T) {
-	g := NewWithT(t)
-	ca := newTestCA(t)
-	startFakeWorkloadAPI(t, ca)
-
-	// Normal (non-SPIFFE) server cert with an IP SAN for hostname verification.
-	serverCertPEM, serverKeyPEM := ca.issue(t, "server", []net.IP{net.IPv4(127, 0, 0, 1)}, nil)
-	serverCert, err := tls.X509KeyPair(serverCertPEM, serverKeyPEM)
-	g.Expect(err).ToNot(HaveOccurred())
-	caPool := x509.NewCertPool()
-	g.Expect(caPool.AppendCertsFromPEM(ca.certPEM)).To(BeTrue())
-
-	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	srv.TLS = &tls.Config{
-		Certificates: []tls.Certificate{serverCert},
-		ClientCAs:    caPool,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-	}
-	srv.StartTLS()
-	defer srv.Close()
-	host := mustHost(t, srv.URL)
-
-	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{{
-		Host: host,
-		TLS: &apiv1.TLS{
-			ServerAuth: &apiv1.TLSServerAuth{Value: string(ca.certPEM)},
-			ClientAuth: &apiv1.TLSClientAuth{Provider: apiv1.TLSClientProviderX509SVID},
-		},
-	}})
-	g.Expect(err).ToNot(HaveOccurred())
-	defer closeFn()
-
-	resp, err := rt.RoundTrip(mustGet(t, srv.URL))
-	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(resp.StatusCode).To(Equal(http.StatusNoContent))
-}
-
-// TestSPIFFE_JWTSVIDCredential resolves a credential with provider jwt-svid
+// TestSPIFFE_JWTSVIDCredential resolves a credential with provider spiffe
 // against the fake Workload API and checks the returned JWT carries the host as
 // audience and the SPIFFE ID as subject.
 func TestSPIFFE_JWTSVIDCredential(t *testing.T) {
@@ -234,8 +195,8 @@ func TestSPIFFE_JWTSVIDCredential(t *testing.T) {
 	ca := newTestCA(t)
 	startFakeWorkloadAPI(t, ca)
 
-	h := apiv1.RegistryHost{Host: "registry.example.com", Credential: &apiv1.RegistryCredential{
-		Provider: apiv1.JWTProviderJWTSVID,
+	h := apiv1.RegistryHost{Host: "registry.example.com", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
+		Provider: apiv1.JWTProviderSPIFFE,
 	}}
 	cred, err := resolveCredential(context.Background(), h)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -246,6 +207,30 @@ func TestSPIFFE_JWTSVIDCredential(t *testing.T) {
 	g.Expect(tok.UnsafeClaimsWithoutVerification(&claims)).To(Succeed())
 	g.Expect(claims.Subject).To(Equal(testClientID))
 	g.Expect(claims.Audience).To(ContainElement("registry.example.com"))
+}
+
+// TestSPIFFE_JWTSVIDCredential_MultipleAudiences resolves a credential with
+// provider spiffe and several audiences, and checks the extra audiences are
+// carried as additional JWT-SVID audiences.
+func TestSPIFFE_JWTSVIDCredential_MultipleAudiences(t *testing.T) {
+	g := NewWithT(t)
+	ca := newTestCA(t)
+	startFakeWorkloadAPI(t, ca)
+
+	audiences := []string{"registry.example.com", "extra.example.com"}
+	h := apiv1.RegistryHost{Host: "registry.example.com", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
+		Provider:  apiv1.JWTProviderSPIFFE,
+		Audiences: audiences,
+	}}
+	cred, err := resolveCredential(context.Background(), h)
+	g.Expect(err).ToNot(HaveOccurred())
+
+	tok, err := jwt.ParseSigned(cred, []jose.SignatureAlgorithm{jose.ES256})
+	g.Expect(err).ToNot(HaveOccurred())
+	var claims jwt.Claims
+	g.Expect(tok.UnsafeClaimsWithoutVerification(&claims)).To(Succeed())
+	g.Expect(claims.Subject).To(Equal(testClientID))
+	g.Expect(claims.Audience).To(ConsistOf(audiences))
 }
 
 func mustURL(t *testing.T, raw string) *url.URL {

@@ -220,3 +220,10 @@ func writeRepositoriesFile(t *testing.T, entries ...*repo.Entry) string {
 	}
 	return path
 }
+
+func TestNormalizeRepositoryURL_TrimsWhitespace(t *testing.T) {
+	g := NewWithT(t)
+	got, err := normalizeRepositoryURL(" https://charts.example.com/ ")
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(got).To(Equal("https://charts.example.com"))
+}

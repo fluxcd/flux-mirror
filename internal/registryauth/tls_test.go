@@ -24,7 +24,7 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 // testCA is a self-signed CA used to issue server and client certificates for
@@ -85,11 +85,22 @@ func (ca *testCA) issue(t *testing.T, cn string, ips []net.IP, uris []*url.URL) 
 		pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
 }
 
+// certDir writes the given files into a fresh directory and returns its path.
+func certDir(t *testing.T, files map[string][]byte) string {
+	t.Helper()
+	g := NewWithT(t)
+	dir := t.TempDir()
+	for name, data := range files {
+		g.Expect(os.WriteFile(filepath.Join(dir, name), data, 0o600)).To(Succeed())
+	}
+	return dir
+}
+
 // TestNewTLSTransport_MTLSEndToEnd drives a real mTLS handshake through the
 // dispatching transport: a CA-backed server that requires a client certificate,
-// reached with serverAuth (custom CA) + clientAuth (client cert) configured for
-// its host. It also checks that the wrong CA and a missing client cert fail, and
-// that an unconfigured host falls through to the inner transport.
+// reached with a tls.path directory containing ca.crt, tls.crt, and tls.key. It
+// also checks that a CA-only directory fails the client-cert requirement, and
+// that the wrong CA fails server verification.
 func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 	g := NewWithT(t)
 	ca := newTestCA(t)
@@ -114,16 +125,33 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 
 	host := mustHost(t, srv.URL) // e.g. "127.0.0.1:NNNNN" (with port)
 
-	t.Run("serverAuth + clientAuth succeeds", func(t *testing.T) {
+	t.Run("CA and client certificate succeed", func(t *testing.T) {
+		g := NewWithT(t)
+		dir := certDir(t, map[string][]byte{
+			"ca.crt":  ca.certPEM,
+			"tls.crt": clientCertPEM,
+			"tls.key": clientKeyPEM,
+		})
+		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{{
+			Host: host,
+			TLS:  &apiv1.TLS{Path: dir},
+		}})
+		g.Expect(err).ToNot(HaveOccurred())
+		defer closeFn()
+
+		resp, err := rt.RoundTrip(mustGet(t, srv.URL))
+		g.Expect(err).ToNot(HaveOccurred())
+		g.Expect(resp.StatusCode).To(Equal(http.StatusNoContent))
+	})
+
+	t.Run("inline CA and client certificate succeed", func(t *testing.T) {
 		g := NewWithT(t)
 		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{{
 			Host: host,
 			TLS: &apiv1.TLS{
-				ServerAuth: &apiv1.TLSServerAuth{Value: string(ca.certPEM)},
-				ClientAuth: &apiv1.TLSClientAuth{
-					Certificate: &apiv1.TLSData{Value: string(clientCertPEM)},
-					Key:         &apiv1.TLSKey{FromPath: writeTemp(t, clientKeyPEM)},
-				},
+				CACert:  string(ca.certPEM),
+				TLSCert: string(clientCertPEM),
+				TLSKey:  string(clientKeyPEM),
 			},
 		}})
 		g.Expect(err).ToNot(HaveOccurred())
@@ -136,9 +164,10 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 
 	t.Run("missing client cert is rejected by the server", func(t *testing.T) {
 		g := NewWithT(t)
+		dir := certDir(t, map[string][]byte{"ca.crt": ca.certPEM})
 		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{{
 			Host: host,
-			TLS:  &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{Value: string(ca.certPEM)}},
+			TLS:  &apiv1.TLS{Path: dir},
 		}})
 		g.Expect(err).ToNot(HaveOccurred())
 		defer closeFn()
@@ -150,15 +179,14 @@ func TestNewTLSTransport_MTLSEndToEnd(t *testing.T) {
 	t.Run("wrong CA fails server verification", func(t *testing.T) {
 		g := NewWithT(t)
 		otherCA := newTestCA(t)
+		dir := certDir(t, map[string][]byte{
+			"ca.crt":  otherCA.certPEM,
+			"tls.crt": clientCertPEM,
+			"tls.key": clientKeyPEM,
+		})
 		rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{{
 			Host: host,
-			TLS: &apiv1.TLS{
-				ServerAuth: &apiv1.TLSServerAuth{Value: string(otherCA.certPEM)},
-				ClientAuth: &apiv1.TLSClientAuth{
-					Certificate: &apiv1.TLSData{Value: string(clientCertPEM)},
-					Key:         &apiv1.TLSKey{FromPath: writeTemp(t, clientKeyPEM)},
-				},
-			},
+			TLS:  &apiv1.TLS{Path: dir},
 		}})
 		g.Expect(err).ToNot(HaveOccurred())
 		defer closeFn()
@@ -181,15 +209,6 @@ func mustGet(t *testing.T, rawURL string) *http.Request {
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	g.Expect(err).ToNot(HaveOccurred())
 	return req
-}
-
-// writeTemp writes data to a temp file and returns its path.
-func writeTemp(t *testing.T, data []byte) string {
-	t.Helper()
-	g := NewWithT(t)
-	p := filepath.Join(t.TempDir(), "data.pem")
-	g.Expect(os.WriteFile(p, data, 0o600)).To(Succeed())
-	return p
 }
 
 // makeCertPEM returns a self-signed certificate and its private key, PEM-encoded.
@@ -215,15 +234,15 @@ func makeCertPEM(t *testing.T) (certPEM, keyPEM []byte) {
 func TestNeedsTLS(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(NeedsTLS(nil)).To(BeFalse())
-	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", Credential: &apiv1.RegistryCredential{Value: "X"}}})).To(BeFalse())
-	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{Value: "x"}}}})).To(BeTrue())
+	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "X"}}})).To(BeFalse())
+	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", TLS: &apiv1.TLS{Path: "/certs"}}})).To(BeTrue())
 }
 
 func TestNewTLSTransport_NoTLSReturnsInner(t *testing.T) {
 	g := NewWithT(t)
 	inner := http.DefaultTransport
 	rt, closeFn, err := NewTLSTransport(context.Background(), inner, []apiv1.RegistryHost{
-		{Host: "a", Credential: &apiv1.RegistryCredential{Value: "X"}},
+		{Host: "a", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "X"}},
 	})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(rt).To(BeIdenticalTo(inner))
@@ -235,13 +254,14 @@ func TestNewTLSTransport_StaticDispatch(t *testing.T) {
 	caPEM, _ := makeCertPEM(t)
 	certPEM, keyPEM := makeCertPEM(t)
 
+	caDir := certDir(t, map[string][]byte{"ca.crt": caPEM})
+	mtlsDir := certDir(t, map[string][]byte{"tls.crt": certPEM, "tls.key": keyPEM})
+
 	hosts := []apiv1.RegistryHost{
-		{Host: "ca.example", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{Value: string(caPEM)}}},
-		{Host: "mtls.example", TLS: &apiv1.TLS{ClientAuth: &apiv1.TLSClientAuth{
-			Certificate: &apiv1.TLSData{Value: string(certPEM)},
-			Key:         &apiv1.TLSKey{FromPath: writeTemp(t, keyPEM)},
-		}}},
-		{Host: "plain.example", Credential: &apiv1.RegistryCredential{Value: "X"}},
+		{Host: "ca.example", TLS: &apiv1.TLS{Path: caDir}},
+		{Host: "mtls.example", TLS: &apiv1.TLS{Path: mtlsDir}},
+		{Host: "inline.example", TLS: &apiv1.TLS{CACert: string(caPEM)}},
+		{Host: "plain.example", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "X"}},
 	}
 	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, hosts)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -251,54 +271,100 @@ func TestNewTLSTransport_StaticDispatch(t *testing.T) {
 	g.Expect(ok).To(BeTrue())
 	g.Expect(disp.byHost).To(HaveKey("ca.example"))
 	g.Expect(disp.byHost).To(HaveKey("mtls.example"))
+	g.Expect(disp.byHost).To(HaveKey("inline.example"))
 	g.Expect(disp.byHost).ToNot(HaveKey("plain.example")) // no TLS → falls through to inner
 
 	caRT := disp.byHost["ca.example"].(*http.Transport)
 	g.Expect(caRT.TLSClientConfig.RootCAs).ToNot(BeNil())
 	mtlsRT := disp.byHost["mtls.example"].(*http.Transport)
 	g.Expect(mtlsRT.TLSClientConfig.Certificates).To(HaveLen(1))
+	inlineRT := disp.byHost["inline.example"].(*http.Transport)
+	g.Expect(inlineRT.TLSClientConfig.RootCAs).ToNot(BeNil())
+}
+
+// TestNewTLSTransport_LegacyKeys proves the directory loader accepts the legacy
+// Flux certificate key names as fallbacks, like a certSecretRef Secret.
+func TestNewTLSTransport_LegacyKeys(t *testing.T) {
+	g := NewWithT(t)
+	caPEM, _ := makeCertPEM(t)
+	dir := certDir(t, map[string][]byte{"caFile": caPEM})
+
+	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{
+		{Host: "ca.example", TLS: &apiv1.TLS{Path: dir}},
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+	defer closeFn()
+
+	disp, ok := rt.(tlsDispatchTransport)
+	g.Expect(ok).To(BeTrue())
+	caRT := disp.byHost["ca.example"].(*http.Transport)
+	g.Expect(caRT.TLSClientConfig.RootCAs).ToNot(BeNil())
+}
+
+// TestNewTLSTransport_MissingTLSConfig guards unvalidated callers: a TLS block
+// without path, inline certificates, or spiffe must not fall back to reading the working
+// directory.
+func TestNewTLSTransport_MissingTLSConfig(t *testing.T) {
+	g := NewWithT(t)
+	_, _, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{
+		{Host: "empty.example", TLS: &apiv1.TLS{}},
+	})
+	g.Expect(err).To(MatchError(ContainSubstring("one of path, inline certificates, or spiffe is required")))
 }
 
 func TestNewTLSTransport_BadCABundle(t *testing.T) {
 	g := NewWithT(t)
+	dir := certDir(t, map[string][]byte{"ca.crt": []byte("not a pem")})
 	_, _, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{
-		{Host: "ca.example", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{Value: "not a pem"}}},
+		{Host: "ca.example", TLS: &apiv1.TLS{Path: dir}},
 	})
-	g.Expect(err).To(MatchError(ContainSubstring("no valid certificates in CA bundle")))
+	g.Expect(err).To(MatchError(ContainSubstring("failed to parse CA certificate")))
 }
 
-func TestReadTLSData(t *testing.T) {
+func TestNewTLSTransport_BadInlineData(t *testing.T) {
 	g := NewWithT(t)
-
-	// value
-	b, err := readTLSData(&apiv1.TLSData{Value: "inline"})
-	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(string(b)).To(Equal("inline"))
-
-	// fromPath
-	p := filepath.Join(t.TempDir(), "f")
-	g.Expect(os.WriteFile(p, []byte("filedata"), 0o600)).To(Succeed())
-	b, err = readTLSData(&apiv1.TLSData{FromPath: p})
-	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(string(b)).To(Equal("filedata"))
+	_, _, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{
+		{Host: "ca.example", TLS: &apiv1.TLS{CACert: "not a pem"}},
+	})
+	g.Expect(err).To(MatchError(ContainSubstring("failed to parse CA certificate")))
 }
 
-func TestSpiffeAuthorizer(t *testing.T) {
-	g := NewWithT(t)
+func TestNewTLSTransport_PathValidation(t *testing.T) {
+	certPEM, keyPEM := makeCertPEM(t)
 
-	// AuthorizeAny and ServerID and a concrete trustDomain do not need a source.
-	a, err := spiffeAuthorizer(nil, &apiv1.SPIFFETLS{AuthorizeAny: true})
-	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(a).ToNot(BeNil())
-
-	a, err = spiffeAuthorizer(nil, &apiv1.SPIFFETLS{ServerID: "spiffe://example.org/registry"})
-	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(a).ToNot(BeNil())
-
-	a, err = spiffeAuthorizer(nil, &apiv1.SPIFFETLS{TrustDomain: "example.org"})
-	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(a).ToNot(BeNil())
-
-	_, err = spiffeAuthorizer(nil, &apiv1.SPIFFETLS{ServerID: "not-a-spiffe-id"})
-	g.Expect(err).To(MatchError(ContainSubstring("serverID")))
+	for _, tc := range []struct {
+		name    string
+		files   map[string][]byte
+		errText string
+	}{
+		{
+			name:    "empty directory",
+			files:   map[string][]byte{},
+			errText: "must contain either 'ca.crt' or both 'tls.crt' and 'tls.key'",
+		},
+		{
+			name:    "cert without key",
+			files:   map[string][]byte{"tls.crt": certPEM},
+			errText: "contains 'tls.crt' but missing 'tls.key'",
+		},
+		{
+			name:    "key without cert",
+			files:   map[string][]byte{"tls.key": keyPEM},
+			errText: "contains 'tls.key' but missing 'tls.crt'",
+		},
+		{
+			name:    "invalid key pair",
+			files:   map[string][]byte{"tls.crt": certPEM, "tls.key": []byte("not a key")},
+			errText: "failed to parse TLS certificate and key",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			dir := certDir(t, tc.files)
+			_, _, err := NewTLSTransport(context.Background(), http.DefaultTransport, []apiv1.RegistryHost{
+				{Host: "ca.example", TLS: &apiv1.TLS{Path: dir}},
+			})
+			g.Expect(err).To(MatchError(ContainSubstring(tc.errText)))
+		})
+	}
 }

@@ -11,7 +11,7 @@ import (
 
 	"github.com/briandowns/spinner"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 // progress drives a single global spinner (on stderr) plus per-job

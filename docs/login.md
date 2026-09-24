@@ -55,10 +55,11 @@ exactly like `docker login`:
 What gets written depends on the host:
 
 - A cloud [`provider`](config.md#cloud-registry-providers) host, or a
-  [`credential`](config.md#per-host-credential) host with `username` set,
-  writes `username`/`password`/`auth`.
-- A `credential` host without `username` writes the bearer `registrytoken` field
-  instead. Because credential helpers only store username/secret pairs, a
+  [`credential`](config.md#per-host-credential) host with `credential.username`
+  set, writes `username`/`password`/`auth`.
+- A `credential` host without `credential.username` writes the bearer
+  `registrytoken` field instead. Because credential helpers only store
+  username/secret pairs, a
   `registrytoken` always goes to the config file (never a keychain helper). See
   [Bearer token vs. username/password](config.md#bearer-token-vs-usernamepassword).
 
@@ -66,8 +67,8 @@ Pass `--plaintext` to force the base64 `config.json` entry and bypass any
 configured or auto-detected helper (this applies to the username/password case;
 `registrytoken` is always file-based).
 
-> **Note:** a TLS-only host (only `tls`, no `credential`/`provider`) has nothing
-> to store and is skipped with a `• skipping <host>` message.
+> **Note:** a TLS-only host (only `tls`, no `credential` and no cloud `provider`)
+> has nothing to store and is skipped with a `• skipping <host>` message.
 
 ## Examples
 
@@ -84,7 +85,7 @@ A hosts-only config — switch clouds by changing the host and `provider`:
 
 ```yaml
 # hosts.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 hosts:
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
@@ -133,17 +134,19 @@ jobs:
 ### Log in to GHCR from GitHub Actions
 
 GHCR authorizes by the token and ignores the username value, but it still expects
-a username/password login — so set `username` to any value (for example a
-`github.*` context key) and pass `GITHUB_TOKEN` as the password via `value`:
+a username/password login — so set `credential.username` to any value (for
+example a `github.*` context key) and pass `GITHUB_TOKEN` as the password via
+`value`:
 
 ```yaml
 # hosts.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 hosts:
   - host: ghcr.io
-    username: ${GITHUB_REPOSITORY_OWNER}   # ignored by GHCR; any value works
     credential:
+      type: jwt
+      username: ${GITHUB_REPOSITORY_OWNER}   # ignored by GHCR; any value works
       value: ${GH_TOKEN}
 ```
 
@@ -168,17 +171,18 @@ jobs:
 
 ### Log in to Docker Hub from GitHub Actions
 
-Docker Hub uses a standard username/password login. Set `username` to the Docker
-Hub account and pass an access token as the password via `value`:
+Docker Hub uses a standard username/password login. Set `credential.username` to
+the Docker Hub account and pass an access token as the password via `value`:
 
 ```yaml
 # hosts.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 hosts:
   - host: docker.io
-    username: ${DOCKERHUB_USERNAME}
     credential:
+      type: jwt
+      username: ${DOCKERHUB_USERNAME}
       value: ${DOCKERHUB_TOKEN}
 ```
 
@@ -228,7 +232,7 @@ flux mirror login --plaintext
   or whatever `value`/`fromPath` holds). Re-run `login` before it expires; for
   `provider` sources the registry re-validates each request, so a stored
   credential stops working once it lapses. To mint a longer-lived login token,
-  use a `jwkPath`/`jwkValue` credential with a longer `exp` — see
+  use a `jwkPath`/`jwkValue` credential with a longer `expiration` — see
   [keygen](keygen.md).
 - For `aws`, the credential is a JWT-shaped envelope wrapping a signed
   `sts:GetCallerIdentity` request, not an OIDC token. The destination registry

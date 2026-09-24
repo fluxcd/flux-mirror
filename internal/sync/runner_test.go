@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	. "github.com/fluxcd/flux-mirror/api/v1beta1"
+	. "github.com/fluxcd/flux-mirror/api/v1beta2"
 	. "github.com/onsi/gomega"
 )
 
