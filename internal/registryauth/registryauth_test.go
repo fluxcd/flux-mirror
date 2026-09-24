@@ -9,6 +9,8 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +88,31 @@ func TestUsernameSwitch(t *testing.T) {
 	kc, err := BuildKeychain(context.Background(), userpass)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(kc).ToNot(BeNil())
+}
+
+// TestProviderTokenFunc_GCPUserCredentialRejectsAud proves the GCP provider
+// rejects an explicitly configured audience when ADC resolves to user
+// credentials, whose ID token is always minted for the gcloud OAuth client ID
+// rather than the requested audience.
+func TestProviderTokenFunc_GCPUserCredentialRejectsAud(t *testing.T) {
+	g := NewWithT(t)
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", writeAuthorizedUserCreds(t))
+	t.Setenv("GOOGLE_API_GO_EXPERIMENTAL_ENABLE_NEW_AUTH_LIB", "false")
+
+	fn, err := providerTokenFunc(apiv1.JWTProviderGCP, "registry.example.com", true)
+	g.Expect(err).ToNot(HaveOccurred())
+	_, err = fn(context.Background())
+	g.Expect(err).To(MatchError(ContainSubstring("cannot be honored with GCP user credentials")))
+}
+
+func writeAuthorizedUserCreds(t *testing.T) string {
+	t.Helper()
+	g := NewWithT(t)
+	path := filepath.Join(t.TempDir(), "adc.json")
+	body := `{"type":"authorized_user","client_id":"x.apps.googleusercontent.com",` +
+		`"client_secret":"secret","refresh_token":"refresh"}`
+	g.Expect(os.WriteFile(path, []byte(body), 0o600)).To(Succeed())
+	return path
 }
 
 func TestPkgAuthProviderName(t *testing.T) {

@@ -306,7 +306,7 @@ func JWTTransportOptions(inner http.RoundTripper, hosts []apiv1.RegistryHost) ([
 		aud := h.EffectiveAud()
 		switch {
 		case j.Provider != "":
-			fn, err := providerTokenFunc(j.Provider, aud)
+			fn, err := providerTokenFunc(j.Provider, aud, strings.TrimSpace(j.Aud) != "")
 			if err != nil {
 				return nil, fmt.Errorf("auth host %q: %w", h.Host, err)
 			}
