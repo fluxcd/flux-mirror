@@ -50,7 +50,7 @@ func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error
 	)
 	switch {
 	case c.Provider != "":
-		fn, ferr := providerTokenFunc(c.Provider, aud)
+		fn, ferr := providerTokenFunc(c.Provider, aud, strings.TrimSpace(c.Aud) != "")
 		if ferr != nil {
 			return "", ferr
 		}
@@ -122,11 +122,14 @@ func gcpUserIDToken(ctx context.Context) (string, error) {
 
 // providerTokenFunc returns a cijwt.TokenFunc that mints a per-request bearer
 // credential for aud using the given provider: an OIDC ID/access token for the
-// OIDC providers, or a signed sts:GetCallerIdentity envelope for aws. cijwt
-// parses each returned token's exp claim and caches it for the first 50% of its
-// lifetime, so the closure runs only on a cache miss and any ctx-scoped setup
-// happens lazily under the request's own context.
-func providerTokenFunc(provider, aud string) (cijwt.TokenFunc, error) {
+// OIDC providers, or a signed sts:GetCallerIdentity envelope for aws. audSet
+// reports whether aud was explicitly configured (rather than defaulted to the
+// host), so a provider branch that cannot honor a requested audience fails fast
+// instead of silently minting a token for a different one. cijwt parses each
+// returned token's exp claim and caches it for the first 50% of its lifetime, so
+// the closure runs only on a cache miss and any ctx-scoped setup happens lazily
+// under the request's own context.
+func providerTokenFunc(provider, aud string, audSet bool) (cijwt.TokenFunc, error) {
 	switch provider {
 	case apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo:
 		return func(ctx context.Context) (string, error) {
@@ -138,10 +141,16 @@ func providerTokenFunc(provider, aud string) (cijwt.TokenFunc, error) {
 			if err != nil {
 				// User credentials (authorized_user, e.g. `gcloud auth
 				// application-default login`) cannot mint a custom-audience ID
-				// token. Fall back to the default-audience id_token from ADC,
-				// whose aud is the gcloud OAuth client ID (not aud) and whose
-				// identity is the human's email/sub.
+				// token. When no audience was requested, fall back to the
+				// default-audience id_token from ADC, whose aud is the gcloud
+				// OAuth client ID and whose identity is the human's email/sub.
+				// When an audience was requested, that fallback would silently
+				// ignore it, so reject rather than mint a token for the wrong
+				// audience.
 				if strings.Contains(err.Error(), "unsupported credentials type") {
+					if audSet {
+						return "", fmt.Errorf("aud %q cannot be honored with GCP user credentials (authorized_user Application Default Credentials); unset aud or authenticate with a service account", aud)
+					}
 					return gcpUserIDToken(ctx)
 				}
 				return "", fmt.Errorf("create GCP ID token source: %w", err)

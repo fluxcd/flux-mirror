@@ -355,7 +355,11 @@ what the registry on the other side has to accept:
 - `gcp` obtains a Google ID token for the audience via Application Default
   Credentials (the GKE/GCE metadata server, a service account key, or workload
   identity federation). The registry must trust Google's OIDC issuer and the
-  configured audience.
+  configured audience. User credentials (`authorized_user`, e.g. from
+  `gcloud auth application-default login`) cannot mint a token for a custom
+  audience: with `.aud` set the run fails, and with `.aud` unset it falls back
+  to the default-audience ID token carried in the ADC response, whose audience
+  is the gcloud OAuth client ID and whose identity is the signed-in user.
 - `azure` obtains a Microsoft Entra ID access token via the default Azure
   credential chain (AKS/managed identity, workload identity federation,
   environment credentials). The audience is requested as the `<aud>/.default`
