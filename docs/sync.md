@@ -43,14 +43,15 @@ FLUX_MIRROR_CONFIG=./flux-mirror.yaml flux mirror sync
      registry's native credentials from the cloud provider's workload identity.
    - [`credential`](config.md#per-host-credential) resolves a per-host
      token from a cloud/CI identity, a JWK signature, or an environment variable
-     or file. With no `username` it is sent as an HTTP Bearer credential; with a
-     `username` it is the password in the standard registry auth challenge.
+     or file. With no `credential.username` it is sent as an HTTP Bearer
+     credential; with `credential.username` it is the password in the standard
+     registry auth challenge.
 2. Hosts not listed under `hosts` use the ambient Docker config and credential
    helpers (`~/.docker/config.json`, or `$DOCKER_CONFIG` when set).
 
-A non-`provider` host may also set [`tls`](config.md#transport-tls) to
-configure transport-layer TLS for its registry connections: a custom CA, a client
-certificate (mTLS), or SPIFFE X.509-SVID mTLS.
+A host whose `provider` is unset or `generic` may also set
+[`tls`](config.md#transport-tls) to configure transport-layer TLS for its registry
+connections: a custom CA, a client certificate (mTLS), or SPIFFE X.509-SVID mTLS.
 
 HTTP/S Helm repository authentication (for `charts` sources) is separate from OCI
 auth and always comes from the ambient Helm repositories config:
@@ -191,7 +192,7 @@ This config mirrors a few such charts into GitHub Container Registry (GHCR):
 
 ```yaml
 # flux-mirror.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 charts:
   - name: ingress-nginx
@@ -216,11 +217,12 @@ charts:
     limit: 3
 hosts:
   # GHCR is the push destination. It expects a username/password login (the
-  # username is any non-empty value; GHCR authorizes by the token), so `username`
-  # is set and GITHUB_TOKEN is the password.
+  # username is any non-empty value; GHCR authorizes by the token), so
+  # `credential.username` is set and GITHUB_TOKEN is the password.
   - host: ghcr.io
-    username: my-org
     credential:
+      type: jwt
+      username: my-org
       value: ${GH_TOKEN}
 ```
 
@@ -256,7 +258,7 @@ the only way to mirror an OCI Helm chart between OCI repositories — the
 [`charts`](config.md#charts) section is exclusively for HTTP/S sources.
 
 ```yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: ghcr.io/stefanprodan/charts/podinfo
@@ -272,11 +274,11 @@ This mirrors `ghcr.io/fluxcd` controller images into a private registry from
 GitHub Actions. The destination authenticates with a username and password from
 GitHub Actions secrets. The GHCR source is authenticated with `GITHUB_TOKEN`
 (rather than pulled anonymously) to avoid anonymous pull rate limits — GHCR
-expects a username/password login, so `username` is set there too.
+expects a username/password login, so `credential.username` is set there too.
 
 ```yaml
 # flux-mirror.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: ghcr.io/fluxcd/source-controller
@@ -294,15 +296,17 @@ artifacts:
 hosts:
   # Source: authenticate to GHCR to avoid anonymous rate limits.
   - host: ghcr.io
-    username: my-org
     credential:
+      type: jwt
+      username: my-org
       value: ${GH_TOKEN}
   # Destination: a private registry expecting a username/password login. The
   # username and password are substituted from the environment while loading the
   # config.
   - host: registry.internal.example.com
-    username: ${REGISTRY_USERNAME}
     credential:
+      type: jwt
+      username: ${REGISTRY_USERNAME}
       value: ${REGISTRY_PASSWORD}
 ```
 
@@ -344,7 +348,7 @@ The config is the same for all three clouds except for the destination host and
 
 ```yaml
 # flux-mirror.yaml — Amazon ECR destination
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: ghcr.io/fluxcd/source-controller   # container image
@@ -359,8 +363,9 @@ artifacts:
     selector: { regex: { pattern: "^latest$" }, sortBy: alphabetical }
 hosts:
   - host: ghcr.io
-    username: my-org
     credential:
+      type: jwt
+      username: my-org
       value: ${GH_TOKEN}
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
     provider: ecr
@@ -425,7 +430,7 @@ identity. The destination cloud registry is authenticated with
 cloud credential chain — IRSA, AKS Workload Identity, or GKE Workload Identity).
 The source registry here accepts the cluster's ServiceAccount OIDC tokens, so it
 is authenticated with a projected ServiceAccount token sent as an HTTP Bearer
-credential (no `username`).
+credential (no `credential.username`).
 
 First, the ServiceAccount, annotated for each provider's workload identity. The
 projected token's audience must be the **source** registry host:
@@ -470,7 +475,7 @@ are mounted together (below) so a relative `fromPath` resolves:
 
 ```yaml
 # mirror.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: source-registry.example.com/library/app
@@ -478,10 +483,11 @@ artifacts:
     selector: { semver: ">=1.0.0", limit: 5 }
 hosts:
   # Source: a registry that validates the cluster's ServiceAccount OIDC token.
-  # No username → the token is sent as an HTTP Bearer credential. Its audience
-  # (the source host) is set by the projected-token volume, not here.
+  # No credential.username → the token is sent as an HTTP Bearer credential. Its
+  # audience (the source host) is set by the projected-token volume, not here.
   - host: source-registry.example.com
     credential:
+      type: jwt
       fromPath: registry-token
   # Destination: ECR via the pod's IRSA identity (use acr/gar to switch clouds).
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
@@ -561,17 +567,19 @@ metadata:
 
 ```yaml
 # mirror.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: source-registry.example.com/library/app
     destination: registry.example.org/library/app
     selector: { semver: ">=1.0.0", limit: 5 }
 hosts:
-  # Source: a registry that validates the caller's AWS identity. No username →
-  # the signed sts:GetCallerIdentity envelope is sent as an HTTP Bearer credential.
+  # Source: a registry that validates the caller's AWS identity.
+  # No credential.username → the signed sts:GetCallerIdentity envelope is sent
+  # as an HTTP Bearer credential.
   - host: source-registry.example.com
     credential:
+      type: jwt
       provider: aws
   # Destination: SPIFFE mTLS in both directions, no HTTP credential. Our client
   # X.509-SVID authenticates us; the server's SVID is verified against our own
@@ -579,8 +587,9 @@ hosts:
   - host: registry.example.org
     tls:
       clientAuth:
-        provider: x509-svid
+        provider: spiffe
       serverAuth:
+        provider: spiffe
         spiffe:
           trustDomain: self
 ```

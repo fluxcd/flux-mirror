@@ -13,7 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 // validateReportSchema compiles the generated report JSON Schema and validates
@@ -26,7 +26,7 @@ func validateReportSchema(t *testing.T, raw string) {
 	var doc any
 	g.Expect(json.Unmarshal([]byte(raw), &doc)).To(Succeed())
 
-	abs, err := filepath.Abs(filepath.Join("..", "..", "docs", "report-v1beta1.json"))
+	abs, err := filepath.Abs(filepath.Join("..", "..", "docs", "report-v1beta2.json"))
 	g.Expect(err).ToNot(HaveOccurred())
 
 	compiler := jsonschema.NewCompiler()
