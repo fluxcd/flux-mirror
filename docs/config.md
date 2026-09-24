@@ -303,7 +303,7 @@ Exactly one **token source** subfield selects how the credential is obtained:
   `forgejo`, `gcp`, `azure`, `aws`, or `jwt-svid` — see
   [Token providers](#token-providers) for what each obtains and what the registry
   must accept.
-- `.value`, sends the JSON Web Token configured inline as-is (e.g. a GitLab CI `id_token`). Use `${VAR}` to substitute it from the environment while loading the config.
+- `.value`, sends the JSON Web Token configured inline as-is (e.g. a GitLab CI/CD `id_token`). Use `${VAR}` to substitute it from the environment while loading the config.
 - `.fromPath`, sends the token read from the file at the path, with surrounding
   whitespace trimmed. The file is re-read on every request, so the token can be
   rotated without restarting (useful for a projected ServiceAccount token).
