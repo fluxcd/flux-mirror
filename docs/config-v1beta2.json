@@ -1,11 +1,11 @@
 {
-  "$id": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/config-v1beta1.json",
+  "$id": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/config-v1beta2.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Config is the flux-mirror configuration file.",
   "properties": {
     "apiVersion": {
-      "const": "mirror.plugin.fluxcd.io/v1beta1",
+      "const": "mirror.plugin.fluxcd.io/v1beta2",
       "type": "string"
     },
     "artifacts": {
@@ -172,30 +172,33 @@
       "description": "Hosts configures per-host authentication for OCI registry requests, both\nsource pulls and destination pushes.",
       "items": {
         "additionalProperties": false,
-        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential (mutually exclusive).\nTLS configures the transport-layer TLS/mTLS settings: it composes with\nCredential, but is mutually exclusive with Provider — a cloud registry\nprovider is a managed registry whose transport flux-mirror does not customize.\nAt least one of Credential, Provider, TLS, or MaxChunkSize must be set.",
+        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential (mutually exclusive for a\ncloud provider). TLS configures the transport-layer TLS/mTLS settings: it\ncomposes with Credential and with the default (generic) Provider, but is\nmutually exclusive with a cloud Provider — a cloud registry provider is a\nmanaged registry whose transport flux-mirror does not customize. At least one\nof Credential, a cloud Provider, TLS, or MaxChunkSize must be set.",
         "properties": {
           "credential": {
             "additionalProperties": false,
             "description": "Credential configures the HTTP-layer registry credential for the host.",
             "properties": {
-              "aud": {
-                "description": "Aud is the audience claim. Defaults to Host.",
-                "type": "string"
+              "audiences": {
+                "description": "Audiences is the audience claim. Defaults to Host.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               "envelope": {
                 "description": "Envelope transforms the resolved credential before it is sent to the\nregistry. It is a Go template whose data is a single Token field holding\nthe credential, with two functions available: base64 (standard base64)\nand hex (lowercase hexadecimal). For example, \"token-{{ hex .Token }}\"\nsends the hex-encoded credential with a token- prefix. An unset envelope\nsends the credential unchanged.",
                 "type": "string"
               },
-              "exp": {
-                "description": "Exp is the jwkPath/jwkValue JWT lifetime. Defaults to 60s.",
+              "expiration": {
+                "description": "Expiration is the jwkPath/jwkValue JWT lifetime. Defaults to 60s.",
                 "type": "string"
               },
               "fromPath": {
                 "description": "FromPath sends a static JWT read from the file at the path.",
                 "type": "string"
               },
-              "iss": {
-                "description": "Iss is the issuer claim for jwkPath/jwkValue-signed tokens.",
+              "issuer": {
+                "description": "Issuer is the issuer claim for jwkPath/jwkValue-signed tokens.",
                 "type": "string"
               },
               "jwkPath": {
@@ -207,19 +210,30 @@
                 "type": "string"
               },
               "provider": {
-                "description": "Provider mints a per-request credential for the audience, one of\nJWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,\nJWTProviderAWS, or JWTProviderJWTSVID.",
+                "description": "Provider mints a per-request credential for the audiences, one of\nJWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,\nJWTProviderAWS, or JWTProviderSPIFFE.",
                 "enum": [
                   "github",
                   "forgejo",
                   "gcp",
                   "azure",
                   "aws",
-                  "jwt-svid"
+                  "spiffe"
                 ],
                 "type": "string"
               },
-              "sub": {
-                "description": "Sub is the subject claim for jwkPath/jwkValue-signed tokens.",
+              "subject": {
+                "description": "Subject is the subject claim for jwkPath/jwkValue-signed tokens.",
+                "type": "string"
+              },
+              "type": {
+                "description": "Type is the kind of credential material (CredentialTypeJWT).",
+                "enum": [
+                  "jwt"
+                ],
+                "type": "string"
+              },
+              "username": {
+                "description": "Username presents the credential as the password of a username/password\npair. When unset, the credential is used as a bearer token.",
                 "type": "string"
               },
               "value": {
@@ -227,6 +241,9 @@
                 "type": "string"
               }
             },
+            "required": [
+              "type"
+            ],
             "type": "object"
           },
           "host": {
@@ -239,8 +256,9 @@
             "type": "integer"
           },
           "provider": {
-            "description": "Provider authenticates the host with a cloud registry provider's workload\nidentity, one of RegistryProviderECR, RegistryProviderACR or\nRegistryProviderGAR. Mutually exclusive with Credential.",
+            "description": "Provider selects a cloud registry provider's workload-identity credentials\nfor the host: RegistryProviderECR, RegistryProviderACR, or\nRegistryProviderGAR. Omitted (or RegistryProviderGeneric) means an ordinary\nregistry, for which flux-mirror configures the credential and/or TLS\ndirectly. A cloud provider is mutually exclusive with Credential and TLS.",
             "enum": [
+              "generic",
               "ecr",
               "acr",
               "gar"
@@ -286,9 +304,9 @@
                     "type": "object"
                   },
                   "provider": {
-                    "description": "Provider presents a SPIFFE X.509-SVID from the Workload API as the client\ncertificate (TLSClientProviderX509SVID).",
+                    "description": "Provider selects SPIFFE X.509-SVID client authentication\n(TLSProviderSPIFFE). Unset selects the static Certificate and Key pair.",
                     "enum": [
-                      "x509-svid"
+                      "spiffe"
                     ],
                     "type": "string"
                   }
@@ -301,6 +319,13 @@
                 "properties": {
                   "fromPath": {
                     "description": "FromPath reads the CA bundle from the file at the path.",
+                    "type": "string"
+                  },
+                  "provider": {
+                    "description": "Provider selects SPIFFE server verification (TLSProviderSPIFFE). Unset\nselects the file-based CA bundle from FromPath or Value.",
+                    "enum": [
+                      "spiffe"
+                    ],
                     "type": "string"
                   },
                   "spiffe": {
@@ -331,10 +356,6 @@
               }
             },
             "type": "object"
-          },
-          "username": {
-            "description": "Username presents the host credential as a username/password pair. When\nunset, the host credential is used as a bearer token.",
-            "type": "string"
           }
         },
         "required": [

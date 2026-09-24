@@ -17,7 +17,7 @@ import (
 	"github.com/fluxcd/pkg/auth/utils"
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/envelope"
 	"github.com/fluxcd/flux-mirror/internal/jwkio"
 )
@@ -59,7 +59,7 @@ func SelectAuthHosts(cfg *apiv1.Config, filter []string) ([]apiv1.RegistryHost, 
 // sets a provider or a credential. A TLS-only host (only tls configured) does
 // not, so the login/secret commands skip it.
 func HasCredential(h apiv1.RegistryHost) bool {
-	return h.Provider != "" || h.Credential != nil
+	return h.IsCloudProvider() || h.Credential != nil
 }
 
 // ResolveHostAuth resolves the credential for any auth host:
@@ -75,7 +75,7 @@ func ResolveHostAuth(ctx context.Context, h apiv1.RegistryHost) (HostAuth, error
 	if !HasCredential(h) {
 		return HostAuth{}, fmt.Errorf("host %q has no credential or provider configured", h.Host)
 	}
-	if h.Provider != "" {
+	if h.IsCloudProvider() {
 		a, err := providerAuthenticator(ctx, h)
 		if err != nil {
 			return HostAuth{}, err
@@ -90,8 +90,8 @@ func ResolveHostAuth(ctx context.Context, h apiv1.RegistryHost) (HostAuth, error
 	if err != nil {
 		return HostAuth{}, err
 	}
-	if h.Username != "" {
-		return HostAuth{Username: h.Username, Password: cred}, nil
+	if h.Credential.Username != "" {
+		return HostAuth{Username: h.Credential.Username, Password: cred}, nil
 	}
 	return HostAuth{RegistryToken: cred}, nil
 }
@@ -165,7 +165,7 @@ func (m mintingAuthenticator) AuthorizationContext(ctx context.Context) (*authn.
 	if err != nil {
 		return nil, err
 	}
-	return &authn.AuthConfig{Username: m.host.Username, Password: cred}, nil
+	return &authn.AuthConfig{Username: m.host.Credential.Username, Password: cred}, nil
 }
 
 // BuildKeychain returns a keychain that serves the hosts which authenticate
@@ -177,13 +177,13 @@ func BuildKeychain(ctx context.Context, hosts []apiv1.RegistryHost) (authn.Keych
 	auths := make(map[string]authn.Authenticator)
 	for _, h := range hosts {
 		switch {
-		case h.Provider != "":
+		case h.IsCloudProvider():
 			a, err := providerAuthenticator(ctx, h)
 			if err != nil {
 				return nil, err
 			}
 			auths[h.Host] = a
-		case h.Credential != nil && h.Username != "":
+		case h.Credential != nil && h.Credential.Username != "":
 			auths[h.Host] = mintingAuthenticator{host: h}
 		}
 	}
@@ -199,7 +199,7 @@ func BuildKeychain(ctx context.Context, hosts []apiv1.RegistryHost) (authn.Keych
 // keychain instead.
 func NeedsCredentialTransport(hosts []apiv1.RegistryHost) bool {
 	for _, h := range hosts {
-		if h.Credential != nil && h.Username == "" {
+		if h.Credential != nil && h.Credential.Username == "" {
 			return true
 		}
 	}
@@ -297,16 +297,16 @@ func JWTTransportOptions(inner http.RoundTripper, hosts []apiv1.RegistryHost) ([
 	opts := []cijwt.Option{cijwt.WithInner(inner)}
 
 	for _, h := range hosts {
-		if h.Credential == nil || h.Username != "" {
-			// Provider hosts and username credentials authenticate via the
+		if h.Credential == nil || h.Credential.Username != "" {
+			// Cloud provider hosts and username credentials authenticate via the
 			// keychain (standard challenge), not the cijwt bearer-stamp.
 			continue
 		}
 		j := h.Credential
-		aud := h.EffectiveAud()
+		audiences := h.EffectiveAudiences()
 		switch {
 		case j.Provider != "":
-			fn, err := providerTokenFunc(j.Provider, aud, strings.TrimSpace(j.Aud) != "")
+			fn, err := providerTokenFunc(j.Provider, audiences, len(j.Audiences) > 0)
 			if err != nil {
 				return nil, fmt.Errorf("auth host %q: %w", h.Host, err)
 			}
@@ -320,13 +320,13 @@ func JWTTransportOptions(inner http.RoundTripper, hosts []apiv1.RegistryHost) ([
 			if err != nil {
 				return nil, fmt.Errorf("auth host %q: %w", h.Host, err)
 			}
-			if j.Exp == nil {
+			if j.Expiration == nil {
 				// Default: cijwt signs a fresh 60s token per request.
-				opts = append(opts, cijwt.WithHostJWK(h.Host, jwk, j.Iss, aud, j.Sub))
+				opts = append(opts, cijwt.WithHostJWK(h.Host, jwk, j.Issuer, audiences, j.Subject))
 				break
 			}
-			// Custom exp: sign it ourselves and let cijwt cache per its exp.
-			fn, err := jwkTokenFunc(jwk, j.Iss, j.Sub, aud, j.Exp.Duration)
+			// Custom expiration: sign it ourselves and let cijwt cache per its exp.
+			fn, err := jwkTokenFunc(jwk, j.Issuer, j.Subject, audiences, j.Expiration.Duration)
 			if err != nil {
 				return nil, fmt.Errorf("auth host %q: parse JWK: %w", h.Host, err)
 			}

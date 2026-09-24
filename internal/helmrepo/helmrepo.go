@@ -64,7 +64,7 @@ func httpRepositoryEntry(sourceURL string) (*repo.Entry, error) {
 		return nil, fmt.Errorf("normalize source URL %q: %w", sourceURL, err)
 	}
 	for _, entry := range repos.Repositories {
-		if entry == nil || strings.TrimSpace(entry.URL) == "" {
+		if entry == nil || entry.URL == "" {
 			continue
 		}
 		entryKey, err := normalizeRepositoryURL(entry.URL)
@@ -85,7 +85,7 @@ func httpRepositoryEntry(sourceURL string) (*repo.Entry, error) {
 func VersionToTag(version string) string { return strings.ReplaceAll(version, "+", "_") }
 
 func normalizeRepositoryURL(raw string) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(raw))
+	u, err := url.Parse(raw)
 	if err != nil {
 		return "", err
 	}

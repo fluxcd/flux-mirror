@@ -12,7 +12,7 @@ require (
 	github.com/cyphar/filepath-securejoin v0.6.1
 	github.com/distribution/distribution/v3 v3.1.1
 	github.com/docker/cli v29.7.2+incompatible
-	github.com/fluxcd/pkg/auth v0.57.0
+	github.com/fluxcd/pkg/auth v0.58.1-0.20260924222852-f10f4a2efbd8
 	github.com/fluxcd/pkg/envsubst v1.8.0
 	github.com/fluxcd/pkg/helmtestserver v0.42.0
 	github.com/go-jose/go-jose/v4 v4.1.5
