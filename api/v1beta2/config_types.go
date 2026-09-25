@@ -1,10 +1,9 @@
 // Copyright 2026 The Flux Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package v1beta1
+package v1beta2
 
 import (
-	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,23 +44,37 @@ const (
 	// no JWT, so instead of an OIDC token this signs an sts:GetCallerIdentity
 	// request with the ambient role credentials (IMDS, env, ...) and wraps it in
 	// a JWT-shaped envelope; the registry replays the signed request to STS to
-	// verify it and read the caller's account/ARN. aud pins the target registry
-	// via a signed header, not an OIDC audience claim.
+	// verify it and read the caller's account/ARN. Each audience pins a target
+	// registry via a signed header, not an OIDC audience claim.
 	JWTProviderAWS = "aws"
-	// JWTProviderJWTSVID fetches a JWT-SVID from the SPIFFE Workload API
-	// (ambient SPIFFE_ENDPOINT_SOCKET) for the audience (defaults to host) and
-	// sends it as the registry credential. This is the HTTP-layer counterpart to
-	// the transport-layer tls.spiffe (X.509-SVID mTLS); the two are independent.
-	JWTProviderJWTSVID = "jwt-svid"
+	// JWTProviderSPIFFE fetches a JWT-SVID from the SPIFFE Workload API
+	// (ambient SPIFFE_ENDPOINT_SOCKET) for the audiences (defaulting to the host)
+	// and sends it as the registry credential. This is the HTTP-layer counterpart
+	// to the transport-layer tls.clientAuth/serverAuth spiffe provider
+	// (X.509-SVID mTLS); the two are independent.
+	JWTProviderSPIFFE = "spiffe"
+
+	// CredentialTypeJWT selects JSON Web Token material for a credential
+	// (credential.type). It is the only type currently supported; other
+	// material kinds (e.g. X.509) are reserved for a future release.
+	CredentialTypeJWT = "jwt"
 
 	// TrustDomainSelf used in tls.serverAuth.spiffe.trustDomain, authorizes any
 	// server SVID in the client's own trust domain (read from its X.509-SVID).
 	TrustDomainSelf = "self"
 
-	// TLSClientProviderX509SVID used in tls.clientAuth.provider, presents a
-	// SPIFFE X.509-SVID from the ambient Workload API as the client certificate.
-	TLSClientProviderX509SVID = "x509-svid"
+	// TLSProviderSPIFFE used in tls.clientAuth.provider and tls.serverAuth.provider,
+	// uses a SPIFFE X.509-SVID: as the client certificate for clientAuth, and as the
+	// expected server identity for serverAuth. The trust bundle comes from the
+	// ambient Workload API (SPIFFE_ENDPOINT_SOCKET). It is the only provider value;
+	// omitting provider selects the file-based path fields instead.
+	TLSProviderSPIFFE = "spiffe"
 
+	// RegistryProviderGeneric is the default registry provider for a host
+	// (hosts[].provider): the host is an ordinary registry whose transport and
+	// credential flux-mirror configures directly. It composes with credential and
+	// tls, unlike the cloud providers below.
+	RegistryProviderGeneric = "generic"
 	// RegistryProviderECR selects AWS ECR workload-identity credentials for a
 	// host (hosts[].provider). It maps to AWS and is mutually exclusive with the
 	// per-host credential.
@@ -80,9 +93,9 @@ const (
 	// defaultLimit is the chart/selector limit applied when unset.
 	defaultLimit = 1
 
-	// defaultJWKExp is the jwkPath/jwkValue JWT lifetime when exp is unset. It matches
-	// cijwt's per-request signing lifetime, keeping the default behavior of
-	// short-lived, freshly signed tokens.
+	// defaultJWKExp is the jwkPath/jwkValue JWT lifetime when expiration is unset.
+	// It matches cijwt's per-request signing lifetime, keeping the default behavior
+	// of short-lived, freshly signed tokens.
 	defaultJWKExp = 60 * time.Second
 )
 
@@ -114,29 +127,27 @@ type Config struct {
 }
 
 // RegistryHost binds an authentication method to a registry host. Credential and
-// Provider configure the HTTP-layer registry credential (mutually exclusive).
-// TLS configures the transport-layer TLS/mTLS settings: it composes with
-// Credential, but is mutually exclusive with Provider — a cloud registry
-// provider is a managed registry whose transport flux-mirror does not customize.
-// At least one of Credential, Provider, TLS, or MaxChunkSize must be set.
+// Provider configure the HTTP-layer registry credential (mutually exclusive for a
+// cloud provider). TLS configures the transport-layer TLS/mTLS settings: it
+// composes with Credential and with the default (generic) Provider, but is
+// mutually exclusive with a cloud Provider — a cloud registry provider is a
+// managed registry whose transport flux-mirror does not customize. At least one
+// of Credential, a cloud Provider, TLS, or MaxChunkSize must be set.
 type RegistryHost struct {
 	// Host is the registry host (and optional port) the auth applies to.
 	Host string `json:"host"`
-
-	// Username presents the host credential as a username/password pair. When
-	// unset, the host credential is used as a bearer token.
-	// +optional
-	Username string `json:"username,omitempty"`
 
 	// Credential configures the HTTP-layer registry credential for the host.
 	// +optional
 	Credential *RegistryCredential `json:"credential,omitempty"`
 
-	// Provider authenticates the host with a cloud registry provider's workload
-	// identity, one of RegistryProviderECR, RegistryProviderACR or
-	// RegistryProviderGAR. Mutually exclusive with Credential.
+	// Provider selects a cloud registry provider's workload-identity credentials
+	// for the host: RegistryProviderECR, RegistryProviderACR, or
+	// RegistryProviderGAR. Omitted (or RegistryProviderGeneric) means an ordinary
+	// registry, for which flux-mirror configures the credential and/or TLS
+	// directly. A cloud provider is mutually exclusive with Credential and TLS.
 	// +optional
-	// +kubebuilder:validation:Enum=ecr;acr;gar
+	// +kubebuilder:validation:Enum=generic;ecr;acr;gar
 	Provider string `json:"provider,omitempty"`
 
 	// TLS configures transport-layer TLS for the host: server verification
@@ -155,8 +166,9 @@ type RegistryHost struct {
 
 // IsCloudProvider reports whether the host selects a cloud registry provider
 // (RegistryProviderECR, RegistryProviderACR, or RegistryProviderGAR) rather than
-// the default provider. A cloud provider authenticates the host itself and is
-// mutually exclusive with Credential and TLS. The value is matched as written.
+// the default (RegistryProviderGeneric) provider. A cloud provider authenticates
+// the host itself and is mutually exclusive with Credential and TLS. The value is
+// matched as written.
 func (h RegistryHost) IsCloudProvider() bool {
 	switch h.Provider {
 	case RegistryProviderECR, RegistryProviderACR, RegistryProviderGAR:
@@ -166,13 +178,15 @@ func (h RegistryHost) IsCloudProvider() bool {
 	}
 }
 
-// RegistryCredential configures a per-host credential. Exactly one of Provider,
-// Value, FromPath, JWKPath, or JWKValue selects how the credential is obtained:
+// RegistryCredential configures a per-host credential. Type selects the kind of
+// material (CredentialTypeJWT) and is required. Exactly one of Provider, Value,
+// FromPath, JWKPath, or JWKValue selects how the credential is obtained:
 //
-//   - Provider mints a per-request credential for Aud (an OIDC token for the
-//     OIDC providers, or a signed sts:GetCallerIdentity envelope for aws; see
-//     JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,
-//     JWTProviderAWS).
+//   - Provider mints a per-request credential for Audiences (an OIDC token for
+//     the OIDC providers, a JWT-SVID for spiffe, or a signed
+//     sts:GetCallerIdentity envelope for aws; see JWTProviderGitHub,
+//     JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure, JWTProviderAWS,
+//     JWTProviderSPIFFE).
 //   - Value sends a static JWT read as-is from the config. Environment
 //     substitution can fill this from an environment variable.
 //   - FromPath sends a static JWT read from the file at the path, with leading
@@ -180,21 +194,30 @@ func (h RegistryHost) IsCloudProvider() bool {
 //   - JWKPath signs a fresh JWT with the private JSON Web Key at the path.
 //   - JWKValue signs a fresh JWT with the private JSON Web Key read from the config.
 //
-// Iss and Sub are required for, and may only be set with, JWKPath or JWKValue. Aud
-// is optional and may only be set with JWKPath, JWKValue, or Provider; it defaults
-// to Host. Exp sets the JWT lifetime and may only be set with JWKPath or JWKValue,
-// the sources whose lifetime flux-mirror controls; it defaults to a short 60s.
-// Every other source's lifetime is fixed by an external issuer or is an opaque
-// static token, so Exp is rejected for them.
+// Issuer and Subject are required for, and may only be set with, JWKPath or
+// JWKValue. Audiences is optional and may only be set with JWKPath, JWKValue, or
+// Provider; it defaults to Host. Every source accepts multiple audiences except
+// the gcp and azure providers, whose token carries a single aud. Expiration sets
+// the JWT lifetime and may only be set with JWKPath or JWKValue, the sources
+// whose lifetime flux-mirror controls; it defaults to a short 60s. Every other
+// source's lifetime is fixed by an external issuer or is an opaque static token,
+// so Expiration is rejected for them.
+//
+// Username presents the credential as a username/password pair. When unset, the
+// credential is used as a bearer token.
 //
 // Envelope is an optional transform applied to the resolved credential on top of
 // whichever source is selected; see its field comment.
 type RegistryCredential struct {
-	// Provider mints a per-request credential for the audience, one of
+	// Type is the kind of credential material (CredentialTypeJWT).
+	// +kubebuilder:validation:Enum=jwt
+	Type string `json:"type"`
+
+	// Provider mints a per-request credential for the audiences, one of
 	// JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,
-	// JWTProviderAWS, or JWTProviderJWTSVID.
+	// JWTProviderAWS, or JWTProviderSPIFFE.
 	// +optional
-	// +kubebuilder:validation:Enum=github;forgejo;gcp;azure;aws;jwt-svid
+	// +kubebuilder:validation:Enum=github;forgejo;gcp;azure;aws;spiffe
 	Provider string `json:"provider,omitempty"`
 
 	// Value sends a static JWT read from the config.
@@ -213,21 +236,26 @@ type RegistryCredential struct {
 	// +optional
 	JWKValue string `json:"jwkValue,omitempty"`
 
-	// Iss is the issuer claim for jwkPath/jwkValue-signed tokens.
+	// Issuer is the issuer claim for jwkPath/jwkValue-signed tokens.
 	// +optional
-	Iss string `json:"iss,omitempty"`
+	Issuer string `json:"issuer,omitempty"`
 
-	// Sub is the subject claim for jwkPath/jwkValue-signed tokens.
+	// Subject is the subject claim for jwkPath/jwkValue-signed tokens.
 	// +optional
-	Sub string `json:"sub,omitempty"`
+	Subject string `json:"subject,omitempty"`
 
-	// Aud is the audience claim. Defaults to Host.
+	// Audiences is the audience claim. Defaults to Host.
 	// +optional
-	Aud string `json:"aud,omitempty"`
+	Audiences []string `json:"audiences,omitempty"`
 
-	// Exp is the jwkPath/jwkValue JWT lifetime. Defaults to 60s.
+	// Expiration is the jwkPath/jwkValue JWT lifetime. Defaults to 60s.
 	// +optional
-	Exp *metav1.Duration `json:"exp,omitempty"`
+	Expiration *metav1.Duration `json:"expiration,omitempty"`
+
+	// Username presents the credential as the password of a username/password
+	// pair. When unset, the credential is used as a bearer token.
+	// +optional
+	Username string `json:"username,omitempty"`
 
 	// Envelope transforms the resolved credential before it is sent to the
 	// registry. It is a Go template whose data is a single Token field holding
@@ -239,21 +267,23 @@ type RegistryCredential struct {
 	Envelope string `json:"envelope,omitempty"`
 }
 
-// EffectiveExp returns the jwkPath/jwkValue JWT lifetime with the documented
-// default (60s) applied. Only meaningful for jwkPath/jwkValue credentials.
-func (c RegistryCredential) EffectiveExp() time.Duration {
-	if c.Exp != nil {
-		return c.Exp.Duration
+// EffectiveExpiration returns the jwkPath/jwkValue JWT lifetime with the
+// documented default (60s) applied. Only meaningful for jwkPath/jwkValue
+// credentials.
+func (c RegistryCredential) EffectiveExpiration() time.Duration {
+	if c.Expiration != nil {
+		return c.Expiration.Duration
 	}
 	return defaultJWKExp
 }
 
-// EffectiveAud returns the audience with the documented default (the host) applied.
-func (h RegistryHost) EffectiveAud() string {
-	if h.Credential == nil || strings.TrimSpace(h.Credential.Aud) == "" {
-		return h.Host
+// EffectiveAudiences returns the audiences with the documented default (the
+// host) applied.
+func (h RegistryHost) EffectiveAudiences() []string {
+	if h.Credential == nil || len(h.Credential.Audiences) == 0 {
+		return []string{h.Host}
 	}
-	return h.Credential.Aud
+	return h.Credential.Audiences
 }
 
 // TLS configures transport-layer TLS for a host. ServerAuth verifies the
@@ -271,12 +301,18 @@ type TLS struct {
 	ClientAuth *TLSClientAuth `json:"clientAuth,omitempty"`
 }
 
-// TLSServerAuth verifies the registry's server certificate. Exactly one of the
-// fields is set: FromPath/Value provide a custom CA bundle (one or
-// more concatenated PEM certificates), or SPIFFE verifies the server's
+// TLSServerAuth verifies the registry's server certificate. With provider unset,
+// FromPath or Value supply a custom CA bundle (one or more concatenated PEM
+// certificates); with provider TLSProviderSPIFFE, SPIFFE verifies the server's
 // X.509-SVID against the SPIFFE trust bundle. When ServerAuth is unset entirely,
 // the system trust pool is used.
 type TLSServerAuth struct {
+	// Provider selects SPIFFE server verification (TLSProviderSPIFFE). Unset
+	// selects the file-based CA bundle from FromPath or Value.
+	// +optional
+	// +kubebuilder:validation:Enum=spiffe
+	Provider string `json:"provider,omitempty"`
+
 	// FromPath reads the CA bundle from the file at the path.
 	// +optional
 	FromPath string `json:"fromPath,omitempty"`
@@ -314,15 +350,14 @@ type TLSKey struct {
 	Value string `json:"value,omitempty"`
 }
 
-// TLSClientAuth presents a client certificate (mTLS). Either Provider is set
-// (TLSClientProviderX509SVID, presenting a SPIFFE X.509-SVID from the Workload
-// API), or the static Certificate and Key pair is set — the two are mutually
-// exclusive.
+// TLSClientAuth presents a client certificate (mTLS). With provider unset, the
+// static Certificate and Key pair is used; with provider TLSProviderSPIFFE, a
+// SPIFFE X.509-SVID from the Workload API is presented.
 type TLSClientAuth struct {
-	// Provider presents a SPIFFE X.509-SVID from the Workload API as the client
-	// certificate (TLSClientProviderX509SVID).
+	// Provider selects SPIFFE X.509-SVID client authentication
+	// (TLSProviderSPIFFE). Unset selects the static Certificate and Key pair.
 	// +optional
-	// +kubebuilder:validation:Enum=x509-svid
+	// +kubebuilder:validation:Enum=spiffe
 	Provider string `json:"provider,omitempty"`
 
 	// Certificate is the static client certificate chain.
@@ -387,7 +422,7 @@ type ChartEntry struct {
 
 // EffectiveVersion returns the version constraint with the documented default applied.
 func (c ChartEntry) EffectiveVersion() string {
-	if strings.TrimSpace(c.Version) == "" {
+	if c.Version == "" {
 		return defaultChartVersion
 	}
 	return c.Version
@@ -473,7 +508,7 @@ type Selector struct {
 
 // EffectiveSortBy returns the sort strategy with the documented default applied.
 func (s Selector) EffectiveSortBy() string {
-	if strings.TrimSpace(s.SortBy) == "" {
+	if s.SortBy == "" {
 		return SortBySemver
 	}
 	return s.SortBy

@@ -10,7 +10,7 @@ import (
 	"log/slog"
 	"time"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/oci"
 	"github.com/fluxcd/flux-mirror/internal/selector"
 	"github.com/fluxcd/flux-mirror/internal/sync"

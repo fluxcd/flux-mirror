@@ -12,7 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 // NewReport assembles a Report from a Result. The caller owns the reporter

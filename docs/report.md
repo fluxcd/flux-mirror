@@ -7,7 +7,7 @@ weight: 60
 The `flux mirror sync` command can emit a structured report of the mirror
 results by setting `--output` to `json` or `yaml`. The envelope shape is
 versioned and documented by the JSON Schema in
-[`report-v1beta1.json`](report-v1beta1.json).
+[`report-v1beta2.json`](report-v1beta2.json).
 
 ## Usage
 
@@ -25,7 +25,7 @@ Every report is wrapped in a top-level envelope:
 
 | Key                 | Description                                                  |
 |---------------------|--------------------------------------------------------------|
-| `apiVersion`        | Report API version. Currently `mirror.plugin.fluxcd.io/v1beta1`.    |
+| `apiVersion`        | Report API version. Currently `mirror.plugin.fluxcd.io/v1beta2`.    |
 | `kind`              | Report API kind. Currently `Report`.                         |
 | `$schema`           | URL of the JSON Schema describing the envelope. JSON only.   |
 | `report.reporter`   | Identity of the producer, e.g. `flux-mirror/v0.1.0`.         |
@@ -163,9 +163,9 @@ second entry failed at plan time because the source repository does not exist.
 
 ```json
 {
-  "apiVersion": "mirror.plugin.fluxcd.io/v1beta1",
+  "apiVersion": "mirror.plugin.fluxcd.io/v1beta2",
   "kind": "Report",
-  "$schema": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report-v1beta1.json",
+  "$schema": "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report-v1beta2.json",
   "report": {
     "reporter": "flux-mirror/v0.1.0",
     "timestamp": "2026-06-06T20:12:25Z",

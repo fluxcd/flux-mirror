@@ -65,13 +65,13 @@ for `provider` sources involves a network call to mint the token. The global
   present in the config is an error.
 - The Secret's `.dockerconfigjson` holds one `auths` entry per host. A cloud
   [`provider`](config.md#cloud-registry-providers) host, and a
-  [`credential`](config.md#per-host-credential) host with `username` set,
-  write `username`/`password`/`auth` (understood by `kubelet` and Flux). A
-  `credential` host without `username` writes the bearer `registrytoken` field
+  [`credential`](config.md#per-host-credential) host with `credential.username`
+  set, write `username`/`password`/`auth` (understood by `kubelet` and Flux). A
+  `credential` host without `credential.username` writes the bearer `registrytoken` field
   (understood by go-containerregistry and Flux, **not** by `kubelet`). See
   [Bearer token vs. username/password](config.md#bearer-token-vs-usernamepassword).
-- A TLS-only host (only `tls`, no `credential`/`provider`) has nothing to put in
-  the Secret and is skipped with a `• skipping <host>` message.
+- A TLS-only host (only `tls`, no `credential` and no cloud `provider`) has
+  nothing to put in the Secret and is skipped with a `• skipping <host>` message.
 - Credentials are short-lived (provider tokens, freshly signed JWTs). Re-run the
   command to refresh the Secret before they expire; by default it replaces the
   existing one in place.
@@ -151,7 +151,7 @@ A hosts-only config selecting the cloud registry (switch clouds via the host and
 
 ```yaml
 # mirror.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 hosts:
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
@@ -206,7 +206,7 @@ both as a pod `imagePullSecret` and as a Flux `OCIRepository`/`HelmRepository`
 When the target registry validates the cluster's ServiceAccount OIDC tokens
 directly, project a ServiceAccount token whose audience is the registry host and
 feed it to a [`credential`](config.md#per-host-credential) host via
-`fromPath`. Setting `username` writes the token as the password of a
+`fromPath`. Setting `credential.username` writes the token as the password of a
 username/password pair (`username`/`password`/`auth`), so the resulting Secret
 works as a pod `imagePullSecret` (which `kubelet` can use) as well as a Flux
 `OCIRepository`/`HelmRepository` `.spec.secretRef`. The username value is
@@ -222,12 +222,13 @@ are mounted together:
 
 ```yaml
 # mirror.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 hosts:
   - host: registry.example.com
-    username: sa-oidc          # value the registry expects; often ignored
     credential:
+      type: jwt
+      username: sa-oidc          # value the registry expects; often ignored
       fromPath: registry-token   # the audience is set by the projected volume
 ```
 
@@ -271,11 +272,12 @@ spec:
 ### Rotate credentials using a SPIFFE JWT-SVID
 
 When the registry accepts SPIFFE JWT-SVIDs, use the
-[`jwt-svid` credential provider](config.md#token-providers): it fetches
-a JWT-SVID for the audience (the registry host) from the SPIFFE Workload API.
-Setting `username` writes the JWT-SVID as the password of a username/password
-pair, so the resulting Secret works as a pod `imagePullSecret` (which `kubelet`
-can use) as well as a Flux `OCIRepository`/`HelmRepository` `.spec.secretRef`.
+[`spiffe` credential provider](config.md#token-providers): it fetches
+a JWT-SVID for the audiences (defaulting to the registry host) from the SPIFFE
+Workload API. Setting `credential.username` writes the JWT-SVID as the password
+of a username/password pair, so the resulting Secret works as a pod
+`imagePullSecret` (which `kubelet` can use) as well as a Flux
+`OCIRepository`/`HelmRepository` `.spec.secretRef`.
 The Workload API is exposed to the pod by the SPIFFE CSI driver, and go-spiffe
 locates it through the `SPIFFE_ENDPOINT_SOCKET` environment variable.
 
@@ -284,14 +286,15 @@ cloud annotations are needed; the registry trusts the SPIFFE trust domain).
 
 ```yaml
 # mirror.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 hosts:
   - host: registry.example.com
-    username: spiffe           # value the registry expects; often ignored
     credential:
-      provider: jwt-svid
-      # aud defaults to the host (registry.example.com)
+      type: jwt
+      provider: spiffe
+      username: spiffe           # value the registry expects; often ignored
+      # audiences default to the host (registry.example.com)
 ```
 
 ```yaml

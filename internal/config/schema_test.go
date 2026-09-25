@@ -22,7 +22,7 @@ func validateConfigSchema(t *testing.T, raw string) {
 	var doc any
 	g.Expect(k8syaml.Unmarshal([]byte(raw), &doc)).To(Succeed())
 
-	abs, err := filepath.Abs(filepath.Join("..", "..", "docs", "config-v1beta1.json"))
+	abs, err := filepath.Abs(filepath.Join("..", "..", "docs", "config-v1beta2.json"))
 	g.Expect(err).ToNot(HaveOccurred())
 
 	compiler := jsonschema.NewCompiler()
@@ -33,18 +33,19 @@ func validateConfigSchema(t *testing.T, raw string) {
 }
 
 func TestConfig_Schema(t *testing.T) {
-	validateConfigSchema(t, `apiVersion: mirror.plugin.fluxcd.io/v1beta1
+	validateConfigSchema(t, `apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 hosts:
   - host: ghcr.io
     credential:
       provider: github
+      type: jwt
   - host: registry.example.com
     tls:
       serverAuth:
         fromPath: /etc/ssl/ca.crt
       clientAuth:
-        provider: x509-svid
+        provider: spiffe
   - host: 123456789.dkr.ecr.us-east-1.amazonaws.com
     provider: ecr
 charts:

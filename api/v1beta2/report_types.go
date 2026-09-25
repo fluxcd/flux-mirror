@@ -1,7 +1,7 @@
 // Copyright 2026 The Flux Authors
 // SPDX-License-Identifier: Apache-2.0
 
-package v1beta1
+package v1beta2
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -9,9 +9,7 @@ const (
 	// ReportKind is the kind used by sync report envelopes.
 	ReportKind = "Report"
 
-	// ReportSchema is the canonical URL of the JSON Schema describing the Report
-	// shape. v1beta1 is deprecated and its reports are never emitted; the shape
-	// is unchanged from v1beta2, so this points at the current schema.
+	// ReportSchema is the canonical URL of the JSON Schema describing the Report shape.
 	ReportSchema = "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report-v1beta2.json"
 )
 

@@ -24,7 +24,7 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 // testCA is a self-signed CA used to issue server and client certificates for
@@ -215,7 +215,7 @@ func makeCertPEM(t *testing.T) (certPEM, keyPEM []byte) {
 func TestNeedsTLS(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(NeedsTLS(nil)).To(BeFalse())
-	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", Credential: &apiv1.RegistryCredential{Value: "X"}}})).To(BeFalse())
+	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "X"}}})).To(BeFalse())
 	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{Value: "x"}}}})).To(BeTrue())
 }
 
@@ -223,7 +223,7 @@ func TestNewTLSTransport_NoTLSReturnsInner(t *testing.T) {
 	g := NewWithT(t)
 	inner := http.DefaultTransport
 	rt, closeFn, err := NewTLSTransport(context.Background(), inner, []apiv1.RegistryHost{
-		{Host: "a", Credential: &apiv1.RegistryCredential{Value: "X"}},
+		{Host: "a", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "X"}},
 	})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(rt).To(BeIdenticalTo(inner))
@@ -241,7 +241,7 @@ func TestNewTLSTransport_StaticDispatch(t *testing.T) {
 			Certificate: &apiv1.TLSData{Value: string(certPEM)},
 			Key:         &apiv1.TLSKey{FromPath: writeTemp(t, keyPEM)},
 		}}},
-		{Host: "plain.example", Credential: &apiv1.RegistryCredential{Value: "X"}},
+		{Host: "plain.example", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "X"}},
 	}
 	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, hosts)
 	g.Expect(err).ToNot(HaveOccurred())

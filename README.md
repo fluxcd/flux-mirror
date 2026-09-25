@@ -72,7 +72,7 @@ Write a config file describing what to mirror:
 
 ```yaml
 # flux-mirror.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 charts:
   - name: external-dns
@@ -217,9 +217,9 @@ Run `flux mirror <command> --help` for the full flag list.
   exit codes, and example invocations.
 - [Config specification](docs/config.md) — YAML schema for `hosts`,
   `artifacts`, and `charts` entries, selector pipeline, overwrite semantics,
-  defaults, and the published [JSON Schema](docs/config-v1beta1.json).
+  defaults, and the published [JSON Schema](docs/config-v1beta2.json).
 - [Sync report reference](docs/report.md) — report envelope and its
-  published [JSON Schema](docs/report-v1beta1.json) for `-o json` / `-o yaml`.
+  published [JSON Schema](docs/report-v1beta2.json) for `-o json` / `-o yaml`.
 - [Keygen command reference](docs/keygen.md) — generate EdDSA JWK pairs for
   JWK-based registry auth.
 - [Login command reference](docs/login.md) — store configured credentials in
