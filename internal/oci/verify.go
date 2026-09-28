@@ -4,6 +4,7 @@
 package oci
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -25,6 +26,15 @@ import (
 )
 
 const (
+	// minBundleVersion is the minimum sigstore bundle version accepted from
+	// OCI referrers. v0.3 is the spec's canonical format; v0.1/v0.2 exist
+	// only for backwards compatibility and rely on a weaker inclusion
+	// promise and full certificate chain instead of v0.3's inclusion proof
+	// and single leaf certificate. cosign added OCI-referrer bundle
+	// publishing in v2.6.0, the same release that adopted v0.3, so no
+	// earlier version was ever produced this way.
+	// Spec: https://github.com/sigstore/protobuf-specs/blob/main/protos/sigstore_bundle.proto
+	// cosign changelog: https://github.com/sigstore/cosign/blob/main/CHANGELOG.md
 	minBundleVersion              = "v0.3"
 	sigstoreBundleMediaTypePrefix = "application/vnd.dev.sigstore.bundle"
 )
@@ -51,10 +61,12 @@ type SignatureTooNewError struct {
 }
 
 func (e *SignatureTooNewError) Error() string {
-	return fmt.Sprintf("signature age (%s) is less than the required minAge (%s); signature was integrated at %s",
+	return fmt.Sprintf(
+		"signature age (%s) is less than the required minAge (%s); signature was integrated at %s",
 		e.Age.Round(time.Second),
 		e.MinAge,
-		e.IntegratedTime.Format(time.RFC3339))
+		e.IntegratedTime.Format(time.RFC3339),
+	)
 }
 
 // Verifier verifies cosign keyless signatures stored as OCI referrers.
@@ -100,34 +112,17 @@ func (v *Verifier) Verify(ctx context.Context, ref string, cfg apiv1.ArtifactVer
 	}
 
 	repo := parsed.Context()
-	digestRef := repo.Digest(desc.Digest.String())
-	idx, err := remote.Referrers(digestRef, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("list referrers for %s: %w", digestRef, err)
-	}
-	manifest, err := idx.IndexManifest()
-	if err != nil {
-		return nil, fmt.Errorf("read referrers index for %s: %w", digestRef, err)
-	}
-
-	bundleBytes, err := findSigstoreBundle(repo, manifest, opts...)
+	discovered, err := discoverSignatureBundle(repo, desc, opts...)
 	if err != nil {
 		return nil, err
-	}
-
-	var b bundle.Bundle
-	if err := b.UnmarshalJSON(bundleBytes); err != nil {
-		return nil, fmt.Errorf("parse sigstore bundle: %w", err)
-	}
-	if !b.MinVersion(minBundleVersion) {
-		return nil, fmt.Errorf("unsupported sigstore bundle version: minimum %s required", minBundleVersion)
 	}
 
 	trustedRoot, err := v.getTrustedRoot()
 	if err != nil {
 		return nil, err
 	}
-	sigVerifier, err := verify.NewVerifier(trustedRoot,
+	sigVerifier, err := verify.NewVerifier(
+		trustedRoot,
 		verify.WithSignedCertificateTimestamps(1),
 		verify.WithIntegratedTimestamps(1),
 		verify.WithTransparencyLog(1),
@@ -140,17 +135,10 @@ func (v *Verifier) Verify(ctx context.Context, ref string, cfg apiv1.ArtifactVer
 	if err != nil {
 		return nil, err
 	}
-	digestBytes, err := hex.DecodeString(desc.Digest.Hex)
-	if err != nil {
-		return nil, fmt.Errorf("decode digest %s: %w", desc.Digest.String(), err)
-	}
 
 	policyOptions := append([]verify.PolicyOption(nil), identityOptions...)
-	policy := verify.NewPolicy(
-		verify.WithArtifactDigest(desc.Digest.Algorithm, digestBytes),
-		policyOptions...,
-	)
-	result, err := sigVerifier.Verify(&b, policy)
+	policy := verify.NewPolicy(discovered.artifact, policyOptions...)
+	result, err := sigVerifier.Verify(discovered.bundle, policy)
 	if err != nil {
 		return nil, fmt.Errorf("signature verification failed: %w", err)
 	}
@@ -298,5 +286,83 @@ func findSigstoreBundle(repo name.Repository, manifest *v1.IndexManifest, opts .
 		}
 		return data, nil
 	}
-	return nil, fmt.Errorf("no sigstore bundle found in referrers")
+	return nil, errNoReferrerBundle
+}
+
+// errNoReferrerBundle signals that no sigstore bundle was found via the OCI
+// referrers API, so discoverSignatureBundle can fall back to cosign's
+// tag-based discovery scheme.
+var errNoReferrerBundle = errors.New("no sigstore bundle found in referrers")
+
+// discoveredBundle pairs a sigstore Bundle with the artifact policy option
+// that binds it to whatever content the signature was actually computed
+// over: OCI referrer bundles are bound to the raw image digest, while
+// cosign tag-based bundles are bound to the "simple signing" payload.
+type discoveredBundle struct {
+	bundle   *bundle.Bundle
+	artifact verify.ArtifactPolicyOption
+}
+
+// discoverSignatureBundle locates the sigstore bundle for desc, preferring
+// the OCI 1.1 referrers API and falling back to cosign's tag-based
+// discovery scheme (see cosign_tag_discovery.go) when no referrer bundle is
+// found. Some registries don't support the referrers API at all, and some
+// images are only ever published with tag-based signatures.
+// See https://github.com/sigstore/cosign/blob/main/specs/SIGNATURE_SPEC.md#tag-based-discovery
+func discoverSignatureBundle(repo name.Repository, desc *remote.Descriptor, opts ...remote.Option) (
+	*discoveredBundle, error,
+) {
+	found, err := findReferrerBundle(repo, desc.Digest, opts...)
+	if err == nil {
+		return found, nil
+	}
+	if !errors.Is(err, errNoReferrerBundle) {
+		return nil, err
+	}
+	// err is exactly errNoReferrerBundle: fall through to the cosign
+	// tag-based scheme.
+
+	tagBundle, payload, err := findCosignTagBundle(repo, desc.Digest, opts...)
+	if err != nil {
+		if errors.Is(err, errNoCosignTagSignature) {
+			return nil, fmt.Errorf(
+				"no sigstore bundle found via OCI referrers or cosign tag-based discovery for %s", desc.Digest,
+			)
+		}
+		return nil, err
+	}
+	return &discoveredBundle{bundle: tagBundle, artifact: verify.WithArtifact(bytes.NewReader(payload))}, nil
+}
+
+// findReferrerBundle looks up a sigstore bundle attached to digest via the
+// OCI 1.1 referrers API.
+func findReferrerBundle(repo name.Repository, digest v1.Hash, opts ...remote.Option) (*discoveredBundle, error) {
+	digestRef := repo.Digest(digest.String())
+	idx, err := remote.Referrers(digestRef, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("list referrers for %s: %w", digestRef, err)
+	}
+	manifest, err := idx.IndexManifest()
+	if err != nil {
+		return nil, fmt.Errorf("read referrers index for %s: %w", digestRef, err)
+	}
+
+	bundleBytes, err := findSigstoreBundle(repo, manifest, opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	var b bundle.Bundle
+	if err := b.UnmarshalJSON(bundleBytes); err != nil {
+		return nil, fmt.Errorf("parse sigstore bundle: %w", err)
+	}
+	if !b.MinVersion(minBundleVersion) {
+		return nil, fmt.Errorf("unsupported sigstore bundle version: minimum %s required", minBundleVersion)
+	}
+
+	digestBytes, err := hex.DecodeString(digest.Hex)
+	if err != nil {
+		return nil, fmt.Errorf("decode digest %s: %w", digest.String(), err)
+	}
+	return &discoveredBundle{bundle: &b, artifact: verify.WithArtifactDigest(digest.Algorithm, digestBytes)}, nil
 }
