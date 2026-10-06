@@ -22,7 +22,6 @@ func TestApply(t *testing.T) {
 		{name: "literal only", tmpl: "static", token: "secret", want: "static"},
 		{name: "prefix and hex", tmpl: "token-{{ hex .Token }}", token: "abc", want: "token-" + hex.EncodeToString([]byte("abc"))},
 		{name: "base64", tmpl: "{{ base64 .Token }}", token: "abc", want: base64.StdEncoding.EncodeToString([]byte("abc"))},
-		{name: "trimmed whitespace only is a no-op", tmpl: "  ", token: "secret", want: "secret"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

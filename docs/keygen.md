@@ -61,7 +61,7 @@ Output:
 
 Unlike `provider`/`value` credentials — whose lifetime is fixed by an external
 issuer — a `jwkPath` credential is signed locally, so you control its lifetime
-through [`exp`](config.md#per-host-credential). This makes a key pair plus
+through [`expiration`](config.md#per-host-credential). This makes a key pair plus
 `login` a convenient way to mint a single, long-lived bearer token (for example,
 a year-long token for a CI system or an air-gapped agent).
 
@@ -71,23 +71,25 @@ a year-long token for a CI system or an air-gapped agent).
 flux mirror keygen -o ./keys/registry
 ```
 
-**2. Reference the private key from a host credential, with a long `exp`.** Set
-`iss`/`sub` to the identity the registry expects, and `exp` to the desired
-lifetime (here ~1 year). With no `username`, the signed JWT is stored as a bearer
-`registrytoken`:
+**2. Reference the private key from a host credential, with a long `expiration`.**
+Set `issuer`/`subject` to the identity the registry expects, and `expiration` to
+the desired lifetime (here ~1 year). With no `credential.username`, the signed
+JWT is stored as a bearer `registrytoken`:
 
 ```yaml
 # config.yaml
-apiVersion: mirror.plugin.fluxcd.io/v1beta1
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 hosts:
   - host: registry.example.com
     credential:
+      type: jwt
       jwkPath: ./keys/registry/privkey.json
-      iss: https://my-issuer.example
-      sub: ci-pusher
-      # aud: registry.example.com   # optional, defaults to the host
-      exp: 8760h                     # ~1 year
+      issuer: https://my-issuer.example
+      subject: ci-pusher
+      # audiences:                   # optional, defaults to the host
+      #   - registry.example.com
+      expiration: 8760h              # ~1 year
 ```
 
 **3. Log in once to mint and store the token.**
@@ -96,13 +98,14 @@ hosts:
 flux mirror login -f ./config.yaml
 ```
 
-`login` signs one JWT valid for `exp` and writes it to the Docker config, so
-tools like `flux push artifact` authenticate as that identity until it expires.
+`login` signs one JWT valid for the configured `expiration` and writes it to the
+Docker config, so tools like `flux push artifact` authenticate as that identity
+until it expires.
 
 **4. Grant access on the registry side.** Share `pubkey.json` with the registry
 operator, or publish it at an HTTPS URL the registry can fetch as JWKS, so the
 registry can verify tokens signed by the matching private key (matched by `kid`).
 
 > Re-run `login` to mint a fresh token before the current one expires. Treat
-> `privkey.json` as a secret: anyone holding it can mint tokens for `sub` until
-> the public key is rotated out.
+> `privkey.json` as a secret: anyone holding it can mint tokens for the
+> configured `subject` until the public key is rotated out.

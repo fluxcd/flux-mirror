@@ -6,7 +6,7 @@ package sync
 import (
 	"context"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 // EntryMirror is the consumer-side interface the Runner uses to drive any

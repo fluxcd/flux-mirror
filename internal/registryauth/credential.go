@@ -33,7 +33,7 @@ import (
 	"github.com/fluxcd/pkg/auth/jwt"
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/envelope"
 )
 
@@ -43,14 +43,14 @@ import (
 // source). The host's Envelope, if any, is applied to the resolved credential.
 func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error) {
 	c := h.Credential
-	aud := h.EffectiveAud()
+	audiences := h.EffectiveAudiences()
 	var (
 		token string
 		err   error
 	)
 	switch {
 	case c.Provider != "":
-		fn, ferr := providerTokenFunc(c.Provider, aud, strings.TrimSpace(c.Aud) != "")
+		fn, ferr := providerTokenFunc(c.Provider, audiences, len(c.Audiences) > 0)
 		if ferr != nil {
 			return "", ferr
 		}
@@ -68,7 +68,7 @@ func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error
 		if rerr != nil {
 			return "", rerr
 		}
-		fn, ferr := jwkTokenFunc(raw, c.Iss, c.Sub, aud, c.EffectiveExp())
+		fn, ferr := jwkTokenFunc(raw, c.Issuer, c.Subject, audiences, c.EffectiveExpiration())
 		if ferr != nil {
 			return "", fmt.Errorf("parse JWK: %w", ferr)
 		}
@@ -84,15 +84,15 @@ func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error
 
 // jwkTokenFunc parses a private JWK once and returns a cijwt.TokenFunc that
 // signs a fresh JWT with the given claims and lifetime on each call. Used for
-// jwkPath/jwkValue credentials that set a custom exp; the default 60s lifetime is
-// served by cijwt.WithHostJWK instead.
-func jwkTokenFunc(jwk, iss, sub, aud string, ttl time.Duration) (cijwt.TokenFunc, error) {
+// jwkPath/jwkValue credentials that set a custom expiration; the default 60s
+// lifetime is served by cijwt.WithHostJWK instead.
+func jwkTokenFunc(jwk, iss, sub string, auds []string, ttl time.Duration) (cijwt.TokenFunc, error) {
 	key, err := jwt.ParseJWK(jwk)
 	if err != nil {
 		return nil, err
 	}
 	return func(context.Context) (string, error) {
-		return key.Issue(iss, sub, aud, ttl)
+		return key.Issue(iss, sub, auds, ttl)
 	}, nil
 }
 
@@ -121,19 +121,28 @@ func gcpUserIDToken(ctx context.Context) (string, error) {
 }
 
 // providerTokenFunc returns a cijwt.TokenFunc that mints a per-request bearer
-// credential for aud using the given provider: an OIDC ID/access token for the
-// OIDC providers, or a signed sts:GetCallerIdentity envelope for aws. audSet
-// reports whether aud was explicitly configured (rather than defaulted to the
-// host), so a provider branch that cannot honor a requested audience fails fast
-// instead of silently minting a token for a different one. cijwt parses each
-// returned token's exp claim and caches it for the first 50% of its lifetime, so
-// the closure runs only on a cache miss and any ctx-scoped setup happens lazily
-// under the request's own context.
-func providerTokenFunc(provider, aud string, audSet bool) (cijwt.TokenFunc, error) {
+// credential for audiences using the given provider: an OIDC ID/access token for
+// the OIDC providers, a JWT-SVID for spiffe, or a signed sts:GetCallerIdentity
+// envelope for aws. audiences has at least one entry (the host is the default).
+// gcp and azure accept a single audience, enforced both here and by the config
+// validation; the rest carry all of them. audiencesSet reports whether any
+// audience was explicitly configured, so a provider branch that cannot honor a
+// requested audience fails fast instead of silently minting a token for a
+// different one. cijwt parses each returned token's exp claim and caches it for
+// the first 50% of its lifetime, so the closure runs only on a cache miss and
+// any ctx-scoped setup happens lazily under the request's own context.
+func providerTokenFunc(provider string, audiences []string, audiencesSet bool) (cijwt.TokenFunc, error) {
+	if len(audiences) == 0 {
+		return nil, fmt.Errorf("provider %q requires at least one audience", provider)
+	}
+	if len(audiences) > 1 && (provider == apiv1.JWTProviderGCP || provider == apiv1.JWTProviderAzure) {
+		return nil, fmt.Errorf("provider %q accepts at most one audience", provider)
+	}
+	aud := audiences[0]
 	switch provider {
 	case apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo:
 		return func(ctx context.Context) (string, error) {
-			return actionsoidc.FetchToken(ctx, aud)
+			return actionsoidc.FetchToken(ctx, audiences)
 		}, nil
 	case apiv1.JWTProviderGCP:
 		return func(ctx context.Context) (string, error) {
@@ -148,8 +157,8 @@ func providerTokenFunc(provider, aud string, audSet bool) (cijwt.TokenFunc, erro
 				// ignore it, so reject rather than mint a token for the wrong
 				// audience.
 				if strings.Contains(err.Error(), "unsupported credentials type") {
-					if audSet {
-						return "", fmt.Errorf("aud %q cannot be honored with GCP user credentials (authorized_user Application Default Credentials); unset aud or authenticate with a service account", aud)
+					if audiencesSet {
+						return "", fmt.Errorf("audience %q cannot be honored with GCP user credentials (authorized_user Application Default Credentials); unset audiences or authenticate with a service account", aud)
 					}
 					return gcpUserIDToken(ctx)
 				}
@@ -189,11 +198,12 @@ func providerTokenFunc(provider, aud string, audSet bool) (cijwt.TokenFunc, erro
 			if region == "" {
 				region = "us-east-1"
 			}
-			return mintAWSSTSToken(ctx, cfg.Credentials, signer, region, aud)
+			return mintAWSSTSToken(ctx, cfg.Credentials, signer, region, audiences)
 		}, nil
-	case apiv1.JWTProviderJWTSVID:
+	case apiv1.JWTProviderSPIFFE:
+		extra := audiences[1:]
 		return func(ctx context.Context) (string, error) {
-			// Fetch a JWT-SVID for the audience from the ambient Workload API
+			// Fetch a JWT-SVID for the audiences from the ambient Workload API
 			// (SPIFFE_ENDPOINT_SOCKET). The source is opened per cache-miss call
 			// and closed immediately; cijwt caches the returned token's exp, so
 			// this does not dial the socket on every request.
@@ -202,7 +212,7 @@ func providerTokenFunc(provider, aud string, audSet bool) (cijwt.TokenFunc, erro
 				return "", fmt.Errorf("create SPIFFE JWT source: %w", err)
 			}
 			defer src.Close()
-			svid, err := src.FetchJWTSVID(ctx, jwtsvid.Params{Audience: aud})
+			svid, err := src.FetchJWTSVID(ctx, jwtsvid.Params{Audience: aud, ExtraAudiences: extra})
 			if err != nil {
 				return "", fmt.Errorf("fetch JWT-SVID: %w", err)
 			}
@@ -219,10 +229,13 @@ func providerTokenFunc(provider, aud string, audSet bool) (cijwt.TokenFunc, erro
 // window AWS STS accepts a SigV4 request's timestamp.
 const awsSTSTokenTTL = 2 * time.Minute
 
-// awsAudienceHeader carries aud, signed into the GetCallerIdentity request to
-// pin the intended registry, so a request minted for one host cannot be
-// replayed against another. The registry must require it and match it to its
-// own identity. It plays the role Vault's X-Vault-AWS-IAM-Server-ID guard does.
+// awsAudienceHeader carries the audiences, signed into the GetCallerIdentity
+// request so the registry can match the request against its own identity. Each
+// audience is sent as its own signed header value; the registry must require the
+// header and accept the request only if it lists an identity the registry
+// recognizes. A single audience therefore ties the request to that one registry,
+// while several audiences deliberately authorize every registry listed. It plays
+// the role Vault's X-Vault-AWS-IAM-Server-ID guard does.
 const awsAudienceHeader = "X-Audience"
 
 // awsSTSTokenType is the JOSE "typ" header the registry uses to tell this
@@ -240,7 +253,7 @@ const awsSTSTokenType = "aws-sigv4-getcalleridentity"
 // not a real JWT — it carries the signed request under the "sts" claim and an
 // unverified exp that only tells the cijwt transport when to re-mint; nothing
 // checks its (empty) signature segment.
-func mintAWSSTSToken(ctx context.Context, creds aws.CredentialsProvider, signer *v4.Signer, region, serverID string) (string, error) {
+func mintAWSSTSToken(ctx context.Context, creds aws.CredentialsProvider, signer *v4.Signer, region string, audiences []string) (string, error) {
 	c, err := creds.Retrieve(ctx)
 	if err != nil {
 		return "", fmt.Errorf("retrieve AWS credentials: %w", err)
@@ -253,7 +266,7 @@ func mintAWSSTSToken(ctx context.Context, creds aws.CredentialsProvider, signer 
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set(awsAudienceHeader, serverID)
+	req.Header[awsAudienceHeader] = audiences
 
 	sum := sha256.Sum256([]byte(body))
 	now := time.Now()
@@ -272,7 +285,7 @@ func mintAWSSTSToken(ctx context.Context, creds aws.CredentialsProvider, signer 
 	}
 	claims, err := json.Marshal(map[string]any{
 		"exp": now.Add(awsSTSTokenTTL).Unix(),
-		"aud": serverID,
+		"aud": audiences,
 		"sts": json.RawMessage(sts),
 	})
 	if err != nil {

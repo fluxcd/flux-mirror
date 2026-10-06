@@ -25,7 +25,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/proto/spiffe/workload"
 	"google.golang.org/grpc"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 const (
@@ -129,7 +129,7 @@ func startFakeWorkloadAPI(t *testing.T, ca *testCA) {
 // TestSPIFFE_MTLSEndToEnd drives a real X.509-SVID mTLS handshake: a SPIFFE
 // server SVID on the server side, flux-mirror's tls.spiffe transport (fed by the
 // fake Workload API) on the client side, exercising trustDomain: self, an exact
-// serverID, and a serverID mismatch.
+// serverID, a serverID prefix, and their respective mismatches.
 func TestSPIFFE_MTLSEndToEnd(t *testing.T) {
 	g := NewWithT(t)
 	ca := newTestCA(t)
@@ -161,14 +161,16 @@ func TestSPIFFE_MTLSEndToEnd(t *testing.T) {
 		{"trustDomain self", &apiv1.SPIFFETLS{TrustDomain: apiv1.TrustDomainSelf}, true},
 		{"exact serverID", &apiv1.SPIFFETLS{ServerID: testServerID}, true},
 		{"serverID mismatch", &apiv1.SPIFFETLS{ServerID: "spiffe://example.org/wrong"}, false},
+		{"serverID prefix", &apiv1.SPIFFETLS{ServerID: "spiffe://example.org/server/"}, true},
+		{"serverID prefix mismatch", &apiv1.SPIFFETLS{ServerID: "spiffe://example.org/other/"}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport,
 				[]apiv1.RegistryHost{{Host: host, TLS: &apiv1.TLS{
-					ClientAuth: &apiv1.TLSClientAuth{Provider: apiv1.TLSClientProviderX509SVID},
-					ServerAuth: &apiv1.TLSServerAuth{SPIFFE: tc.spiffe},
+					ClientAuth: &apiv1.TLSClientAuth{Provider: apiv1.TLSProviderSPIFFE},
+					ServerAuth: &apiv1.TLSServerAuth{Provider: apiv1.TLSProviderSPIFFE, SPIFFE: tc.spiffe},
 				}}})
 			g.Expect(err).ToNot(HaveOccurred())
 			defer closeFn()
@@ -215,7 +217,7 @@ func TestSPIFFE_ClientOnly(t *testing.T) {
 		Host: host,
 		TLS: &apiv1.TLS{
 			ServerAuth: &apiv1.TLSServerAuth{Value: string(ca.certPEM)},
-			ClientAuth: &apiv1.TLSClientAuth{Provider: apiv1.TLSClientProviderX509SVID},
+			ClientAuth: &apiv1.TLSClientAuth{Provider: apiv1.TLSProviderSPIFFE},
 		},
 	}})
 	g.Expect(err).ToNot(HaveOccurred())
@@ -226,7 +228,7 @@ func TestSPIFFE_ClientOnly(t *testing.T) {
 	g.Expect(resp.StatusCode).To(Equal(http.StatusNoContent))
 }
 
-// TestSPIFFE_JWTSVIDCredential resolves a credential with provider jwt-svid
+// TestSPIFFE_JWTSVIDCredential resolves a credential with provider spiffe
 // against the fake Workload API and checks the returned JWT carries the host as
 // audience and the SPIFFE ID as subject.
 func TestSPIFFE_JWTSVIDCredential(t *testing.T) {
@@ -234,8 +236,8 @@ func TestSPIFFE_JWTSVIDCredential(t *testing.T) {
 	ca := newTestCA(t)
 	startFakeWorkloadAPI(t, ca)
 
-	h := apiv1.RegistryHost{Host: "registry.example.com", Credential: &apiv1.RegistryCredential{
-		Provider: apiv1.JWTProviderJWTSVID,
+	h := apiv1.RegistryHost{Host: "registry.example.com", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
+		Provider: apiv1.JWTProviderSPIFFE,
 	}}
 	cred, err := resolveCredential(context.Background(), h)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -246,6 +248,30 @@ func TestSPIFFE_JWTSVIDCredential(t *testing.T) {
 	g.Expect(tok.UnsafeClaimsWithoutVerification(&claims)).To(Succeed())
 	g.Expect(claims.Subject).To(Equal(testClientID))
 	g.Expect(claims.Audience).To(ContainElement("registry.example.com"))
+}
+
+// TestSPIFFE_JWTSVIDCredential_MultipleAudiences resolves a credential with
+// provider spiffe and several audiences, and checks the extra audiences are
+// carried as additional JWT-SVID audiences.
+func TestSPIFFE_JWTSVIDCredential_MultipleAudiences(t *testing.T) {
+	g := NewWithT(t)
+	ca := newTestCA(t)
+	startFakeWorkloadAPI(t, ca)
+
+	audiences := []string{"registry.example.com", "extra.example.com"}
+	h := apiv1.RegistryHost{Host: "registry.example.com", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
+		Provider:  apiv1.JWTProviderSPIFFE,
+		Audiences: audiences,
+	}}
+	cred, err := resolveCredential(context.Background(), h)
+	g.Expect(err).ToNot(HaveOccurred())
+
+	tok, err := jwt.ParseSigned(cred, []jose.SignatureAlgorithm{jose.ES256})
+	g.Expect(err).ToNot(HaveOccurred())
+	var claims jwt.Claims
+	g.Expect(tok.UnsafeClaimsWithoutVerification(&claims)).To(Succeed())
+	g.Expect(claims.Subject).To(Equal(testClientID))
+	g.Expect(claims.Audience).To(ConsistOf(audiences))
 }
 
 func mustURL(t *testing.T, raw string) *url.URL {

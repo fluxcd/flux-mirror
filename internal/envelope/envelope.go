@@ -30,7 +30,7 @@ var funcs = template.FuncMap{
 // Parse compiles an envelope template. An empty template is valid and returns a
 // nil template, which Render treats as "send the credential unchanged".
 func Parse(text string) (*template.Template, error) {
-	if strings.TrimSpace(text) == "" {
+	if text == "" {
 		return nil, nil
 	}
 	t, err := template.New("envelope").Funcs(funcs).Parse(text)

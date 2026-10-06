@@ -10,12 +10,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 // NeedsTLS reports whether any host configures transport-layer TLS.
@@ -98,8 +99,8 @@ func NewTLSTransport(ctx context.Context, inner http.RoundTripper, hosts []apiv1
 // tlsNeedsSPIFFE reports whether either half of the TLS config uses SPIFFE and so
 // requires a Workload API source.
 func tlsNeedsSPIFFE(t *apiv1.TLS) bool {
-	clientSPIFFE := t.ClientAuth != nil && t.ClientAuth.Provider == apiv1.TLSClientProviderX509SVID
-	serverSPIFFE := t.ServerAuth != nil && t.ServerAuth.SPIFFE != nil
+	clientSPIFFE := t.ClientAuth != nil && t.ClientAuth.Provider == apiv1.TLSProviderSPIFFE
+	serverSPIFFE := t.ServerAuth != nil && t.ServerAuth.Provider == apiv1.TLSProviderSPIFFE
 	return clientSPIFFE || serverSPIFFE
 }
 
@@ -108,12 +109,12 @@ func tlsNeedsSPIFFE(t *apiv1.TLS) bool {
 // SPIFFE it draws on src, the shared Workload API source owned by the caller
 // (which must be non-nil whenever the config uses SPIFFE).
 func buildTLSConfig(t *apiv1.TLS, src *workloadapi.X509Source) (*tls.Config, error) {
-	clientSPIFFE := t.ClientAuth != nil && t.ClientAuth.Provider == apiv1.TLSClientProviderX509SVID
-	serverSPIFFE := t.ServerAuth != nil && t.ServerAuth.SPIFFE != nil
+	clientSPIFFE := t.ClientAuth != nil && t.ClientAuth.Provider == apiv1.TLSProviderSPIFFE
+	serverSPIFFE := t.ServerAuth != nil && t.ServerAuth.Provider == apiv1.TLSProviderSPIFFE
 
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 
-	// Server verification: SPIFFE, a custom CA bundle, or (unset) system roots.
+	// Server verification: SPIFFE, a file-based CA bundle, or (unset) system roots.
 	switch {
 	case serverSPIFFE:
 		authorizer, err := spiffeAuthorizer(src, t.ServerAuth.SPIFFE)
@@ -133,7 +134,7 @@ func buildTLSConfig(t *apiv1.TLS, src *workloadapi.X509Source) (*tls.Config, err
 		cfg.RootCAs = pool
 	}
 
-	// Client certificate: SPIFFE X.509-SVID or a static cert/key pair.
+	// Client certificate: SPIFFE X.509-SVID or a file-based cert/key pair.
 	switch {
 	case clientSPIFFE:
 		cfg.GetClientCertificate = tlsconfig.GetClientCertificate(src)
@@ -162,9 +163,16 @@ func spiffeAuthorizer(src *workloadapi.X509Source, s *apiv1.SPIFFETLS) (tlsconfi
 	case s.AuthorizeAny:
 		return tlsconfig.AuthorizeAny(), nil
 	case s.ServerID != "":
-		id, err := spiffeid.FromString(s.ServerID)
+		// A trailing slash marks a SPIFFE ID prefix (SPIFFE IDs cannot end in
+		// a slash); it authorizes any ID in that trust domain whose path is the
+		// prefix or extends it on a segment boundary.
+		raw := strings.TrimSuffix(s.ServerID, "/")
+		id, err := spiffeid.FromString(raw)
 		if err != nil {
 			return nil, fmt.Errorf("serverID: %w", err)
+		}
+		if raw != s.ServerID {
+			return tlsconfig.AuthorizeIDPrefix(id), nil
 		}
 		return tlsconfig.AuthorizeID(id), nil
 	case s.TrustDomain != "":

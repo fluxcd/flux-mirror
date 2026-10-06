@@ -23,8 +23,9 @@ import (
 	"time"
 
 	. "github.com/onsi/gomega"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 // testCA is a self-signed CA used to issue server and client certificates for
@@ -215,7 +216,7 @@ func makeCertPEM(t *testing.T) (certPEM, keyPEM []byte) {
 func TestNeedsTLS(t *testing.T) {
 	g := NewWithT(t)
 	g.Expect(NeedsTLS(nil)).To(BeFalse())
-	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", Credential: &apiv1.RegistryCredential{Value: "X"}}})).To(BeFalse())
+	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "X"}}})).To(BeFalse())
 	g.Expect(NeedsTLS([]apiv1.RegistryHost{{Host: "a", TLS: &apiv1.TLS{ServerAuth: &apiv1.TLSServerAuth{Value: "x"}}}})).To(BeTrue())
 }
 
@@ -223,7 +224,7 @@ func TestNewTLSTransport_NoTLSReturnsInner(t *testing.T) {
 	g := NewWithT(t)
 	inner := http.DefaultTransport
 	rt, closeFn, err := NewTLSTransport(context.Background(), inner, []apiv1.RegistryHost{
-		{Host: "a", Credential: &apiv1.RegistryCredential{Value: "X"}},
+		{Host: "a", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "X"}},
 	})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(rt).To(BeIdenticalTo(inner))
@@ -241,7 +242,7 @@ func TestNewTLSTransport_StaticDispatch(t *testing.T) {
 			Certificate: &apiv1.TLSData{Value: string(certPEM)},
 			Key:         &apiv1.TLSKey{FromPath: writeTemp(t, keyPEM)},
 		}}},
-		{Host: "plain.example", Credential: &apiv1.RegistryCredential{Value: "X"}},
+		{Host: "plain.example", Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "X"}},
 	}
 	rt, closeFn, err := NewTLSTransport(context.Background(), http.DefaultTransport, hosts)
 	g.Expect(err).ToNot(HaveOccurred())
@@ -286,18 +287,36 @@ func TestReadTLSData(t *testing.T) {
 func TestSpiffeAuthorizer(t *testing.T) {
 	g := NewWithT(t)
 
-	// AuthorizeAny and ServerID and a concrete trustDomain do not need a source.
-	a, err := spiffeAuthorizer(nil, &apiv1.SPIFFETLS{AuthorizeAny: true})
+	// AuthorizeAny, ServerID, and a concrete trustDomain do not need a source.
+	authAny, err := spiffeAuthorizer(nil, &apiv1.SPIFFETLS{AuthorizeAny: true})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(a).ToNot(BeNil())
+	g.Expect(authAny).ToNot(BeNil())
 
-	a, err = spiffeAuthorizer(nil, &apiv1.SPIFFETLS{ServerID: "spiffe://example.org/registry"})
+	exact, err := spiffeAuthorizer(nil, &apiv1.SPIFFETLS{ServerID: "spiffe://example.org/registry"})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(a).ToNot(BeNil())
+	g.Expect(exact).ToNot(BeNil())
 
-	a, err = spiffeAuthorizer(nil, &apiv1.SPIFFETLS{TrustDomain: "example.org"})
+	prefix, err := spiffeAuthorizer(nil, &apiv1.SPIFFETLS{ServerID: "spiffe://example.org/registry/"})
 	g.Expect(err).ToNot(HaveOccurred())
-	g.Expect(a).ToNot(BeNil())
+	g.Expect(prefix).ToNot(BeNil())
+
+	member, err := spiffeAuthorizer(nil, &apiv1.SPIFFETLS{TrustDomain: "example.org"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(member).ToNot(BeNil())
+
+	exactID := spiffeid.RequireFromString("spiffe://example.org/registry")
+	childID := spiffeid.RequireFromString("spiffe://example.org/registry/sub")
+	siblingID := spiffeid.RequireFromString("spiffe://example.org/registry-other")
+
+	// An exact serverID authorizes only that ID.
+	g.Expect(exact(exactID, nil)).To(Succeed())
+	g.Expect(exact(childID, nil)).ToNot(Succeed())
+
+	// A trailing slash turns serverID into a prefix: the exact ID and any ID
+	// under it on a segment boundary, but not a same-prefix sibling.
+	g.Expect(prefix(exactID, nil)).To(Succeed())
+	g.Expect(prefix(childID, nil)).To(Succeed())
+	g.Expect(prefix(siblingID, nil)).ToNot(Succeed())
 
 	_, err = spiffeAuthorizer(nil, &apiv1.SPIFFETLS{ServerID: "not-a-spiffe-id"})
 	g.Expect(err).To(MatchError(ContainSubstring("serverID")))
