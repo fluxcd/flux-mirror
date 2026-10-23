@@ -22,7 +22,7 @@ jobs:
       packages: write # for pushing and signing container images.
     uses: fluxcd/gha-workflows/.github/workflows/cli-plugin-release.yaml@v0.15.0
     with:
-      go-version: 1.26.x
+      go-version: 1.27.x
       release-candidate-prefix: ${{ github.event.inputs.tag }}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}

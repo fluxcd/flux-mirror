@@ -92,7 +92,7 @@ func jwkTokenFunc(jwk, iss, sub, aud string, ttl time.Duration) (cijwt.TokenFunc
 		return nil, err
 	}
 	return func(context.Context) (string, error) {
-		return key.Issue(iss, sub, aud, ttl)
+		return key.Issue(iss, sub, []string{aud}, ttl)
 	}, nil
 }
 
@@ -133,7 +133,7 @@ func providerTokenFunc(provider, aud string, audSet bool) (cijwt.TokenFunc, erro
 	switch provider {
 	case apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo:
 		return func(ctx context.Context) (string, error) {
-			return actionsoidc.FetchToken(ctx, aud)
+			return actionsoidc.FetchToken(ctx, []string{aud})
 		}, nil
 	case apiv1.JWTProviderGCP:
 		return func(ctx context.Context) (string, error) {

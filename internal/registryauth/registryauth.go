@@ -322,7 +322,7 @@ func JWTTransportOptions(inner http.RoundTripper, hosts []apiv1.RegistryHost) ([
 			}
 			if j.Exp == nil {
 				// Default: cijwt signs a fresh 60s token per request.
-				opts = append(opts, cijwt.WithHostJWK(h.Host, jwk, j.Iss, aud, j.Sub))
+				opts = append(opts, cijwt.WithHostJWK(h.Host, jwk, j.Iss, []string{aud}, j.Sub))
 				break
 			}
 			// Custom exp: sign it ourselves and let cijwt cache per its exp.
