@@ -17,7 +17,7 @@ import (
 	craneLogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/spf13/cobra"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/artifacts"
 	"github.com/fluxcd/flux-mirror/internal/charts"
 	"github.com/fluxcd/flux-mirror/internal/config"
@@ -38,7 +38,7 @@ var syncCmd = &cobra.Command{
 	Use:   "sync [CONFIG|-]",
 	Short: "Mirror Helm charts and OCI artifacts to a destination registry",
 	Long: `Mirror Helm charts and OCI artifacts between registries based on a
-declarative YAML config (apiVersion: mirror.plugin.fluxcd.io/v1beta1, kind: Config).
+declarative YAML config (apiVersion: mirror.plugin.fluxcd.io/v1beta2, kind: Config).
 OCI registry auth is read from the ambient Docker config (~/.docker/config.json,
 $DOCKER_CONFIG, and configured credential helpers), or, for hosts listed in the
 config's 'hosts' section, from a per-host JWT. Helm HTTP/S repository auth is read
@@ -366,9 +366,15 @@ func resolveConfigPath(args []string) (string, error) {
 // fields are resolved (via SecureJoin) within the config file's directory, or the
 // process working directory when the config is read from stdin.
 func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*apiv1.Config, error) {
-	cfg, err := decodeConfig(cmd, path)
+	cfg, declaredAPIVersion, err := decodeConfig(cmd, path)
 	if err != nil {
+		if guide := config.MigrationGuide(declaredAPIVersion); guide != "" {
+			cmd.PrintErrf("warning: v1beta1 config cannot be migrated:\n%s\n", guide)
+		}
 		return nil, err
+	}
+	if warn := config.DeprecationWarning(declaredAPIVersion); warn != "" {
+		cmd.PrintErrf("warning: %s\n", warn)
 	}
 	if requireEntries {
 		err = config.Validate(cfg)
@@ -405,13 +411,13 @@ func configBaseDir(path string) (string, error) {
 	return filepath.Dir(abs), nil
 }
 
-func decodeConfig(cmd *cobra.Command, path string) (*apiv1.Config, error) {
+func decodeConfig(cmd *cobra.Command, path string) (*apiv1.Config, string, error) {
 	if path == "-" {
 		return config.DecodeWithEnvSubst(cmd.InOrStdin(), !rootArgs.noEnvsubst)
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("open config: %w", err)
+		return nil, "", fmt.Errorf("open config: %w", err)
 	}
 	defer f.Close()
 	return config.DecodeWithEnvSubst(f, !rootArgs.noEnvsubst)

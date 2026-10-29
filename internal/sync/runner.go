@@ -4,7 +4,7 @@
 package sync
 
 import (
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 
 	"context"
 	"errors"

@@ -12,9 +12,12 @@ require (
 	github.com/cyphar/filepath-securejoin v0.7.0
 	github.com/distribution/distribution/v3 v3.1.2
 	github.com/docker/cli v29.9.2+incompatible
+	github.com/fluxcd/pkg/apis/crypto v0.5.0
 	github.com/fluxcd/pkg/auth v0.66.0
 	github.com/fluxcd/pkg/envsubst v1.9.0
 	github.com/fluxcd/pkg/helmtestserver v0.45.0
+	github.com/fluxcd/pkg/runtime v0.122.0
+	github.com/fluxcd/pkg/spiffe v0.2.0
 	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-containerregistry v0.22.1
@@ -96,10 +99,8 @@ require (
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fluxcd/cli-utils v1.4.0 // indirect
-	github.com/fluxcd/pkg/apis/crypto v0.5.0 // indirect
 	github.com/fluxcd/pkg/apis/meta v1.38.0 // indirect
 	github.com/fluxcd/pkg/cache v0.19.0 // indirect
-	github.com/fluxcd/pkg/spiffe v0.2.0 // indirect
 	github.com/fluxcd/pkg/testserver v0.15.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect

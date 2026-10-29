@@ -80,6 +80,25 @@ generate-json-schemas: generate-api ## Generate the config and report JSON Schem
 		-schema-field \
 		-id "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report-v1beta1.json" \
 		-out ./docs/report-v1beta1.json
+	go run ./tools/schema-gen \
+		-controller-gen "$(CONTROLLER_GEN)" \
+		-group "mirror.plugin.fluxcd.io" \
+		-version "v1beta2" \
+		-kind "Config" \
+		-type "github.com/fluxcd/flux-mirror/api/v1beta2.Config" \
+		-title "Config is the flux-mirror configuration file." \
+		-id "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/config-v1beta2.json" \
+		-out ./docs/config-v1beta2.json
+	go run ./tools/schema-gen \
+		-controller-gen "$(CONTROLLER_GEN)" \
+		-group "mirror.plugin.fluxcd.io" \
+		-version "v1beta2" \
+		-kind "Report" \
+		-type "github.com/fluxcd/flux-mirror/api/v1beta2.ReportSpec" \
+		-field "report" \
+		-schema-field \
+		-id "https://raw.githubusercontent.com/fluxcd/flux-mirror/main/docs/report-v1beta2.json" \
+		-out ./docs/report-v1beta2.json
 
 .PHONY: package-schemas
 package-schemas: ## Package JSON Schemas for release assets.
@@ -87,6 +106,8 @@ package-schemas: ## Package JSON Schemas for release assets.
 	mkdir -p $(RELEASE_DIR)/schemas
 	cp ./docs/config-v1beta1.json $(RELEASE_DIR)/schemas/
 	cp ./docs/report-v1beta1.json $(RELEASE_DIR)/schemas/
+	cp ./docs/config-v1beta2.json $(RELEASE_DIR)/schemas/
+	cp ./docs/report-v1beta2.json $(RELEASE_DIR)/schemas/
 	tar -czf $(RELEASE_DIR)/schemas.tar.gz -C $(RELEASE_DIR) schemas
 
 .PHONY: docker-build

@@ -18,7 +18,7 @@ func (o *Output) String() string {
 }
 
 func (o *Output) Set(str string) error {
-	if strings.TrimSpace(str) == "" {
+	if str == "" {
 		return fmt.Errorf("no output format given, must be one of: %s",
 			strings.Join(supportedOutputs, ", "))
 	}

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 // Result is the aggregate output of Runner.Run. Duration is the total wall

@@ -6,16 +6,21 @@ package registryauth
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 
-	"github.com/spiffe/go-spiffe/v2/spiffeid"
-	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/fluxcd/pkg/runtime/secrets"
+	fluxspiffe "github.com/fluxcd/pkg/spiffe"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
 
 // NeedsTLS reports whether any host configures transport-layer TLS.
@@ -47,9 +52,10 @@ func (t tlsDispatchTransport) RoundTrip(req *http.Request) (*http.Response, erro
 }
 
 // NewTLSTransport wraps inner with a transport that applies each host's
-// configured TLS settings (custom CA, client certificate, or SPIFFE X.509-SVID
-// mTLS) to requests for that host. Hosts without TLS fall through to inner
-// unchanged. Returns inner and a no-op closer when no host configures TLS.
+// configured TLS settings to requests for that host: a PEM directory (custom CA
+// and/or client certificate) or SPIFFE mutual TLS. Hosts without TLS fall
+// through to inner unchanged. Returns inner and a no-op closer when no host
+// configures TLS.
 //
 // The returned closer must be called when the transport is no longer needed; it
 // closes the SPIFFE Workload API source, if one was opened.
@@ -75,14 +81,27 @@ func NewTLSTransport(ctx context.Context, inner http.RoundTripper, hosts []apiv1
 		if h.TLS == nil {
 			continue
 		}
-		if spiffeSrc == nil && tlsNeedsSPIFFE(h.TLS) {
-			s, err := workloadapi.NewX509Source(ctx)
-			if err != nil {
-				return nil, nil, fmt.Errorf("host %q: tls: spiffe: create X.509 source: %w", h.Host, err)
-			}
-			spiffeSrc = s
+		inline := h.TLS.CACert != "" || h.TLS.TLSCert != "" || h.TLS.TLSKey != ""
+		if h.TLS.SPIFFE == nil && h.TLS.Path == "" && !inline {
+			_ = closeSource()
+			return nil, nil, fmt.Errorf("host %q: tls: one of path, inline certificates, or spiffe is required", h.Host)
 		}
-		tlsCfg, err := buildTLSConfig(h.TLS, spiffeSrc)
+		var tlsCfg *tls.Config
+		var err error
+		switch {
+		case h.TLS.SPIFFE != nil:
+			if spiffeSrc == nil {
+				spiffeSrc, err = workloadapi.NewX509Source(ctx)
+				if err != nil {
+					return nil, nil, fmt.Errorf("host %q: tls: spiffe: create X.509 source: %w", h.Host, err)
+				}
+			}
+			tlsCfg, err = fluxspiffe.BuildTLSConfig(spiffeSrc, trimAll(h.TLS.SPIFFE.ServerIDs)...)
+		case inline:
+			tlsCfg, err = tlsConfigFromInline(ctx, *h.TLS)
+		default:
+			tlsCfg, err = tlsConfigFromPath(ctx, h.TLS.Path)
+		}
 		if err != nil {
 			_ = closeSource()
 			return nil, nil, fmt.Errorf("host %q: tls: %w", h.Host, err)
@@ -95,115 +114,73 @@ func NewTLSTransport(ctx context.Context, inner http.RoundTripper, hosts []apiv1
 	return tlsDispatchTransport{byHost: byHost, inner: inner}, closeSource, nil
 }
 
-// tlsNeedsSPIFFE reports whether either half of the TLS config uses SPIFFE and so
-// requires a Workload API source.
-func tlsNeedsSPIFFE(t *apiv1.TLS) bool {
-	clientSPIFFE := t.ClientAuth != nil && t.ClientAuth.Provider == apiv1.TLSClientProviderX509SVID
-	serverSPIFFE := t.ServerAuth != nil && t.ServerAuth.SPIFFE != nil
-	return clientSPIFFE || serverSPIFFE
+// tlsConfigFromPath builds a *tls.Config from a directory laid out like a
+// mounted Flux certSecretRef: ca.crt supplies the server CA bundle, and/or
+// tls.crt with tls.key presents a client certificate. The Flux secrets package
+// performs the same key lookup and validation as the Flux API, so error messages
+// and accepted layouts stay consistent with the controllers.
+func tlsConfigFromPath(ctx context.Context, dir string) (*tls.Config, error) {
+	data := make(map[string][]byte, 6)
+	// Read both the standard certificate keys and the legacy Flux keys; the
+	// secrets package gives the standard keys precedence and warns about legacy
+	// ones, matching how Flux loads a certSecretRef.
+	for _, key := range []string{
+		secrets.KeyCACert, secrets.KeyTLSCert, secrets.KeyTLSPrivateKey,
+		secrets.LegacyKeyCACert, secrets.LegacyKeyTLSCert, secrets.LegacyKeyTLSPrivateKey,
+	} {
+		b, err := os.ReadFile(filepath.Join(dir, key))
+		switch {
+		case err == nil:
+			data[key] = b
+		case errors.Is(err, fs.ErrNotExist):
+			// The file is optional; the secrets package validates that the
+			// combination that is present is usable.
+		default:
+			return nil, fmt.Errorf("read %s: %w", filepath.Join(dir, key), err)
+		}
+	}
+
+	return tlsConfigFromData(ctx, dir, data)
 }
 
-// buildTLSConfig builds a *tls.Config for a host from its independent server and
-// client settings, each of which may be SPIFFE or static. When either side uses
-// SPIFFE it draws on src, the shared Workload API source owned by the caller
-// (which must be non-nil whenever the config uses SPIFFE).
-func buildTLSConfig(t *apiv1.TLS, src *workloadapi.X509Source) (*tls.Config, error) {
-	clientSPIFFE := t.ClientAuth != nil && t.ClientAuth.Provider == apiv1.TLSClientProviderX509SVID
-	serverSPIFFE := t.ServerAuth != nil && t.ServerAuth.SPIFFE != nil
-
-	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
-
-	// Server verification: SPIFFE, a custom CA bundle, or (unset) system roots.
-	switch {
-	case serverSPIFFE:
-		authorizer, err := spiffeAuthorizer(src, t.ServerAuth.SPIFFE)
-		if err != nil {
-			return nil, fmt.Errorf("serverAuth: spiffe: %w", err)
+// tlsConfigFromInline builds a *tls.Config from the inline PEM fields, using the
+// same key names as a certSecretRef Secret.
+func tlsConfigFromInline(ctx context.Context, t apiv1.TLS) (*tls.Config, error) {
+	data := make(map[string][]byte, 3)
+	for key, value := range map[string]string{
+		secrets.KeyCACert:        t.CACert,
+		secrets.KeyTLSCert:       t.TLSCert,
+		secrets.KeyTLSPrivateKey: t.TLSKey,
+	} {
+		if value != "" {
+			data[key] = []byte(value)
 		}
-		tlsconfig.HookTLSClientConfig(cfg, src, authorizer)
-	case t.ServerAuth != nil:
-		pemBytes, err := readPEMSource(t.ServerAuth.FromPath, t.ServerAuth.Value)
-		if err != nil {
-			return nil, fmt.Errorf("serverAuth: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pemBytes) {
-			return nil, fmt.Errorf("serverAuth: no valid certificates in CA bundle")
-		}
-		cfg.RootCAs = pool
 	}
+	return tlsConfigFromData(ctx, "tls (inline)", data)
+}
 
-	// Client certificate: SPIFFE X.509-SVID or a static cert/key pair.
-	switch {
-	case clientSPIFFE:
-		cfg.GetClientCertificate = tlsconfig.GetClientCertificate(src)
-	case t.ClientAuth != nil:
-		certPEM, err := readTLSData(t.ClientAuth.Certificate)
-		if err != nil {
-			return nil, fmt.Errorf("clientAuth: certificate: %w", err)
-		}
-		keyPEM, err := readPEMSource(t.ClientAuth.Key.FromPath, t.ClientAuth.Key.Value)
-		if err != nil {
-			return nil, fmt.Errorf("clientAuth: key: %w", err)
-		}
-		cert, err := tls.X509KeyPair(certPEM, keyPEM)
-		if err != nil {
-			return nil, fmt.Errorf("clientAuth: load key pair: %w", err)
-		}
-		cfg.Certificates = []tls.Certificate{cert}
+// tlsConfigFromData reuses the Flux validation and TLS assembly by presenting
+// the PEM data as an in-memory Secret. name identifies the source in validation
+// errors.
+func tlsConfigFromData(ctx context.Context, name string, data map[string][]byte) (*tls.Config, error) {
+	secret := &corev1.Secret{Data: data}
+	secret.Name = name
+	cfg, err := secrets.TLSConfigFromSecret(ctx, secret)
+	if err != nil {
+		return nil, err
 	}
+	cfg.MinVersion = tls.VersionTLS12
 	return cfg, nil
 }
 
-// spiffeAuthorizer turns the configured authorization rule into a tlsconfig
-// Authorizer. trustDomain "self" resolves to the client's own trust domain.
-func spiffeAuthorizer(src *workloadapi.X509Source, s *apiv1.SPIFFETLS) (tlsconfig.Authorizer, error) {
-	switch {
-	case s.AuthorizeAny:
-		return tlsconfig.AuthorizeAny(), nil
-	case s.ServerID != "":
-		id, err := spiffeid.FromString(s.ServerID)
-		if err != nil {
-			return nil, fmt.Errorf("serverID: %w", err)
+// trimAll trims surrounding whitespace from each entry, matching how Flux
+// parses the RFC-0014 annotation lists, and drops entries that become empty.
+func trimAll(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
 		}
-		return tlsconfig.AuthorizeID(id), nil
-	case s.TrustDomain != "":
-		var td spiffeid.TrustDomain
-		if s.TrustDomain == apiv1.TrustDomainSelf {
-			svid, err := src.GetX509SVID()
-			if err != nil {
-				return nil, fmt.Errorf("read own SVID for trustDomain self: %w", err)
-			}
-			td = svid.ID.TrustDomain()
-		} else {
-			var err error
-			if td, err = spiffeid.TrustDomainFromString(s.TrustDomain); err != nil {
-				return nil, fmt.Errorf("trustDomain: %w", err)
-			}
-		}
-		return tlsconfig.AuthorizeMemberOf(td), nil
-	default:
-		return nil, fmt.Errorf("no authorizer configured")
 	}
-}
-
-// readTLSData reads a single PEM value from the one configured source.
-func readTLSData(d *apiv1.TLSData) ([]byte, error) {
-	return readPEMSource(d.FromPath, d.Value)
-}
-
-// readPEMSource reads PEM bytes from exactly one of a file path or an inline value.
-func readPEMSource(fromPath, value string) ([]byte, error) {
-	switch {
-	case fromPath != "":
-		b, err := os.ReadFile(fromPath)
-		if err != nil {
-			return nil, fmt.Errorf("read fromPath: %w", err)
-		}
-		return b, nil
-	case value != "":
-		return []byte(value), nil
-	default:
-		return nil, fmt.Errorf("no source set")
-	}
+	return out
 }

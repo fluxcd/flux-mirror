@@ -15,43 +15,147 @@ import (
 	"github.com/Masterminds/semver/v3"
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/spiffe/go-spiffe/v2/spiffeid"
 
 	"sigs.k8s.io/yaml"
 
-	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	cryptov1 "github.com/fluxcd/pkg/apis/crypto/v1"
+
+	apiv1beta1 "github.com/fluxcd/flux-mirror/api/v1beta1"
+	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/envelope"
 )
 
-// Decode reads YAML from r into a Config without validating it.
-func Decode(r io.Reader) (*apiv1.Config, error) {
+// DeprecatedV1Beta1APIVersion is the deprecated v1beta1 apiVersion. A config
+// that declares it still loads, but is converted to v1beta2 and a migration
+// warning is printed.
+var DeprecatedV1Beta1APIVersion = apiv1beta1.GroupVersion.String()
+
+// V1Beta1MigrationWarning describes how a v1beta1 config maps onto v1beta2. It
+// is printed as a warning when a v1beta1 config is loaded, and doubles as the
+// migration guide for the breaking rename.
+const V1Beta1MigrationWarning = `apiVersion "mirror.plugin.fluxcd.io/v1beta1" is deprecated and will be removed in a future release; the config is being migrated to "mirror.plugin.fluxcd.io/v1beta2" in memory.`
+
+// V1Beta1Migration describes how to move a v1beta1 config to v1beta2.
+const V1Beta1Migration = `v1beta2 is a breaking change:
+  - credential.type is required (set type: jwt)
+  - credential.aud -> credential.audiences
+  - credential.iss -> credential.issuer
+  - credential.sub -> credential.subject
+  - credential.exp -> credential.expiration
+  - hosts[].username -> hosts[].credential.username
+  - credential provider jwt-svid -> spiffe
+  - tls is now tls.path (a directory), inline ca.crt/tls.crt/tls.key, or
+    tls.spiffe.serverIDs (SPIFFE mutual TLS)
+  - inline v1beta1 tls values and spiffe serverAuth with clientAuth
+    x509-svid convert automatically; per-file paths, one-sided SPIFFE, and
+    authorizeAny must be migrated manually
+See docs/config.md for the full specification.`
+
+// DeprecationWarning returns the migration warning to print for a decoded
+// config, naming the apiVersion declared by the source document. It is empty
+// for the current version. Decode already performs the v1beta1 -> v1beta2
+// conversion, so callers only surface the warning; they do not act on the
+// version.
+func DeprecationWarning(declaredAPIVersion string) string {
+	guide := MigrationGuide(declaredAPIVersion)
+	if guide == "" {
+		return ""
+	}
+	return V1Beta1MigrationWarning + "\n" + guide
+}
+
+// MigrationGuide returns the v1beta1 -> v1beta2 migration guide for the given
+// declared apiVersion, or "" for the current version.
+func MigrationGuide(declaredAPIVersion string) string {
+	if declaredAPIVersion != DeprecatedV1Beta1APIVersion {
+		return ""
+	}
+	return V1Beta1Migration
+}
+
+// Decode reads YAML from r into a Config without validating it. It returns the
+// config, which is always in the current v1beta2 shape, and the apiVersion
+// declared by the source document. A v1beta1 document is converted to v1beta2
+// in memory; pass the declared version to DeprecationWarning to surface the
+// migration warning.
+func Decode(r io.Reader) (*apiv1.Config, string, error) {
 	return DecodeWithEnvSubst(r, true)
 }
 
-// DecodeWithEnvSubst reads YAML from r into a Config, optionally applying
-// strict environment variable substitution before parsing.
-func DecodeWithEnvSubst(r io.Reader, substitute bool) (*apiv1.Config, error) {
+// DecodeWithEnvSubst is like Decode, with optional strict environment variable
+// substitution before parsing.
+func DecodeWithEnvSubst(r io.Reader, substitute bool) (*apiv1.Config, string, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
+		return nil, "", fmt.Errorf("read config: %w", err)
 	}
 	rendered := data
 	if substitute {
 		out, err := envsubst.EvalEnv(string(data), true)
 		if err != nil {
-			return nil, fmt.Errorf("substitute environment variables: %w", err)
+			return nil, "", fmt.Errorf("substitute environment variables: %w", err)
 		}
 		rendered = []byte(out)
 	}
-	var cfg apiv1.Config
-	if err := yaml.Unmarshal(rendered, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+	// Peek at apiVersion leniently to branch the right wire struct. A v1beta1
+	// document uses the old field names, which the strict v1beta2 decoder would
+	// reject as unknown fields before apiVersion is ever checked. A malformed
+	// document yields no peeked version and falls through to the strict decoder,
+	// which reports the parse error.
+	declaredAPIVersion, _ := peekAPIVersion(rendered)
+	switch declaredAPIVersion {
+	case DeprecatedV1Beta1APIVersion:
+		var old apiv1beta1.Config
+		// v1beta1 is frozen: decode it leniently, like the release that
+		// introduced it, so unknown fields do not stop an old config loading.
+		if err := yaml.Unmarshal(rendered, &old); err != nil {
+			return nil, declaredAPIVersion, fmt.Errorf("parse config: %w", err)
+		}
+		cfg, err := apiv1.FromV1Beta1(&old)
+		if err != nil {
+			return nil, declaredAPIVersion, fmt.Errorf("convert v1beta1 config: %w", err)
+		}
+		return cfg, declaredAPIVersion, nil
+	case apiv1.GroupVersion.String():
+		// Fall through to the strict current-version decode below.
+	default:
+		// Any other declared version (including an unknown one) is not a v1beta1
+		// migration, so let the strict decoder report the unknown fields; a
+		// version mismatch is reported by Validate.
 	}
-	return &cfg, nil
+	var cfg apiv1.Config
+	// Strict decoding rejects unknown fields (e.g. a removed or misspelled
+	// key), so a config written for an older schema fails loudly instead of
+	// silently dropping the field.
+	if err := yaml.UnmarshalStrict(rendered, &cfg); err != nil {
+		return nil, declaredAPIVersion, fmt.Errorf("parse config: %w", err)
+	}
+	return &cfg, declaredAPIVersion, nil
+}
+
+// peekAPIVersion reads only the apiVersion field, ignoring unknown fields so a
+// v1beta1 document is not rejected by the strict current-version decoder.
+func peekAPIVersion(rendered []byte) (string, error) {
+	var meta struct {
+		APIVersion string `json:"apiVersion"`
+	}
+	if err := yaml.Unmarshal(rendered, &meta); err != nil {
+		return "", err
+	}
+	return meta.APIVersion, nil
+}
+
+// checkAPIVersion requires a known apiVersion, turning an unknown one into an
+// actionable error rather than a generic mismatch.
+func checkAPIVersion(v string) error {
+	if v != apiv1.GroupVersion.String() {
+		return fmt.Errorf("apiVersion must be %q, got %q", apiv1.GroupVersion.String(), v)
+	}
+	return nil
 }
 
 // ResolvePaths resolves every file-path field (credential fromPath and jwkPath,
-// and the tls path fields) against baseDir — the directory of the config file —
+// and the tls path) against baseDir — the directory of the config file —
 // using SecureJoin, so the result is always confined within baseDir: relative
 // paths, absolute paths, "../" segments, and symlinks cannot escape it. Empty
 // values are left empty. A baseDir of "" is a no-op (paths stay as written).
@@ -83,17 +187,7 @@ func hostPathFields(h *apiv1.RegistryHost) []*string {
 		ps = append(ps, &h.Credential.FromPath, &h.Credential.JWKPath)
 	}
 	if h.TLS != nil {
-		if h.TLS.ServerAuth != nil {
-			ps = append(ps, &h.TLS.ServerAuth.FromPath)
-		}
-		if h.TLS.ClientAuth != nil {
-			if h.TLS.ClientAuth.Certificate != nil {
-				ps = append(ps, &h.TLS.ClientAuth.Certificate.FromPath)
-			}
-			if h.TLS.ClientAuth.Key != nil {
-				ps = append(ps, &h.TLS.ClientAuth.Key.FromPath)
-			}
-		}
+		ps = append(ps, &h.TLS.Path)
 	}
 	return ps
 }
@@ -114,8 +208,8 @@ func ValidateNoEntriesOK(c *apiv1.Config) error {
 }
 
 func validate(c *apiv1.Config, requireEntries bool) error {
-	if c.APIVersion != apiv1.GroupVersion.String() {
-		return fmt.Errorf("apiVersion must be %q, got %q", apiv1.GroupVersion.String(), c.APIVersion)
+	if err := checkAPIVersion(c.APIVersion); err != nil {
+		return err
 	}
 	if c.Kind != apiv1.ConfigKind {
 		return fmt.Errorf("kind must be %q, got %q", apiv1.ConfigKind, c.Kind)
@@ -150,28 +244,26 @@ func validateHost(h apiv1.RegistryHost) error {
 	if strings.TrimSpace(h.Host) == "" {
 		return fmt.Errorf("host is required")
 	}
-	provider := strings.TrimSpace(h.Provider)
-	if strings.TrimSpace(h.Username) != "" && h.Credential == nil {
-		return fmt.Errorf("username requires credential")
+	h.Provider = strings.TrimSpace(h.Provider)
+	// A generic provider is the default and behaves like an unset provider: it
+	// composes with credential and tls, unlike a cloud provider.
+	cloud := h.IsCloudProvider()
+	if h.Credential != nil && cloud {
+		return fmt.Errorf("credential and cloud provider are mutually exclusive")
 	}
-	if h.Credential != nil && provider != "" {
-		return fmt.Errorf("credential and provider are mutually exclusive")
-	}
-	if provider != "" && h.TLS != nil {
-		return fmt.Errorf("provider and tls are mutually exclusive")
+	if cloud && h.TLS != nil {
+		return fmt.Errorf("cloud provider and tls are mutually exclusive")
 	}
 	if h.Credential != nil {
 		if err := validateCredential(*h.Credential); err != nil {
 			return fmt.Errorf("credential: %w", err)
 		}
 	}
-	if provider != "" {
-		switch provider {
-		case apiv1.RegistryProviderECR, apiv1.RegistryProviderACR, apiv1.RegistryProviderGAR:
-		default:
-			return fmt.Errorf("provider %q must be one of: %s, %s, %s",
-				provider, apiv1.RegistryProviderECR, apiv1.RegistryProviderACR, apiv1.RegistryProviderGAR)
-		}
+	switch h.Provider {
+	case "", apiv1.RegistryProviderGeneric, apiv1.RegistryProviderECR, apiv1.RegistryProviderACR, apiv1.RegistryProviderGAR:
+	default:
+		return fmt.Errorf("provider %q must be one of: %s, %s, %s, %s",
+			h.Provider, apiv1.RegistryProviderGeneric, apiv1.RegistryProviderECR, apiv1.RegistryProviderACR, apiv1.RegistryProviderGAR)
 	}
 	if h.TLS != nil {
 		if err := validateTLS(*h.TLS); err != nil {
@@ -181,8 +273,8 @@ func validateHost(h apiv1.RegistryHost) error {
 	if h.MaxChunkSize < 0 {
 		return fmt.Errorf("maxChunkSize must be >= 0 (0 disables chunking)")
 	}
-	if h.Credential == nil && provider == "" && h.TLS == nil && h.MaxChunkSize == 0 {
-		return fmt.Errorf("one of credential, provider, tls, or maxChunkSize is required")
+	if h.Credential == nil && !cloud && h.TLS == nil && h.MaxChunkSize == 0 {
+		return fmt.Errorf("one of credential, a cloud provider, tls, or maxChunkSize is required")
 	}
 	return nil
 }
@@ -199,116 +291,71 @@ func countTrue(conds ...bool) int {
 	return n
 }
 
-// validateTLS checks the TLS settings: at least one of serverAuth or clientAuth
-// must be set, and each (if set) must itself be valid.
+// validateTLS checks the TLS settings: exactly one of path, inline certificate
+// fields, or spiffe must be set. Inline data is validated here; a path directory
+// is checked when the transport is built, because paths are resolved after
+// validation. A spiffe block must authorize at least one parseable server
+// identity.
 func validateTLS(t apiv1.TLS) error {
-	if t.ServerAuth == nil && t.ClientAuth == nil {
-		return fmt.Errorf("one of serverAuth or clientAuth is required")
+	inline := t.CACert != "" || t.TLSCert != "" || t.TLSKey != ""
+	if countTrue(strings.TrimSpace(t.Path) != "", inline, t.SPIFFE != nil) != 1 {
+		return fmt.Errorf("exactly one of path, inline certificates, or spiffe must be set")
 	}
-	if t.ServerAuth != nil {
-		if err := validateTLSServerAuth(*t.ServerAuth); err != nil {
-			return fmt.Errorf("serverAuth: %w", err)
-		}
+	if inline {
+		return validateTLSInline(t)
 	}
-	if t.ClientAuth != nil {
-		if err := validateTLSClientAuth(*t.ClientAuth); err != nil {
-			return fmt.Errorf("clientAuth: %w", err)
-		}
-	}
-	return nil
-}
-
-// validateTLSServerAuth checks that exactly one of the CA-bundle sources or
-// spiffe is set.
-func validateTLSServerAuth(s apiv1.TLSServerAuth) error {
-	if countTrue(
-		strings.TrimSpace(s.FromPath) != "",
-		strings.TrimSpace(s.Value) != "",
-		s.SPIFFE != nil,
-	) != 1 {
-		return fmt.Errorf("exactly one of fromPath, value, or spiffe must be set")
-	}
-	if s.SPIFFE != nil {
-		if err := validateSPIFFE(*s.SPIFFE); err != nil {
-			return fmt.Errorf("spiffe: %w", err)
-		}
-	}
-	return nil
-}
-
-// validateTLSData checks that exactly one source is set.
-func validateTLSData(d apiv1.TLSData) error {
-	if countTrue(
-		strings.TrimSpace(d.FromPath) != "",
-		strings.TrimSpace(d.Value) != "",
-	) != 1 {
-		return fmt.Errorf("exactly one of fromPath or value must be set")
-	}
-	return nil
-}
-
-// validateTLSKey checks that exactly one source is set.
-func validateTLSKey(k apiv1.TLSKey) error {
-	if countTrue(
-		strings.TrimSpace(k.FromPath) != "",
-		strings.TrimSpace(k.Value) != "",
-	) != 1 {
-		return fmt.Errorf("exactly one of fromPath or value must be set")
-	}
-	return nil
-}
-
-// validateTLSClientAuth checks the client cert source: either provider
-// (x509-svid) or a static certificate/key pair, mutually exclusive.
-func validateTLSClientAuth(c apiv1.TLSClientAuth) error {
-	provider := strings.TrimSpace(c.Provider)
-	hasStatic := c.Certificate != nil || c.Key != nil
-	if provider != "" && hasStatic {
-		return fmt.Errorf("provider is mutually exclusive with certificate and key")
-	}
-	if provider != "" {
-		if provider != apiv1.TLSClientProviderX509SVID {
-			return fmt.Errorf("provider %q must be %q", provider, apiv1.TLSClientProviderX509SVID)
-		}
+	if t.SPIFFE == nil {
 		return nil
 	}
-	if c.Certificate == nil {
-		return fmt.Errorf("certificate is required")
+	if len(t.SPIFFE.ServerIDs) == 0 {
+		return fmt.Errorf("spiffe.serverIDs is required")
 	}
-	if err := validateTLSData(*c.Certificate); err != nil {
-		return fmt.Errorf("certificate: %w", err)
-	}
-	if c.Key == nil {
-		return fmt.Errorf("key is required")
-	}
-	if err := validateTLSKey(*c.Key); err != nil {
-		return fmt.Errorf("key: %w", err)
+	for i, raw := range t.SPIFFE.ServerIDs {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			return fmt.Errorf("spiffe.serverIDs[%d] must not be empty", i)
+		}
+		if _, err := cryptov1.ParseSPIFFEID(id); err != nil {
+			return fmt.Errorf("spiffe.serverIDs[%d]: %w", i, err)
+		}
 	}
 	return nil
 }
 
-// validateSPIFFE checks that exactly one authorizer is set and parses.
-func validateSPIFFE(s apiv1.SPIFFETLS) error {
-	serverID := strings.TrimSpace(s.ServerID)
-	trustDomain := strings.TrimSpace(s.TrustDomain)
-
-	if countTrue(serverID != "", trustDomain != "", s.AuthorizeAny) != 1 {
-		return fmt.Errorf("exactly one of serverID, trustDomain, or authorizeAny must be set")
+// validateTLSInline checks the inline PEM fields: tls.crt and tls.key must be
+// set together, at least one of ca.crt or the pair must be present, and no
+// inline value may be blank.
+func validateTLSInline(t apiv1.TLS) error {
+	hasCACert := strings.TrimSpace(t.CACert) != ""
+	hasCert := strings.TrimSpace(t.TLSCert) != ""
+	hasKey := strings.TrimSpace(t.TLSKey) != ""
+	if t.CACert != "" && !hasCACert {
+		return fmt.Errorf("inline ca.crt must not be empty")
 	}
-	if serverID != "" {
-		if _, err := spiffeid.FromString(serverID); err != nil {
-			return fmt.Errorf("serverID %q is not a valid SPIFFE ID: %w", serverID, err)
-		}
+	if t.TLSCert != "" && !hasCert {
+		return fmt.Errorf("inline tls.crt must not be empty")
 	}
-	if trustDomain != "" && trustDomain != apiv1.TrustDomainSelf {
-		if _, err := spiffeid.TrustDomainFromString(trustDomain); err != nil {
-			return fmt.Errorf("trustDomain %q is not valid: %w", trustDomain, err)
-		}
+	if t.TLSKey != "" && !hasKey {
+		return fmt.Errorf("inline tls.key must not be empty")
+	}
+	if hasCert != hasKey {
+		return fmt.Errorf("inline tls.crt and tls.key must be set together")
+	}
+	if !hasCert && !hasCACert {
+		return fmt.Errorf("inline must contain ca.crt or both tls.crt and tls.key")
 	}
 	return nil
 }
 
 func validateCredential(j apiv1.RegistryCredential) error {
+	credentialType := strings.TrimSpace(j.Type)
+	if credentialType == "" {
+		return fmt.Errorf("type is required")
+	}
+	if credentialType != apiv1.CredentialTypeJWT {
+		return fmt.Errorf("type %q must be %q", credentialType, apiv1.CredentialTypeJWT)
+	}
+
 	provider := strings.TrimSpace(j.Provider)
 	value := strings.TrimSpace(j.Value)
 	fromPath := strings.TrimSpace(j.FromPath)
@@ -323,45 +370,60 @@ func validateCredential(j apiv1.RegistryCredential) error {
 		return err
 	}
 
-	hasIss := strings.TrimSpace(j.Iss) != ""
-	hasSub := strings.TrimSpace(j.Sub) != ""
-	hasAud := strings.TrimSpace(j.Aud) != ""
-	hasExp := j.Exp != nil
+	hasIssuer := strings.TrimSpace(j.Issuer) != ""
+	hasSubject := strings.TrimSpace(j.Subject) != ""
+	hasAudiences := len(j.Audiences) > 0
+	hasExpiration := j.Expiration != nil
 
 	switch {
 	case jwkPath != "", jwkValue != "":
-		if !hasIss {
-			return fmt.Errorf("iss is required with jwkPath or jwkValue")
+		if !hasIssuer {
+			return fmt.Errorf("issuer is required with jwkPath or jwkValue")
 		}
-		if !hasSub {
-			return fmt.Errorf("sub is required with jwkPath or jwkValue")
+		if !hasSubject {
+			return fmt.Errorf("subject is required with jwkPath or jwkValue")
 		}
-		if hasExp && j.Exp.Duration <= 0 {
-			return fmt.Errorf("exp must be a positive duration")
+		if hasExpiration && j.Expiration.Duration <= 0 {
+			return fmt.Errorf("expiration must be a positive duration")
 		}
 	case provider != "":
 		switch provider {
-		case apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo, apiv1.JWTProviderGCP, apiv1.JWTProviderAzure, apiv1.JWTProviderAWS, apiv1.JWTProviderJWTSVID:
+		case apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo, apiv1.JWTProviderGCP, apiv1.JWTProviderAzure, apiv1.JWTProviderAWS, apiv1.JWTProviderSPIFFE:
 		default:
 			return fmt.Errorf("provider %q must be one of: %s, %s, %s, %s, %s, %s",
-				provider, apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo, apiv1.JWTProviderGCP, apiv1.JWTProviderAzure, apiv1.JWTProviderAWS, apiv1.JWTProviderJWTSVID)
+				provider, apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo, apiv1.JWTProviderGCP, apiv1.JWTProviderAzure, apiv1.JWTProviderAWS, apiv1.JWTProviderSPIFFE)
 		}
-		if hasIss || hasSub {
-			return fmt.Errorf("iss and sub can only be set with jwkPath or jwkValue")
+		if len(j.Audiences) > 1 && (provider == apiv1.JWTProviderGCP || provider == apiv1.JWTProviderAzure) {
+			return fmt.Errorf("provider %q accepts at most one audience", provider)
 		}
-		if hasExp {
-			return fmt.Errorf("exp can only be set with jwkPath or jwkValue")
+		if hasIssuer || hasSubject {
+			return fmt.Errorf("issuer and subject can only be set with jwkPath or jwkValue")
+		}
+		if hasExpiration {
+			return fmt.Errorf("expiration can only be set with jwkPath or jwkValue")
 		}
 	case value != "", fromPath != "":
-		if hasIss || hasSub {
-			return fmt.Errorf("iss and sub can only be set with jwkPath or jwkValue")
+		if hasIssuer || hasSubject {
+			return fmt.Errorf("issuer and subject can only be set with jwkPath or jwkValue")
 		}
-		if hasAud {
-			return fmt.Errorf("aud can only be set with jwkPath, jwkValue, or provider")
+		if hasAudiences {
+			return fmt.Errorf("audiences can only be set with jwkPath, jwkValue, or provider")
 		}
-		if hasExp {
-			return fmt.Errorf("exp can only be set with jwkPath or jwkValue")
+		if hasExpiration {
+			return fmt.Errorf("expiration can only be set with jwkPath or jwkValue")
 		}
+	}
+
+	seen := make(map[string]bool, len(j.Audiences))
+	for i, raw := range j.Audiences {
+		a := strings.TrimSpace(raw)
+		if a == "" {
+			return fmt.Errorf("audiences[%d] must not be empty", i)
+		}
+		if seen[a] {
+			return fmt.Errorf("audiences[%d] duplicates %q", i, a)
+		}
+		seen[a] = true
 	}
 	return nil
 }
@@ -404,7 +466,7 @@ func validateArtifactEntry(a apiv1.ArtifactEntry) error {
 }
 
 func validateVerification(v apiv1.ArtifactVerification) error {
-	switch strings.TrimSpace(v.Provider) {
+	switch provider := strings.TrimSpace(v.Provider); provider {
 	case apiv1.VerifyProviderCosign:
 	default:
 		return fmt.Errorf("provider %q must be %q", v.Provider, apiv1.VerifyProviderCosign)
