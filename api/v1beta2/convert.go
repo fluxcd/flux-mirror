@@ -84,7 +84,6 @@ func registryHostFromV1Beta1(in apiv1beta1.RegistryHost) (RegistryHost, error) {
 
 func credentialFromV1Beta1(in apiv1beta1.RegistryCredential, username string) *RegistryCredential {
 	out := &RegistryCredential{
-		Type:       CredentialTypeJWT,
 		Provider:   providerFromV1Beta1(in.Provider),
 		Value:      in.Value,
 		FromPath:   in.FromPath,

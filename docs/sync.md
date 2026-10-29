@@ -222,7 +222,6 @@ hosts:
   # `credential.username` is set and GITHUB_TOKEN is the password.
   - host: ghcr.io
     credential:
-      type: jwt
       username: my-org
       value: ${GH_TOKEN}
 ```
@@ -298,7 +297,6 @@ hosts:
   # Source: authenticate to GHCR to avoid anonymous rate limits.
   - host: ghcr.io
     credential:
-      type: jwt
       username: my-org
       value: ${GH_TOKEN}
   # Destination: a private registry expecting a username/password login. The
@@ -306,7 +304,6 @@ hosts:
   # config.
   - host: registry.internal.example.com
     credential:
-      type: jwt
       username: ${REGISTRY_USERNAME}
       value: ${REGISTRY_PASSWORD}
 ```
@@ -365,7 +362,6 @@ artifacts:
 hosts:
   - host: ghcr.io
     credential:
-      type: jwt
       username: my-org
       value: ${GH_TOKEN}
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
@@ -488,7 +484,6 @@ hosts:
   # audience (the source host) is set by the projected-token volume, not here.
   - host: source-registry.example.com
     credential:
-      type: jwt
       fromPath: registry-token
   # Destination: ECR via the pod's IRSA identity (use acr/gar to switch clouds).
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
@@ -580,7 +575,6 @@ hosts:
   # as an HTTP Bearer credential.
   - host: source-registry.example.com
     credential:
-      type: jwt
       provider: aws
   # Destination: SPIFFE mTLS in both directions, no HTTP credential. Our client
   # X.509-SVID authenticates us; the server's SVID is verified against our own

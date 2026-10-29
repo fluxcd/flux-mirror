@@ -53,7 +53,6 @@ charts:
 hosts:
   - host: quay.io
     credential:
-      type: jwt
       username: 'my-org+robot-user'
       value: ${QUAY_TOKEN}
 ```
@@ -93,11 +92,12 @@ and accept a `hosts`-only config.
 `mirror.plugin.fluxcd.io/v1beta2` is the current `apiVersion`. The previous
 `mirror.plugin.fluxcd.io/v1beta1` is deprecated: a config that still declares it
 still loads (it is converted to v1beta2 in memory), but prints a migration
-warning. v1beta2 is a breaking change that makes `credential.type` required,
-renames the credential claims (`aud`→`audiences`, `iss`→`issuer`,
-`sub`→`subject`, `exp`→`expiration`), moves `hosts[].username` under
-`credential`, renames the SPIFFE credential provider (`jwt-svid`→`spiffe`), and
-replaces the `.tls` serverAuth/clientAuth blocks with `.tls.path` (a directory),
+warning. v1beta2 is a breaking change that adds an optional `credential.type`
+(defaults to `jwt`), renames the credential claims (`aud`→`audiences`,
+`iss`→`issuer`, `sub`→`subject`, `exp`→`expiration`), moves
+`hosts[].username` under `credential`, renames the SPIFFE credential provider
+(`jwt-svid`→`spiffe`), and replaces the `.tls` serverAuth/clientAuth blocks with
+`.tls.path` (a directory),
 inline `.ca.crt`, `.tls.crt`, and `.tls.key` values, or `.tls.spiffe.serverIDs`
 (SPIFFE mutual TLS). Update the `apiVersion` and the
 renamed fields to silence the warning. Inline v1beta1 `.tls` values and SPIFFE
@@ -307,7 +307,6 @@ hosts:
   # A per-host credential (HTTP-layer token).
   - host: registry.example.com
     credential:
-      type: jwt
       provider: github
   # A cloud registry provider, via ambient workload identity.
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
@@ -317,9 +316,9 @@ hosts:
 #### Per-host credential
 
 `.hosts[].credential` configures an HTTP-layer registry credential for the host.
-`.type` is required and selects the credential material; only `jwt` is supported
-today. Exactly one **token source** subfield selects how the credential is
-obtained:
+`.type` is optional and selects the credential material. It defaults to `jwt`;
+only `jwt` is supported today, with `x509` reserved for a future release.
+Exactly one **token source** subfield selects how the credential is obtained:
 
 - `.provider`, mints a fresh, per-request credential for the audiences using a
   cloud, CI, or SPIFFE identity, then caches and refreshes it on demand. One of

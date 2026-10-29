@@ -70,7 +70,7 @@ func TestFromV1Beta1(t *testing.T) {
 	h := out.Hosts[0]
 	g.Expect(h.Host).To(Equal("registry.example.com"))
 	g.Expect(h.MaxChunkSize).To(Equal(1024))
-	g.Expect(h.Credential.Type).To(Equal(CredentialTypeJWT))
+	g.Expect(h.Credential.Type).To(BeEmpty())
 	g.Expect(h.Credential.Provider).To(Equal(JWTProviderSPIFFE))
 	g.Expect(h.Credential.Username).To(Equal("robot"))
 	g.Expect(h.Credential.Issuer).To(Equal("https://issuer.example"))

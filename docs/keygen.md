@@ -83,7 +83,6 @@ kind: Config
 hosts:
   - host: registry.example.com
     credential:
-      type: jwt
       jwkPath: ./keys/registry/privkey.json
       issuer: https://my-issuer.example
       subject: ci-pusher
