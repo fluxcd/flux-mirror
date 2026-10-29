@@ -226,7 +226,7 @@
                 "type": "string"
               },
               "type": {
-                "description": "Type is the kind of credential material (CredentialTypeJWT).",
+                "description": "Type is the kind of credential material (CredentialTypeJWT). Defaults to\njwt; other types (such as x509) are reserved for a future release.",
                 "enum": [
                   "jwt"
                 ],
@@ -241,9 +241,6 @@
                 "type": "string"
               }
             },
-            "required": [
-              "type"
-            ],
             "type": "object"
           },
           "host": {

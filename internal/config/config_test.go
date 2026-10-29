@@ -277,7 +277,7 @@ artifacts:
 
 	g.Expect(cfg.Hosts).To(HaveLen(1))
 	h := cfg.Hosts[0]
-	g.Expect(h.Credential.Type).To(Equal(CredentialTypeJWT))
+	g.Expect(h.Credential.Type).To(BeEmpty())
 	g.Expect(h.Credential.JWKPath).To(Equal("/run/jwk.json"))
 	g.Expect(h.Credential.Username).To(Equal("legacy-user"))
 	g.Expect(h.Credential.Issuer).To(Equal("https://issuer.example"))
@@ -949,12 +949,11 @@ func TestValidate_Table(t *testing.T) {
 				}}},
 		},
 		{
-			name: "auth type is required",
+			name: "auth type defaults to jwt",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{
 					Host: "h.example", Credential: &RegistryCredential{Value: "TOKEN"},
 				}}},
-			errMsg: "type is required",
 		},
 		{
 			name: "auth unknown type",

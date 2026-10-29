@@ -37,7 +37,7 @@ const V1Beta1MigrationWarning = `apiVersion "mirror.plugin.fluxcd.io/v1beta1" is
 
 // V1Beta1Migration describes how to move a v1beta1 config to v1beta2.
 const V1Beta1Migration = `v1beta2 is a breaking change:
-  - credential.type is required (set type: jwt)
+  - credential.type is optional and defaults to jwt
   - credential.aud -> credential.audiences
   - credential.iss -> credential.issuer
   - credential.sub -> credential.subject
@@ -348,11 +348,7 @@ func validateTLSInline(t apiv1.TLS) error {
 }
 
 func validateCredential(j apiv1.RegistryCredential) error {
-	credentialType := strings.TrimSpace(j.Type)
-	if credentialType == "" {
-		return fmt.Errorf("type is required")
-	}
-	if credentialType != apiv1.CredentialTypeJWT {
+	if credentialType := strings.TrimSpace(j.Type); credentialType != "" && credentialType != apiv1.CredentialTypeJWT {
 		return fmt.Errorf("type %q must be %q", credentialType, apiv1.CredentialTypeJWT)
 	}
 

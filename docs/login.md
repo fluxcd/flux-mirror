@@ -145,7 +145,6 @@ kind: Config
 hosts:
   - host: ghcr.io
     credential:
-      type: jwt
       username: ${GITHUB_REPOSITORY_OWNER}   # ignored by GHCR; any value works
       value: ${GH_TOKEN}
 ```
@@ -181,7 +180,6 @@ kind: Config
 hosts:
   - host: docker.io
     credential:
-      type: jwt
       username: ${DOCKERHUB_USERNAME}
       value: ${DOCKERHUB_TOKEN}
 ```

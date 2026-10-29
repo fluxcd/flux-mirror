@@ -227,7 +227,6 @@ kind: Config
 hosts:
   - host: registry.example.com
     credential:
-      type: jwt
       username: sa-oidc          # value the registry expects; often ignored
       fromPath: registry-token   # the audience is set by the projected volume
 ```
@@ -291,7 +290,6 @@ kind: Config
 hosts:
   - host: registry.example.com
     credential:
-      type: jwt
       provider: spiffe
       username: spiffe           # value the registry expects; often ignored
       # audiences default to the host (registry.example.com)

@@ -169,8 +169,9 @@ func (h RegistryHost) IsCloudProvider() bool {
 }
 
 // RegistryCredential configures a per-host credential. Type selects the kind of
-// material (CredentialTypeJWT) and is required. Exactly one of Provider, Value,
-// FromPath, JWKPath, or JWKValue selects how the credential is obtained:
+// material (CredentialTypeJWT) and defaults to JWT when unset. Exactly one of
+// Provider, Value, FromPath, JWKPath, or JWKValue selects how the credential is
+// obtained:
 //
 //   - Provider mints a per-request credential for Audiences (an OIDC token for
 //     the OIDC providers, a JWT-SVID for spiffe, or a signed
@@ -199,9 +200,11 @@ func (h RegistryHost) IsCloudProvider() bool {
 // Envelope is an optional transform applied to the resolved credential on top of
 // whichever source is selected; see its field comment.
 type RegistryCredential struct {
-	// Type is the kind of credential material (CredentialTypeJWT).
+	// Type is the kind of credential material (CredentialTypeJWT). Defaults to
+	// jwt; other types (such as x509) are reserved for a future release.
+	// +optional
 	// +kubebuilder:validation:Enum=jwt
-	Type string `json:"type"`
+	Type string `json:"type,omitempty"`
 
 	// Provider mints a per-request credential for the audiences, one of
 	// JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,
