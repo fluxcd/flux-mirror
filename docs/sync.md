@@ -54,6 +54,9 @@ A host whose `provider` is unset or `generic` may also set
 connections: a directory or inline PEM values with a custom CA and/or client
 certificate, or SPIFFE mutual TLS.
 
+With the default registry transport, `--insecure` skips TLS verification for OCI
+requests, including chart destinations and referrer lookups.
+
 HTTP/S Helm repository authentication (for `charts` sources) is separate from OCI
 auth and always comes from the ambient Helm repositories config:
 
