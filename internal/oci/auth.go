@@ -61,15 +61,15 @@ func NewClient(opts ...ClientOption) *Client {
 		opt(c)
 	}
 	c.staticCraneOpts = []crane.Option{crane.WithAuthFromKeychain(c.keychain)}
-	c.staticRemoteOpts = []remote.Option{remote.WithAuthFromKeychain(c.keychain)}
 	if c.transport != nil {
 		c.staticCraneOpts = append(c.staticCraneOpts, crane.WithTransport(c.transport))
-		c.staticRemoteOpts = append(c.staticRemoteOpts, remote.WithTransport(c.transport))
 	}
 	if c.insecure {
 		c.staticCraneOpts = append(c.staticCraneOpts, crane.Insecure)
-		c.staticNameOpts = []name.Option{name.Insecure}
 	}
+	resolved := crane.GetOptions(c.staticCraneOpts...)
+	c.staticRemoteOpts = resolved.Remote
+	c.staticNameOpts = resolved.Name
 	return c
 }
 
