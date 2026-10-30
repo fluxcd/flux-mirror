@@ -105,8 +105,8 @@ func NewClient(opts ...ClientOption) *Client {
 	}
 	c.sourceCraneOpts = buildCraneOpts(srcKC, srcT, c.insecure)
 	c.destinationCraneOpts = buildCraneOpts(dstKC, dstT, c.insecure)
-	c.sourceRemoteOpts = buildRemoteOpts(srcKC, srcT)
-	c.destinationRemoteOpts = buildRemoteOpts(dstKC, dstT)
+	c.sourceRemoteOpts = crane.GetOptions(c.sourceCraneOpts...).Remote
+	c.destinationRemoteOpts = crane.GetOptions(c.destinationCraneOpts...).Remote
 	if c.insecure {
 		c.staticNameOpts = []name.Option{name.Insecure}
 	}
@@ -120,14 +120,6 @@ func buildCraneOpts(kc authn.Keychain, t http.RoundTripper, insecure bool) []cra
 	}
 	if insecure {
 		opts = append(opts, crane.Insecure)
-	}
-	return opts
-}
-
-func buildRemoteOpts(kc authn.Keychain, t http.RoundTripper) []remote.Option {
-	opts := []remote.Option{remote.WithAuthFromKeychain(kc)}
-	if t != nil {
-		opts = append(opts, remote.WithTransport(t))
 	}
 	return opts
 }
