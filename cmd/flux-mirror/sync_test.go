@@ -339,6 +339,21 @@ artifacts:
 	g.Expect(out).To(ContainSubstring(`"status": "copied"`))
 }
 
+func TestSync_DeprecatedArtifactDestinationWarns(t *testing.T) {
+	g := NewWithT(t)
+
+	ensureRegistry(t)
+	src := dockerReg + "/dep-dst-src-" + testregistry.RandSuffix()
+	dst := dockerReg + "/dep-dst-dst-" + testregistry.RandSuffix()
+	testregistry.PushImage(t, src+":1.0.0")
+
+	path := writeConfig(t, src, dst)
+	out, err := executeCommand([]string{"sync", path, "--insecure", "-o", "json"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(out).To(ContainSubstring("artifacts[].destination is deprecated"))
+	g.Expect(out).To(ContainSubstring(`"status": "copied"`))
+}
+
 func TestSync_DeprecatedV1Beta1ConversionFailureShowsGuide(t *testing.T) {
 	g := NewWithT(t)
 

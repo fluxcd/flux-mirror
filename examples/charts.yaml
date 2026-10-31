@@ -13,13 +13,15 @@ charts:
     limit: 1
 artifacts:
   - source: registry.k8s.io/metrics-server/metrics-server
-    destination: localhost:5050/metrics-server
+    destinations:
+      - localhost:5050/metrics-server
     selector:
       semver: ">=0.7.0"
       limit: 1
     includeReferrers: true
   - source: registry.k8s.io/external-dns/external-dns
-    destination: localhost:5050/external-dns
+    destinations:
+      - localhost:5050/external-dns
     selector:
       semver: ">=0.15.0"
       limit: 1

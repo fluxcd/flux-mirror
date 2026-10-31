@@ -77,5 +77,11 @@ artifacts:
         - issuer: https://token.actions.githubusercontent.com
           subject: ^https://github.com/dexidp/.*$
       minAge: 24h
+  - source: ghcr.io/example/app
+    destinations:
+      - ghcr.io/example/mirror/app
+      - registry.example.com/example/app
+    selector:
+      semver: ">=1.0.0"
 `)
 }

@@ -15,8 +15,16 @@
         "description": "ArtifactEntry mirrors an OCI artifact (image, OCI chart, signed manifest, etc.).",
         "properties": {
           "destination": {
-            "description": "Destination is the OCI repository the artifact is mirrored to.",
+            "description": "Destination is the OCI repository the artifact is mirrored to.\nDeprecated: use Destinations instead.",
             "type": "string"
+          },
+          "destinations": {
+            "description": "Destinations are the OCI repositories the artifact is mirrored to.\nExactly one of Destination or Destinations must be set.",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
           },
           "includeReferrers": {
             "description": "IncludeReferrers also mirrors the artifact's referrers (signatures, SBOMs).",
@@ -119,7 +127,6 @@
           }
         },
         "required": [
-          "destination",
           "selector",
           "source"
         ],

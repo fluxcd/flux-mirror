@@ -447,8 +447,25 @@ func validateArtifactEntry(a apiv1.ArtifactEntry) error {
 	if _, err := name.NewRepository(a.Source); err != nil {
 		return fmt.Errorf("source %q is not a valid OCI repository: %w", a.Source, err)
 	}
-	if _, err := name.NewRepository(a.Destination); err != nil {
-		return fmt.Errorf("destination %q is not a valid OCI repository: %w", a.Destination, err)
+	hasDestination := strings.TrimSpace(a.Destination) != ""
+	hasDestinations := len(a.Destinations) > 0
+	if hasDestination == hasDestinations {
+		return fmt.Errorf("exactly one of destination or destinations must be set")
+	}
+	if hasDestination {
+		if err := validateArtifactDestination(a.Destination); err != nil {
+			return err
+		}
+	}
+	seen := make(map[string]bool, len(a.Destinations))
+	for i, dst := range a.Destinations {
+		if err := validateArtifactDestination(dst); err != nil {
+			return fmt.Errorf("destinations[%d]: %w", i, err)
+		}
+		if seen[dst] {
+			return fmt.Errorf("destinations[%d] duplicates %q", i, dst)
+		}
+		seen[dst] = true
 	}
 	if err := validateSelector(a.Selector); err != nil {
 		return fmt.Errorf("selector: %w", err)
@@ -457,6 +474,16 @@ func validateArtifactEntry(a apiv1.ArtifactEntry) error {
 		if err := validateVerification(*a.Verify); err != nil {
 			return fmt.Errorf("verify: %w", err)
 		}
+	}
+	return nil
+}
+
+func validateArtifactDestination(dst string) error {
+	if strings.TrimSpace(dst) == "" {
+		return fmt.Errorf("destination must not be empty")
+	}
+	if _, err := name.NewRepository(dst); err != nil {
+		return fmt.Errorf("destination %q is not a valid OCI repository: %w", dst, err)
 	}
 	return nil
 }

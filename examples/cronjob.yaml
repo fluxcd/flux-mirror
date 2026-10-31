@@ -28,7 +28,8 @@ data:
         limit: 1
     artifacts:
       - source: ghcr.io/stefanprodan/podinfo
-        destination: ghcr.io/my-org/podinfo
+        destinations:
+          - ghcr.io/my-org/podinfo
         selector:
           semver: "*"
           limit: 1

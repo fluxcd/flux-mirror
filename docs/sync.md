@@ -120,6 +120,8 @@ missing-blob, or push-rejection issues.
 `tags[]` array of per-tag rows. Every row has a `status` and, when known, a
 source `digest`; skipped rows carry a `reason`; verified rows carry a
 `verification` block; and, with `includeReferrers: true`, a `referrers[]` array.
+Artifacts with multiple destinations produce one `results[]` entry per
+destination.
 The envelope is documented by the [sync report schema](report.md).
 
 ```bash
@@ -262,7 +264,8 @@ apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: ghcr.io/stefanprodan/charts/podinfo
-    destination: ghcr.io/my-org/charts/podinfo
+    destinations:
+      - ghcr.io/my-org/charts/podinfo
     selector:
       semver: ">=6.0.0"
       limit: 5
@@ -282,13 +285,15 @@ apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: ghcr.io/fluxcd/source-controller
-    destination: registry.internal.example.com/fluxcd/source-controller
+    destinations:
+      - registry.internal.example.com/fluxcd/source-controller
     selector:
       semver: ">=1.0.0"
       limit: 5
     includeReferrers: true
   - source: ghcr.io/fluxcd/kustomize-controller
-    destination: registry.internal.example.com/fluxcd/kustomize-controller
+    destinations:
+      - registry.internal.example.com/fluxcd/kustomize-controller
     selector:
       semver: ">=1.0.0"
       limit: 5
@@ -350,14 +355,17 @@ apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: ghcr.io/fluxcd/source-controller   # container image
-    destination: 123456789012.dkr.ecr.us-east-1.amazonaws.com/fluxcd/source-controller
+    destinations:
+      - 123456789012.dkr.ecr.us-east-1.amazonaws.com/fluxcd/source-controller
     selector: { semver: ">=1.0.0", limit: 5 }
     includeReferrers: true
   - source: ghcr.io/stefanprodan/charts/podinfo # OCI Helm chart
-    destination: 123456789012.dkr.ecr.us-east-1.amazonaws.com/charts/podinfo
+    destinations:
+      - 123456789012.dkr.ecr.us-east-1.amazonaws.com/charts/podinfo
     selector: { semver: ">=6.0.0", limit: 5 }
   - source: ghcr.io/stefanprodan/manifests/podinfo # Flux OCI artifact
-    destination: 123456789012.dkr.ecr.us-east-1.amazonaws.com/manifests/podinfo
+    destinations:
+      - 123456789012.dkr.ecr.us-east-1.amazonaws.com/manifests/podinfo
     selector: { regex: { pattern: "^latest$" }, sortBy: alphabetical }
 hosts:
   - host: ghcr.io
@@ -476,7 +484,8 @@ apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: source-registry.example.com/library/app
-    destination: 123456789012.dkr.ecr.us-east-1.amazonaws.com/library/app
+    destinations:
+      - 123456789012.dkr.ecr.us-east-1.amazonaws.com/library/app
     selector: { semver: ">=1.0.0", limit: 5 }
 hosts:
   # Source: a registry that validates the cluster's ServiceAccount OIDC token.
@@ -567,7 +576,8 @@ apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: source-registry.example.com/library/app
-    destination: registry.example.org/library/app
+    destinations:
+      - registry.example.org/library/app
     selector: { semver: ">=1.0.0", limit: 5 }
 hosts:
   # Source: a registry that validates the caller's AWS identity.

@@ -33,7 +33,8 @@ apiVersion: mirror.plugin.fluxcd.io/v1beta2
 kind: Config
 artifacts:
   - source: docker.io/stefanprodan/podinfo
-    destination: quay.io/my-org/podinfo
+    destinations:
+      - quay.io/my-org/podinfo
     selector:
       semver: "6.x"
       limit: 2
@@ -121,8 +122,10 @@ Each entry has two required fields:
 
 - `.source`, the OCI repository the artifact is pulled from, written without a
   scheme (e.g. `ghcr.io/fluxcd/flux-cli`).
-- `.destination`, the OCI repository the artifact is pushed to, written without a
-  scheme. Selected tags are mirrored to the same tag at the destination.
+- `.destinations`, a non-empty list of OCI repositories to push the artifact to,
+  written without schemes. Selected tags are mirrored to the same tag at every
+  destination. Each destination becomes an independent entry in progress output
+  and the report.
 
 It also has optional fields documented below: `.selector`
 ([Tag selection](#tag-selection)), `.includeReferrers` ([Referrers](#referrers)),
@@ -132,10 +135,20 @@ It also has optional fields documented below: `.selector`
 ```yaml
 artifacts:
   - source: ghcr.io/fluxcd/flux-cli
-    destination: quay.io/example/flux-cli
+    destinations:
+      - quay.io/example/flux-cli
     selector:
       semver: ">=2.7.0 <3.0.0"
       limit: 10
+    includeReferrers: true
+  - source: cpar.dev/openbao/spiffe-jwt
+    destinations:
+      - ghcr.io/controlplaneio/openbao/spiffe-jwt
+      - 123456789012.dkr.ecr.eu-west-2.amazonaws.com/cpar.dev/openbao/spiffe-jwt
+    selector:
+      regex:
+        pattern: .*
+      limit: 0
     includeReferrers: true
 ```
 
@@ -217,7 +230,8 @@ and no copy job is scheduled. The field offers three subfields:
 ```yaml
 artifacts:
   - source: ghcr.io/stefanprodan/podinfo
-    destination: quay.io/my-org/podinfo
+    destinations:
+      - quay.io/my-org/podinfo
     selector:
       semver: "*"
       limit: 1

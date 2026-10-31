@@ -82,7 +82,8 @@ charts:
     limit: 3
 artifacts:
   - source: registry.k8s.io/external-dns/external-dns
-    destination: ghcr.io/my-org/external-dns
+    destinations:
+      - ghcr.io/my-org/external-dns
     selector:
       semver: ">=0.15.0"
       limit: 3

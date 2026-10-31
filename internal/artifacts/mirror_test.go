@@ -91,7 +91,7 @@ func TestMirror_CopiesSelectedTags(t *testing.T) {
 	testregistry.PushImage(t, src+":1.2.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := apiv1.ArtifactEntry{
+	entry := entrySpec{
 		Source:      src,
 		Destination: dst,
 		Selector:    apiv1.Selector{Limit: new(2)},
@@ -109,6 +109,38 @@ func TestMirror_CopiesSelectedTags(t *testing.T) {
 	g.Expect(tags).To(ConsistOf("1.1.0", "1.2.0"))
 }
 
+func TestMirror_CopiesSelectedTagsToAllDestinations(t *testing.T) {
+	g := NewWithT(t)
+	src := repo("multi-src")
+	dstA := repo("multi-dst-a")
+	dstB := repo("multi-dst-b")
+
+	testregistry.PushImage(t, src+":1.0.0")
+	testregistry.PushImage(t, src+":1.1.0")
+
+	c := oci.NewClient(oci.Insecure())
+	entry := apiv1.ArtifactEntry{
+		Source:       src,
+		Destinations: []string{dstA, dstB},
+		Selector:     apiv1.Selector{Limit: new(1)},
+	}
+	mirrors := NewAll(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	g.Expect(mirrors).To(HaveLen(2))
+
+	res, err := newRunner().Run(context.Background(), mirrors)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(res.Entries).To(HaveLen(2))
+	g.Expect(res.HasFailures()).To(BeFalse())
+	g.Expect(tagsWithStatus(res.Entries[0], apiv1.StatusCopied)).To(HaveLen(1))
+	g.Expect(tagsWithStatus(res.Entries[1], apiv1.StatusCopied)).To(HaveLen(1))
+
+	for _, dst := range []string{dstA, dstB} {
+		tags, err := c.ListTags(context.Background(), dst)
+		g.Expect(err).ToNot(HaveOccurred())
+		g.Expect(tags).To(ConsistOf("1.1.0"))
+	}
+}
+
 func TestMirror_VerifiesSelectedTags(t *testing.T) {
 	g := NewWithT(t)
 	src := repo("verify-src")
@@ -118,7 +150,7 @@ func TestMirror_VerifiesSelectedTags(t *testing.T) {
 	srcDigest := testregistry.PushImage(t, src+":1.1.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := apiv1.ArtifactEntry{
+	entry := entrySpec{
 		Source:      src,
 		Destination: dst,
 		Selector:    apiv1.Selector{Limit: new(1)},
@@ -173,7 +205,7 @@ func TestMirror_CopiesVerifiedDigestWhenTagMoves(t *testing.T) {
 	var movedDigest string
 
 	c := oci.NewClient(oci.Insecure())
-	entry := apiv1.ArtifactEntry{
+	entry := entrySpec{
 		Source:      src,
 		Destination: dst,
 		Selector:    apiv1.Selector{Limit: new(1)},
@@ -226,7 +258,7 @@ func TestMirror_VerificationFailureStopsPlanning(t *testing.T) {
 	testregistry.PushImage(t, src+":1.1.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := apiv1.ArtifactEntry{
+	entry := entrySpec{
 		Source:      src,
 		Destination: dst,
 		Selector:    apiv1.Selector{Limit: new(2)},
@@ -281,7 +313,7 @@ func TestMirror_SkipsSignatureTooNew(t *testing.T) {
 	testregistry.PushImage(t, src+":1.0.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := apiv1.ArtifactEntry{
+	entry := entrySpec{
 		Source:      src,
 		Destination: dst,
 		Selector:    apiv1.Selector{Limit: new(1)},
@@ -345,7 +377,7 @@ func TestMirror_SkipsEqual(t *testing.T) {
 	testregistry.PushImage(t, src+":1.0.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := apiv1.ArtifactEntry{
+	entry := entrySpec{
 		Source: src, Destination: dst,
 		Selector: apiv1.Selector{Limit: new(1)},
 	}
@@ -371,7 +403,7 @@ func TestMirror_DriftWithoutOverwrite(t *testing.T) {
 	testregistry.PushImage(t, dst+":1.0.0") // independent push → different digest
 
 	c := oci.NewClient(oci.Insecure())
-	entry := apiv1.ArtifactEntry{
+	entry := entrySpec{
 		Source: src, Destination: dst,
 		Selector: apiv1.Selector{Limit: new(1)},
 	}
@@ -395,7 +427,7 @@ func TestMirror_DriftWithOverwrite(t *testing.T) {
 	testregistry.PushImage(t, dst+":1.0.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := apiv1.ArtifactEntry{
+	entry := entrySpec{
 		Source: src, Destination: dst,
 		Selector: apiv1.Selector{Limit: new(1)},
 	}
@@ -430,7 +462,7 @@ func TestMirror_IncludeReferrers(t *testing.T) {
 	testregistry.PushReferrer(t, src, subject, "application/spdx+json")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := apiv1.ArtifactEntry{
+	entry := entrySpec{
 		Source: src, Destination: dst,
 		Selector:         apiv1.Selector{Limit: new(1)},
 		IncludeReferrers: true,
@@ -501,7 +533,7 @@ func TestMirror_DryRun(t *testing.T) {
 	testregistry.PushImage(t, src+":1.0.0")
 
 	c := oci.NewClient(oci.Insecure())
-	entry := apiv1.ArtifactEntry{
+	entry := entrySpec{
 		Source: src, Destination: dst,
 		Selector: apiv1.Selector{Limit: new(1)},
 	}

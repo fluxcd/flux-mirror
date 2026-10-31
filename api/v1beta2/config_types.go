@@ -376,7 +376,15 @@ type ArtifactEntry struct {
 	Source string `json:"source"`
 
 	// Destination is the OCI repository the artifact is mirrored to.
-	Destination string `json:"destination"`
+	// Deprecated: use Destinations instead.
+	// +optional
+	Destination string `json:"destination,omitempty"`
+
+	// Destinations are the OCI repositories the artifact is mirrored to.
+	// Exactly one of Destination or Destinations must be set.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	Destinations []string `json:"destinations,omitempty"`
 
 	// Selector selects which tags to mirror.
 	Selector Selector `json:"selector"`
@@ -392,6 +400,18 @@ type ArtifactEntry struct {
 	// Verify configures signature verification for source artifacts.
 	// +optional
 	Verify *ArtifactVerification `json:"verify,omitempty"`
+}
+
+// EffectiveDestinations returns the configured destinations. It preserves the
+// deprecated singular Destination when Destinations is unset.
+func (a ArtifactEntry) EffectiveDestinations() []string {
+	if len(a.Destinations) > 0 {
+		return a.Destinations
+	}
+	if a.Destination != "" {
+		return []string{a.Destination}
+	}
+	return nil
 }
 
 // ArtifactVerification configures signature verification for source artifacts.

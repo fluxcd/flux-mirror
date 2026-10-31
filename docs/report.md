@@ -34,7 +34,7 @@ Every report is wrapped in a top-level envelope:
 | `report.timestamp`  | RFC 3339 UTC timestamp of the run.                           |
 | `report.durationMs` | Total wall time of the run, in milliseconds.                 |
 | `report.summary`    | Aggregate counts across all entries (see below).             |
-| `report.results[]`  | One entry per config entry, in config order.                 |
+| `report.results[]`  | One entry per config entry (or per destination for multi-destination artifacts), in config order. |
 
 The `$schema` key is JSON-only — it points at a JSON Schema document and
 carries no meaning for YAML consumers, so it is dropped in YAML mode.
@@ -46,7 +46,7 @@ stable key set.
 
 | Key              | Description                                                                                  |
 |------------------|----------------------------------------------------------------------------------------------|
-| `entries`        | Number of config entries processed.                                                          |
+| `entries`        | Number of mirror entries processed (one per destination for multi-destination artifacts).     |
 | `copied`         | Total tags copied across all entries.                                                        |
 | `overwritten`    | Total tags overwritten (drift with `overwrite: true`).                                       |
 | `skipped`        | Total tags skipped (already up to date, or deferred by `verify.minAge`).                     |
@@ -59,6 +59,7 @@ stable key set.
 ## Result fields
 
 Each `results[]` entry describes one config entry (an artifact or chart source).
+Artifact entries with multiple destinations produce one result per destination.
 
 | Key           | Description                                                      |
 |---------------|------------------------------------------------------------------|

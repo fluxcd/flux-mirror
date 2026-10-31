@@ -44,8 +44,20 @@ type Verifier interface {
 	Verify(ctx context.Context, ref string, cfg apiv1.ArtifactVerification) (*oci.VerificationInfo, error)
 }
 
-// New builds an EntryMirror for the given artifact entry.
-func New(client *oci.Client, entry apiv1.ArtifactEntry, opts Options) sync.EntryMirror {
+// entrySpec is the internal artifact-entry shape used by the mirror. It keeps
+// the runtime on a single destination, independent of the API's deprecated
+// singular Destination field and its multi-destination expansion.
+type entrySpec struct {
+	Source           string
+	Destination      string
+	Selector         apiv1.Selector
+	Overwrite        bool
+	IncludeReferrers bool
+	Verify           *apiv1.ArtifactVerification
+}
+
+// New builds an EntryMirror for one internal artifact entry spec.
+func New(client *oci.Client, entry entrySpec, opts Options) sync.EntryMirror {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
@@ -58,9 +70,28 @@ func New(client *oci.Client, entry apiv1.ArtifactEntry, opts Options) sync.Entry
 	return &mirror{client: client, entry: entry, opts: opts}
 }
 
+// NewAll expands an artifact entry into one EntryMirror per destination. The
+// report keeps one entry per source/destination pair, so multi-destination
+// entries appear as independent results.
+func NewAll(client *oci.Client, entry apiv1.ArtifactEntry, opts Options) []sync.EntryMirror {
+	dests := entry.EffectiveDestinations()
+	out := make([]sync.EntryMirror, 0, len(dests))
+	for _, dst := range dests {
+		out = append(out, New(client, entrySpec{
+			Source:           entry.Source,
+			Destination:      dst,
+			Selector:         entry.Selector,
+			Overwrite:        entry.Overwrite,
+			IncludeReferrers: entry.IncludeReferrers,
+			Verify:           entry.Verify,
+		}, opts))
+	}
+	return out
+}
+
 type mirror struct {
 	client *oci.Client
-	entry  apiv1.ArtifactEntry
+	entry  entrySpec
 	opts   Options
 }
 

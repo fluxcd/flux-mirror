@@ -172,13 +172,13 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 
 	mirrors := make([]sync.EntryMirror, 0, len(cfg.Artifacts)+len(cfg.Charts))
 	for _, e := range cfg.Artifacts {
-		mirrors = append(mirrors, artifacts.New(client, e, artifacts.Options{
+		mirrors = append(mirrors, artifacts.NewAll(client, e, artifacts.Options{
 			Overwrite: syncArgs.overwrite,
 			DryRun:    syncArgs.dryRun,
 			Verbose:   syncArgs.verbose,
 			CopyJobs:  syncArgs.concurrency,
 			Logger:    logger,
-		}))
+		})...)
 	}
 	for _, e := range cfg.Charts {
 		m, err := charts.New(client, e, charts.Options{
@@ -375,6 +375,12 @@ func loadConfig(cmd *cobra.Command, path string, requireEntries bool) (*apiv1.Co
 	}
 	if warn := config.DeprecationWarning(declaredAPIVersion); warn != "" {
 		cmd.PrintErrf("warning: %s\n", warn)
+	}
+	for _, a := range cfg.Artifacts {
+		if a.Destination != "" && len(a.Destinations) == 0 {
+			cmd.PrintErrf("warning: artifacts[].destination is deprecated and will be removed in v1beta3; use artifacts[].destinations\n")
+			break
+		}
 	}
 	if requireEntries {
 		err = config.Validate(cfg)

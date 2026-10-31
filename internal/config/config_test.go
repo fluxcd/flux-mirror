@@ -549,6 +549,70 @@ func TestValidate_Table(t *testing.T) {
 			},
 		},
 		{
+			name: "valid artifacts with destinations",
+			cfg: Config{
+				TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind},
+				Artifacts: []ArtifactEntry{{
+					Source:       "ghcr.io/a/b",
+					Destinations: []string{"ghcr.io/c/d", "ghcr.io/e/f"},
+					Selector:     Selector{Semver: ">=1.0.0", Limit: new(5)},
+				}},
+			},
+		},
+		{
+			name: "artifact destination and destinations are mutually exclusive",
+			cfg: Config{
+				TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind},
+				Artifacts: []ArtifactEntry{{
+					Source:       "ghcr.io/a/b",
+					Destination:  "ghcr.io/c/d",
+					Destinations: []string{"ghcr.io/e/f"},
+				}},
+			},
+			errMsg: "exactly one of destination or destinations",
+		},
+		{
+			name: "artifact destination is required",
+			cfg: Config{
+				TypeMeta:  metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind},
+				Artifacts: []ArtifactEntry{{Source: "ghcr.io/a/b"}},
+			},
+			errMsg: "exactly one of destination or destinations",
+		},
+		{
+			name: "artifact destinations must not be empty",
+			cfg: Config{
+				TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind},
+				Artifacts: []ArtifactEntry{{
+					Source:       "ghcr.io/a/b",
+					Destinations: []string{},
+				}},
+			},
+			errMsg: "exactly one of destination or destinations",
+		},
+		{
+			name: "artifact destinations must be unique",
+			cfg: Config{
+				TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind},
+				Artifacts: []ArtifactEntry{{
+					Source:       "ghcr.io/a/b",
+					Destinations: []string{"ghcr.io/c/d", "ghcr.io/c/d"},
+				}},
+			},
+			errMsg: "duplicates",
+		},
+		{
+			name: "artifact destination must be a valid OCI repository",
+			cfg: Config{
+				TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind},
+				Artifacts: []ArtifactEntry{{
+					Source:       "ghcr.io/a/b",
+					Destinations: []string{"not a repo!"},
+				}},
+			},
+			errMsg: "destinations[0]",
+		},
+		{
 			name: "valid charts only with unlimited",
 			cfg: Config{
 				TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind},
