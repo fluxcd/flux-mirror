@@ -229,9 +229,9 @@ func enforceMinAge(result *verify.VerificationResult, minAge time.Duration, now 
 }
 
 func (v *Verifier) remoteOptions(ctx context.Context) []remote.Option {
-	opts := make([]remote.Option, 0, len(v.client.staticRemoteOpts)+1)
+	opts := make([]remote.Option, 0, len(v.client.sourceRemoteOpts)+1)
 	opts = append(opts, remote.WithContext(ctx))
-	return append(opts, v.client.staticRemoteOpts...)
+	return append(opts, v.client.sourceRemoteOpts...)
 }
 
 func (v *Verifier) getTrustedRoot() (*root.TrustedRoot, error) {

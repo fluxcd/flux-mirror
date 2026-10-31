@@ -217,15 +217,16 @@ func validate(c *apiv1.Config, requireEntries bool) error {
 	if requireEntries && len(c.Charts) == 0 && len(c.Artifacts) == 0 {
 		return fmt.Errorf("config has no entries: at least one of 'charts' or 'artifacts' must be set")
 	}
-	seen := make(map[string]bool, len(c.Hosts))
+	seen := make(map[string]int, len(c.Hosts))
 	for i, h := range c.Hosts {
 		if err := validateHost(h); err != nil {
 			return fmt.Errorf("hosts[%d]: %w", i, err)
 		}
-		if seen[h.Host] {
+		bits := directionBits(h.EffectiveDirection())
+		if seen[h.Host]&bits != 0 {
 			return fmt.Errorf("hosts[%d]: host %q is configured more than once", i, h.Host)
 		}
-		seen[h.Host] = true
+		seen[h.Host] |= bits
 	}
 	for i, ch := range c.Charts {
 		if err := validateChartEntry(ch); err != nil {
@@ -240,9 +241,26 @@ func validate(c *apiv1.Config, requireEntries bool) error {
 	return nil
 }
 
+func directionBits(direction string) int {
+	switch direction {
+	case apiv1.DirectionSource:
+		return 1
+	case apiv1.DirectionDestination:
+		return 2
+	default:
+		return 3
+	}
+}
+
 func validateHost(h apiv1.RegistryHost) error {
 	if strings.TrimSpace(h.Host) == "" {
 		return fmt.Errorf("host is required")
+	}
+	switch h.EffectiveDirection() {
+	case apiv1.DirectionBoth, apiv1.DirectionSource, apiv1.DirectionDestination:
+	default:
+		return fmt.Errorf("direction %q must be one of: %s, %s, %s",
+			h.Direction, apiv1.DirectionBoth, apiv1.DirectionSource, apiv1.DirectionDestination)
 	}
 	h.Provider = strings.TrimSpace(h.Provider)
 	// A generic provider is the default and behaves like an unset provider: it

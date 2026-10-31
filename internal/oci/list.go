@@ -12,7 +12,7 @@ import (
 
 // ListTags returns all tags in repo.
 func (c *Client) ListTags(ctx context.Context, repo string) ([]string, error) {
-	tags, err := crane.ListTags(repo, c.craneOptions(ctx)...)
+	tags, err := crane.ListTags(repo, c.sourceCraneOptions(ctx)...)
 	if err != nil {
 		return nil, fmt.Errorf("list tags %s: %w", repo, err)
 	}
