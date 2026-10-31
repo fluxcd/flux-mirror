@@ -93,7 +93,7 @@ var syncArgs = syncFlags{
 func init() {
 	syncCmd.Flags().VarP(&syncArgs.output, "output", "o", syncArgs.output.Description())
 	syncCmd.Flags().IntVar(&syncArgs.concurrency, "concurrency", syncArgs.concurrency,
-		"Maximum number of copy operations to run in parallel per job")
+		"Maximum number of copy and tag-planning operations to run in parallel")
 	syncCmd.Flags().DurationVar(&syncArgs.timeout, "timeout", syncArgs.timeout,
 		"The length of time to wait before giving up on the current operation.")
 	syncCmd.Flags().IntVar(&syncArgs.retries, "retries", syncArgs.retries,
@@ -214,11 +214,12 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 	mirrors := make([]sync.EntryMirror, 0, len(cfg.Artifacts)+len(cfg.Charts))
 	for _, e := range cfg.Artifacts {
 		mirrors = append(mirrors, artifacts.New(client, e, artifacts.Options{
-			Overwrite: syncArgs.overwrite,
-			DryRun:    syncArgs.dryRun,
-			Verbose:   syncArgs.verbose,
-			CopyJobs:  syncArgs.concurrency,
-			Logger:    logger,
+			Overwrite:       syncArgs.overwrite,
+			DryRun:          syncArgs.dryRun,
+			Verbose:         syncArgs.verbose,
+			CopyJobs:        syncArgs.concurrency,
+			PlanConcurrency: syncArgs.concurrency,
+			Logger:          logger,
 		}))
 	}
 	for _, e := range cfg.Charts {
