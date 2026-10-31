@@ -31,6 +31,20 @@ type HostAuth struct {
 	RegistryToken string
 }
 
+// HostsForDirection returns the hosts that apply to a side of a mirror:
+// direction source includes entries marked source or both, and direction
+// destination includes entries marked destination or both.
+func HostsForDirection(hosts []apiv1.RegistryHost, direction string) []apiv1.RegistryHost {
+	out := make([]apiv1.RegistryHost, 0, len(hosts))
+	for _, h := range hosts {
+		d := h.EffectiveDirection()
+		if d == apiv1.DirectionBoth || d == direction {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 // SelectAuthHosts returns the auth hosts to act on: the ones named in filter
 // (erroring on any not present), or all configured hosts when filter is empty.
 func SelectAuthHosts(cfg *apiv1.Config, filter []string) ([]apiv1.RegistryHost, error) {

@@ -35,7 +35,7 @@ func (c *Client) IsHelmChart(ctx context.Context, ref string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("parse %s: %w", ref, err)
 	}
-	desc, err := remote.Get(parsed, c.remoteOpts(ctx)...)
+	desc, err := remote.Get(parsed, c.sourceRemoteOptions(ctx)...)
 	if err != nil {
 		if isNotFound(err) {
 			return false, nil
@@ -63,7 +63,7 @@ func (c *Client) HelmChartLayerDigest(ctx context.Context, ref string) (string, 
 	if err != nil {
 		return "", fmt.Errorf("parse %s: %w", ref, err)
 	}
-	desc, err := remote.Get(parsed, c.remoteOpts(ctx)...)
+	desc, err := remote.Get(parsed, c.destinationRemoteOptions(ctx)...)
 	if err != nil {
 		if isNotFound(err) {
 			return "", nil
@@ -85,7 +85,7 @@ func (c *Client) PullHelmChart(ctx context.Context, ref string) (data []byte, ma
 	if err != nil {
 		return nil, "", fmt.Errorf("parse %s: %w", ref, err)
 	}
-	opts := c.remoteOpts(ctx)
+	opts := c.sourceRemoteOptions(ctx)
 	desc, err := remote.Get(parsed, opts...)
 	if err != nil {
 		return nil, "", fmt.Errorf("get manifest %s: %w", ref, err)
@@ -136,7 +136,7 @@ func (c *Client) PushHelmChart(ctx context.Context, dst string, configJSON, char
 	if err != nil {
 		return "", fmt.Errorf("parse %s: %w", dst, err)
 	}
-	opts := c.remoteOpts(ctx)
+	opts := c.destinationRemoteOptions(ctx)
 
 	configLayer := static.NewLayer(configJSON, HelmConfigMediaType)
 	chartLayer := static.NewLayer(chartTGZ, HelmChartLayerMediaType)

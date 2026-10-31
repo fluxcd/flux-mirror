@@ -512,3 +512,20 @@ func TestGenericProviderHostResolution(t *testing.T) {
 	_, err = ResolveHostAuth(context.Background(), genericOnly)
 	g.Expect(err).To(MatchError(ContainSubstring("has no credential or provider")))
 }
+func TestHostsForDirection(t *testing.T) {
+	g := NewWithT(t)
+	hosts := []apiv1.RegistryHost{
+		{Host: "both.example", Direction: apiv1.DirectionBoth},
+		{Host: "source.example", Direction: apiv1.DirectionSource},
+		{Host: "destination.example", Direction: apiv1.DirectionDestination},
+		{Host: "default.example"},
+	}
+
+	source := HostsForDirection(hosts, apiv1.DirectionSource)
+	g.Expect(source).To(HaveLen(3))
+	g.Expect([]string{source[0].Host, source[1].Host, source[2].Host}).To(ConsistOf("both.example", "source.example", "default.example"))
+
+	destination := HostsForDirection(hosts, apiv1.DirectionDestination)
+	g.Expect(destination).To(HaveLen(3))
+	g.Expect([]string{destination[0].Host, destination[1].Host, destination[2].Host}).To(ConsistOf("both.example", "destination.example", "default.example"))
+}
