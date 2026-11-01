@@ -413,6 +413,13 @@ type ArtifactEntry struct {
 	// +optional
 	IncludeReferrers bool `json:"includeReferrers,omitempty"`
 
+	// IgnoreDriftForExitCode still reports and logs drifted tags, but excludes
+	// them from the drift exit code. When every drifted tag belongs to an entry
+	// with this field set, the run does not exit with the --drift-exit-code
+	// value.
+	// +optional
+	IgnoreDriftForExitCode bool `json:"ignoreDriftForExitCode,omitempty"`
+
 	// Verify configures signature verification for source artifacts.
 	// +optional
 	Verify *ArtifactVerification `json:"verify,omitempty"`

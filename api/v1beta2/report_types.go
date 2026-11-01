@@ -70,7 +70,8 @@ type ReportSummary struct {
 	// +kubebuilder:validation:Minimum=0
 	Skipped int `json:"skipped"`
 
-	// Drifted is the number of tags that drifted.
+	// Drifted is the number of tags that drifted, including entries that set
+	// ignoreDriftForExitCode.
 	// +kubebuilder:validation:Minimum=0
 	Drifted int `json:"drifted"`
 
@@ -87,6 +88,7 @@ type ReportSummary struct {
 	Failed int `json:"failed"`
 
 	// ExitCode is the semantic sync exit code (0 clean, 1 failures, 2 drift).
+	// Drift on entries that set ignoreDriftForExitCode is excluded.
 	// +kubebuilder:validation:Minimum=0
 	ExitCode int `json:"exitCode"`
 }
@@ -125,6 +127,12 @@ type EntryResult struct {
 	// Error carries the plan-time failure message when Status is failed.
 	// +optional
 	Error string `json:"error,omitempty"`
+
+	// IgnoreDriftForExitCode reports that this entry's drifted tags do not
+	// contribute to the exit code. The tags are still reported with
+	// StatusDrifted.
+	// +optional
+	IgnoreDriftForExitCode bool `json:"ignoreDriftForExitCode,omitempty"`
 
 	// Tags lists the per-tag results.
 	Tags []TagResult `json:"tags"`

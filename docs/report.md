@@ -50,11 +50,11 @@ stable key set.
 | `copied`         | Total tags copied across all entries.                                                        |
 | `overwritten`    | Total tags overwritten (drift with `overwrite: true`).                                       |
 | `skipped`        | Total tags skipped (already up to date, or deferred by `verify.minAge`).                     |
-| `drifted`        | Total tags drifted (different digest, `overwrite: false`).                                   |
+| `drifted`        | Total tags drifted (different digest, `overwrite: false`), including entries with `ignoreDriftForExitCode: true`. |
 | `wouldCopy`      | Dry-run forecast: tags that would have been copied.                                          |
 | `wouldOverwrite` | Dry-run forecast: tags that would have been overwritten.                                     |
 | `failed`         | Total failures: tag-level failures plus plan-failed entries.                                 |
-| `exitCode`       | Semantic exit code: `0` clean, `1` failures, `2` drift. Not affected by `--drift-exit-code`. |
+| `exitCode`       | Semantic exit code: `0` clean, `1` failures, `2` drift. Drift on entries with `ignoreDriftForExitCode: true` is excluded. Not affected by `--drift-exit-code`. |
 
 ## Result fields
 
@@ -66,6 +66,7 @@ Each `results[]` entry describes one config entry (an artifact or chart source).
 | `destination` | Destination repository the entry mirrors into.                   |
 | `status`      | Entry-level outcome: `completed` or `failed`.                    |
 | `error`       | Plan-time error message. Present only when `status` is `failed`. |
+| `ignoreDriftForExitCode` | `true` when the entry's drifted tags were excluded from the exit code. |
 | `tags[]`      | Per-tag results, in plan order (deterministic). May be empty.    |
 
 The entry `status` disambiguates an empty `tags` array:

@@ -516,6 +516,37 @@ func TestSync_DriftExitCode(t *testing.T) {
 	g.Expect(out).To(ContainSubstring("drifted"))
 }
 
+func TestSync_IgnoreDriftForExitCode(t *testing.T) {
+	g := NewWithT(t)
+	ensureRegistry(t)
+
+	src := dockerReg + "/idr-src-" + testregistry.RandSuffix()
+	dst := dockerReg + "/idr-dst-" + testregistry.RandSuffix()
+	testregistry.PushImage(t, src+":1.0.0")
+	testregistry.PushImage(t, dst+":1.0.0") // independent push → different digest
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := fmt.Sprintf(`apiVersion: mirror.plugin.fluxcd.io/v1beta2
+kind: Config
+artifacts:
+  - source: %s
+    destination: %s
+    selector:
+      semver: ">=0.0.0"
+      limit: 5
+    ignoreDriftForExitCode: true
+`, src, dst)
+	g.Expect(os.WriteFile(path, []byte(body), 0o600)).To(Succeed())
+
+	// Drift is still reported, but the run exits clean even with the default
+	// drift exit code.
+	out, err := executeCommand([]string{"sync", path, "--insecure", "-o", "json"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(out).To(ContainSubstring(`"drifted": 1`))
+	g.Expect(out).To(ContainSubstring(`"ignoreDriftForExitCode": true`))
+	g.Expect(out).To(ContainSubstring(`"exitCode": 0`))
+}
+
 func TestSync_DriftExitCodeValidation(t *testing.T) {
 	g := NewWithT(t)
 	cfgPath := writeConfig(t, "ghcr.io/a/b", "ghcr.io/c/d")

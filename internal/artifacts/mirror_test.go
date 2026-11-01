@@ -387,6 +387,37 @@ func TestMirror_DriftWithoutOverwrite(t *testing.T) {
 	g.Expect(res.ExitCode()).To(Equal(2))
 }
 
+func TestMirror_DriftWithIgnoreDriftForExitCode(t *testing.T) {
+	g := NewWithT(t)
+	src := repo("ignore-drift-src")
+	dst := repo("ignore-drift-dst")
+	testregistry.PushImage(t, src+":1.0.0")
+	testregistry.PushImage(t, dst+":1.0.0") // independent push → different digest
+
+	c := oci.NewClient(oci.Insecure())
+	entry := apiv1.ArtifactEntry{
+		Source: src, Destination: dst,
+		Selector:               apiv1.Selector{Limit: new(1)},
+		IgnoreDriftForExitCode: true,
+	}
+	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
+		New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+
+	// Drift is still visible in the entry and totals, but it does not affect
+	// the exit code.
+	drifted := tagsWithStatus(res.Entries[0], apiv1.StatusDrifted)
+	g.Expect(drifted).To(HaveLen(1))
+	g.Expect(drifted[0].Tag).To(Equal("1.0.0"))
+	g.Expect(res.Entries[0].IgnoreDriftForExitCode).To(BeTrue())
+	g.Expect(res.TotalDrifted()).To(Equal(1))
+	g.Expect(res.HasDrift()).To(BeTrue())
+	g.Expect(res.HasDriftForExitCode()).To(BeFalse())
+	g.Expect(res.HasFailures()).To(BeFalse())
+	g.Expect(res.ExitCode()).To(Equal(0))
+}
+
 func TestMirror_DriftWithOverwrite(t *testing.T) {
 	g := NewWithT(t)
 	src := repo("ow-src")

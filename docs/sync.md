@@ -76,7 +76,7 @@ repository credentials automatically.
 | `--retries N`                   | `3`     | Maximum number of retry attempts per job, within the `--timeout` budget. Must be greater than or equal to `0`.                     |
 | `--timeout DURATION`            | `5m`    | Per-job total budget covering all retry attempts. Must be greater than `0`.                                                         |
 | `--overwrite`                   | `false` | Force `overwrite: true` on every entry, regardless of per-entry config. See [Overwrite and drift behavior](config.md#overwrite-and-drift-behavior). |
-| `--drift-exit-code N`           | `2`     | Exit code to use when drift is detected without failures (0–255). Set to `0` for immutable destinations that should not fail CI on drift. |
+| `--drift-exit-code N`           | `2`     | Exit code to use when drift is detected without failures (0–255). Set to `0` for immutable destinations that should not fail CI on drift. Drift on entries with `ignoreDriftForExitCode: true` does not trigger it. |
 | `--dry-run`                     | `false` | Run the plan and comparison pipeline without performing any writes. Reported as `would-copy` / `would-overwrite`.                   |
 | `--verbose`                     | `false` | Log every operation and the involved digests on stderr. Suppresses the spinner.                                                     |
 | `--no-progress`                 | `false` | Disable the live progress spinner. Per-job lines and the summary still print.                                                       |
@@ -181,6 +181,12 @@ Failures take precedence over drift. `--dry-run` does not bump the exit code for
 `would-copy` / `would-overwrite`, but drift detection still produces `2` by
 default. Use `--drift-exit-code=0` when the destination registry is known to be
 immutable and drift should be logged without failing CI.
+
+Drift on an artifact entry with
+[`ignoreDriftForExitCode: true`](config.md#overwrite-and-drift-behavior) is still logged and
+reported as `drifted`, but does not contribute to this exit code. A run where all
+drifted tags belong to such entries exits `0`, and `--drift-exit-code` is not
+applied.
 
 ## Examples
 

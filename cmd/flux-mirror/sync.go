@@ -321,7 +321,7 @@ func classifyExit(r sync.Result, driftExitCode int) error {
 	// already surfaced inline (per-failure ✗ lines) and in the Summary
 	// totals; printing a third "N failed" footer just adds noise.
 	code := r.ExitCode()
-	if code == syncDefaultDriftExitCode && r.HasDrift() && !r.HasFailures() {
+	if code == syncDefaultDriftExitCode && r.HasDriftForExitCode() && !r.HasFailures() {
 		code = driftExitCode
 	}
 	switch code {

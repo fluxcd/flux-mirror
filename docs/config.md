@@ -126,8 +126,8 @@ Each entry has two required fields:
 
 It also has optional fields documented below: `.selector`
 ([Tag selection](#tag-selection)), `.includeReferrers` ([Referrers](#referrers)),
-`.verify` ([Signature verification](#signature-verification)), and `.overwrite`
-([Overwrite and drift behavior](#overwrite-and-drift-behavior)).
+`.verify` ([Signature verification](#signature-verification)), `.overwrite` and
+`.ignoreDriftForExitCode` ([Overwrite and drift behavior](#overwrite-and-drift-behavior)).
 
 ```yaml
 artifacts:
@@ -137,6 +137,7 @@ artifacts:
       semver: ">=2.7.0 <3.0.0"
       limit: 10
     includeReferrers: true
+    ignoreDriftForExitCode: true
 ```
 
 #### Tag selection
@@ -598,6 +599,13 @@ cannot be resolved automatically: it surfaces in the run output and the
 into. The [`--overwrite`](sync.md#flags) CLI flag forces `overwrite:
 true` for every entry, overriding per-entry values, for one-off resyncs.
 
+`.artifacts[].ignoreDriftForExitCode` is an optional boolean, `false` by default. When
+`true`, drifted tags for that entry are still logged and reported as `drifted`,
+but they do not contribute to the drift exit code. If every drifted tag belongs
+to an entry with `ignoreDriftForExitCode: true`, the run exits `0` and
+`--drift-exit-code` is not applied. Use it for an artifact whose destination is
+expected to diverge, without muting drift for the rest of the config.
+
 With `includeReferrers: true`, the same rule applies to referrers. Referrers
 missing at the destination are always mirrored (there is nothing to overwrite) —
 the common case when an upstream signature is published after the artifact was
@@ -606,22 +614,23 @@ first mirrored. Referrers that exist with a different digest are skipped
 
 ### Defaults
 
-| Field                            | Default  |
-|----------------------------------|----------|
-| `artifacts[].selector.sortBy`    | `semver` |
-| `artifacts[].selector.limit`     | `1`      |
-| `artifacts[].overwrite`          | `false`  |
-| `artifacts[].includeReferrers`   | `false`  |
-| `artifacts[].verify`             | unset    |
-| `charts[].version`               | `*`      |
-| `charts[].limit`                 | `1`      |
-| `charts[].overwrite`             | `false`  |
-| `hosts[].direction`              | `both`    |
-| `hosts[].provider`               | `generic` |
-| `hosts[].credential.audiences`   | `host`   |
-| `hosts[].credential.expiration`  | `60s`    |
-| `hosts[].credential.envelope`    | unset    |
-| `hosts[].maxChunkSize`           | `0`      |
+| Field                                | Default    |
+|--------------------------------------|------------|
+| `artifacts[].selector.sortBy`        | `semver`   |
+| `artifacts[].selector.limit`         | `1`        |
+| `artifacts[].overwrite`              | `false`    |
+| `artifacts[].includeReferrers`       | `false`    |
+| `artifacts[].ignoreDriftForExitCode` | `false`    |
+| `artifacts[].verify`                 | unset      |
+| `charts[].version`                   | `*`        |
+| `charts[].limit`                     | `1`        |
+| `charts[].overwrite`                 | `false`    |
+| `hosts[].direction`                  | `both`     |
+| `hosts[].provider`                   | `generic`  |
+| `hosts[].credential.audiences`       | `host`     |
+| `hosts[].credential.expiration`      | `60s`      |
+| `hosts[].credential.envelope`        | unset      |
+| `hosts[].maxChunkSize`               | `0`        |
 
 A `limit` of `0` disables the cap and mirrors every matching tag or version. Use
 it with care: unrestricted mirrors can consume significant bandwidth and storage

@@ -34,6 +34,7 @@ artifacts:
       semver: ">=2.40.0 <3.0.0"
       limit: 10
     includeReferrers: true
+    ignoreDriftForExitCode: true
     verify:
       provider: cosign
       minAge: 12h
@@ -59,6 +60,8 @@ artifacts:
 
 	g.Expect(cfg.Artifacts).To(HaveLen(2))
 	g.Expect(cfg.Artifacts[0].IncludeReferrers).To(BeTrue())
+	g.Expect(cfg.Artifacts[0].IgnoreDriftForExitCode).To(BeTrue())
+	g.Expect(cfg.Artifacts[1].IgnoreDriftForExitCode).To(BeFalse())
 	g.Expect(cfg.Artifacts[0].Verify.Provider).To(Equal(VerifyProviderCosign))
 	g.Expect(cfg.Artifacts[0].Verify.MinAge).ToNot(BeNil())
 	g.Expect(cfg.Artifacts[0].Verify.MinAge.Duration).To(Equal(12 * time.Hour))

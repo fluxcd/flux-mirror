@@ -28,6 +28,10 @@ type Plan struct {
 	// Destination is the entry's destination repository, surfaced alongside
 	// Source in the structured report.
 	Destination string
+	// IgnoreDriftForExitCode marks drift on this entry as informational: its
+	// drifted tags are still reported and logged but do not contribute to the
+	// exit code.
+	IgnoreDriftForExitCode bool
 	// Jobs is the set of work units to execute, all bound to this entry.
 	Jobs []Job
 }

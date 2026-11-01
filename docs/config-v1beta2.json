@@ -18,6 +18,10 @@
             "description": "Destination is the OCI repository the artifact is mirrored to.",
             "type": "string"
           },
+          "ignoreDriftForExitCode": {
+            "description": "IgnoreDriftForExitCode still reports and logs drifted tags, but excludes\nthem from the drift exit code. When every drifted tag belongs to an entry\nwith this field set, the run does not exit with the --drift-exit-code\nvalue.",
+            "type": "boolean"
+          },
           "includeReferrers": {
             "description": "IncludeReferrers also mirrors the artifact's referrers (signatures, SBOMs).",
             "type": "boolean"

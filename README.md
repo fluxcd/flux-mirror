@@ -125,7 +125,7 @@ real failures from drift, so a CI gate can react to each independently:
 |------|------------------------------------------------------------------------------------------------------------|
 | `0`  | Clean run, every tag was copied or skipped as expected.                                                    |
 | `1`  | At least one tag job failed (network error, push rejected, retries exhausted).                             |
-| `2`  | No failures, but at least one tag drifted with `overwrite: false` (configurable with `--drift-exit-code`). |
+| `2`  | No failures, but at least one tag drifted with `overwrite: false` (configurable with `--drift-exit-code`). Drift on artifacts with `ignoreDriftForExitCode: true` is excluded. |
 
 The `--no-progress` flag suppresses the live spinner so log output stays clean in CI:
 

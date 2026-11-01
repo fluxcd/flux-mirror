@@ -89,7 +89,11 @@ type tagJob struct {
 }
 
 func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
-	plan := sync.Plan{Source: m.entry.Source, Destination: m.entry.Destination}
+	plan := sync.Plan{
+		Source:                 m.entry.Source,
+		Destination:            m.entry.Destination,
+		IgnoreDriftForExitCode: m.entry.IgnoreDriftForExitCode,
+	}
 	start := time.Now()
 
 	m.opts.Logger.Info("planning tags", "source", m.entry.Source, "destination", m.entry.Destination)
