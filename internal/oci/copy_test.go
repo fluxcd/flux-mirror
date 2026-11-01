@@ -5,6 +5,8 @@ package oci
 
 import (
 	"context"
+	"net/http"
+	"sync"
 	"testing"
 
 	. "github.com/onsi/gomega"
@@ -56,4 +58,50 @@ func TestCopyTag_Idempotent(t *testing.T) {
 	dstDigest, err := crane.Digest(dst, crane.Insecure)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(dstDigest).To(Equal(srcDigest))
+}
+
+type countingTransport struct {
+	inner http.RoundTripper
+	mu    sync.Mutex
+	seen  map[string]int
+}
+
+func (t *countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.mu.Lock()
+	if t.seen == nil {
+		t.seen = map[string]int{}
+	}
+	t.seen[req.Method]++
+	t.mu.Unlock()
+	return t.inner.RoundTrip(req)
+}
+
+func (t *countingTransport) counts() map[string]int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make(map[string]int, len(t.seen))
+	for k, v := range t.seen {
+		out[k] = v
+	}
+	return out
+}
+
+func TestCopyTag_SeparateSourceAndDestinationTransports(t *testing.T) {
+	g := NewWithT(t)
+	srcRT := &countingTransport{inner: http.DefaultTransport}
+	dstRT := &countingTransport{inner: http.DefaultTransport}
+	c := NewClient(Insecure(), WithSourceTransport(srcRT), WithDestinationTransport(dstRT))
+	src := repo("split-src") + ":v1"
+	dst := repo("split-dst") + ":v1"
+
+	testregistry.PushImage(t, src)
+	g.Expect(c.CopyTag(context.Background(), src, dst, 1)).To(Succeed())
+
+	srcCounts := srcRT.counts()
+	dstCounts := dstRT.counts()
+	g.Expect(srcCounts).To(HaveKey("GET"))
+	g.Expect(srcCounts).ToNot(HaveKey("PUT"))
+	g.Expect(srcCounts).ToNot(HaveKey("POST"))
+	g.Expect(dstCounts).To(HaveKey("PUT"))
+	g.Expect(dstCounts).To(HaveKey("POST"))
 }

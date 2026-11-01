@@ -8,7 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/oci"
@@ -30,6 +33,11 @@ type Options struct {
 	// CopyJobs is the intra-copy blob parallelism passed to crane.WithJobs.
 	// Most useful for large multi-arch images. Default 1 (sequential).
 	CopyJobs int
+	// PlanConcurrency is the maximum number of tag-planning operations to run
+	// in parallel per entry. Planning resolves each tag's digest and snapshots
+	// its referrers, which is one or two API calls per tag. Default 1
+	// (sequential).
+	PlanConcurrency int
 	// Logger is used for warnings (drift, dry-run preview, excluded tags).
 	Logger *slog.Logger
 	// Verifier verifies source artifact signatures when entry.verify is set.
@@ -51,6 +59,9 @@ func New(client *oci.Client, entry apiv1.ArtifactEntry, opts Options) sync.Entry
 	}
 	if opts.CopyJobs <= 0 {
 		opts.CopyJobs = 1
+	}
+	if opts.PlanConcurrency <= 0 {
+		opts.PlanConcurrency = 1
 	}
 	if opts.Verifier == nil {
 		opts.Verifier = oci.NewVerifier(client)
@@ -79,7 +90,9 @@ type tagJob struct {
 
 func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 	plan := sync.Plan{Source: m.entry.Source, Destination: m.entry.Destination}
+	start := time.Now()
 
+	m.opts.Logger.Info("planning tags", "source", m.entry.Source, "destination", m.entry.Destination)
 	tags, err := m.client.ListTags(ctx, m.entry.Source)
 	if err != nil {
 		return plan, err
@@ -96,91 +109,152 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 
 	overwrite := m.entry.Overwrite || m.opts.Overwrite
 
-	plan.Jobs = make([]sync.Job, 0, len(sel.Tags))
-	for _, tag := range sel.Tags {
-		job := tagJob{
+	m.opts.Logger.Info("tags selected",
+		"source", m.entry.Source,
+		"tags", len(sel.Tags),
+		"includeReferrers", m.entry.IncludeReferrers,
+		"elapsed", time.Since(start).Round(time.Millisecond))
+
+	jobs := make([]*tagJob, len(sel.Tags))
+	overrides := make([]*sync.Job, len(sel.Tags))
+	limit := len(sel.Tags)
+
+	// Verification is sequential: its failure semantics decide which later
+	// tags are planned at all, so parallelising it would change behavior.
+	for i, tag := range sel.Tags {
+		job := &tagJob{
 			tag:       tag,
 			src:       m.entry.Source + ":" + tag,
 			dst:       m.entry.Destination + ":" + tag,
 			overwrite: overwrite,
 		}
+		jobs[i] = job
 
-		if m.entry.Verify != nil {
-			info, err := m.opts.Verifier.Verify(ctx, job.src, *m.entry.Verify)
-			if err != nil {
-				var tooNew *oci.SignatureTooNewError
-				if errors.As(err, &tooNew) {
-					m.opts.Logger.Info("signature too new; skipping tag",
-						"src", job.src,
-						"integrated_time", tooNew.IntegratedTime.Format(time.RFC3339),
-						"age", tooNew.Age.Round(time.Second),
-						"min_age", tooNew.MinAge)
-					ver := toVerification(info)
-					if ver == nil {
-						ver = &apiv1.Verification{}
-					}
-					ver.Age = tooNew.Age.Round(time.Second).String()
-					ver.MinAge = tooNew.MinAge.String()
-					skipDigest := ""
-					if info != nil {
-						skipDigest = info.Digest
-					}
-					plan.Jobs = append(plan.Jobs, sync.Job{
-						ID:           tag,
-						Dst:          job.dst,
-						Verification: ver,
-						Run: func(context.Context) (sync.JobResult, error) {
-							return sync.JobResult{
-								Status: apiv1.StatusSkipped,
-								Reason: apiv1.ReasonSignatureTooNew,
-								Digest: skipDigest,
-							}, nil
-						},
-					})
-					continue
-				}
-				// Any other verify failure becomes a failed tag row carrying the
-				// error; planning stops after it (tags verified earlier still
-				// run, later tags are not attempted). Unlike a plan-time error,
-				// this keeps the entry status "completed".
-				plan.Jobs = append(plan.Jobs, sync.Job{
-					ID:        tag,
-					Dst:       job.dst,
-					PlanError: fmt.Errorf("verify %s: %w", job.src, err),
-				})
-				break
-			}
-			if info == nil || info.Digest == "" {
-				return plan, fmt.Errorf("verify %s: verifier returned no digest", job.src)
-			}
-			job.srcDigest = info.Digest
-			job.verification = toVerification(info)
+		if m.entry.Verify == nil {
+			continue
 		}
+		info, err := m.opts.Verifier.Verify(ctx, job.src, *m.entry.Verify)
+		if err != nil {
+			var tooNew *oci.SignatureTooNewError
+			if errors.As(err, &tooNew) {
+				m.opts.Logger.Info("signature too new; skipping tag",
+					"src", job.src,
+					"integrated_time", tooNew.IntegratedTime.Format(time.RFC3339),
+					"age", tooNew.Age.Round(time.Second),
+					"min_age", tooNew.MinAge)
+				ver := toVerification(info)
+				if ver == nil {
+					ver = &apiv1.Verification{}
+				}
+				ver.Age = tooNew.Age.Round(time.Second).String()
+				ver.MinAge = tooNew.MinAge.String()
+				skipDigest := ""
+				if info != nil {
+					skipDigest = info.Digest
+				}
+				overrides[i] = &sync.Job{
+					ID:           tag,
+					Dst:          job.dst,
+					Verification: ver,
+					Run: func(context.Context) (sync.JobResult, error) {
+						return sync.JobResult{
+							Status: apiv1.StatusSkipped,
+							Reason: apiv1.ReasonSignatureTooNew,
+							Digest: skipDigest,
+						}, nil
+					},
+				}
+				jobs[i] = nil
+				continue
+			}
+			// Any other verify failure becomes a failed tag row carrying the
+			// error; planning stops after it (tags verified earlier still
+			// run, later tags are not attempted). Unlike a plan-time error,
+			// this keeps the entry status "completed".
+			overrides[i] = &sync.Job{
+				ID:        tag,
+				Dst:       job.dst,
+				PlanError: fmt.Errorf("verify %s: %w", job.src, err),
+			}
+			jobs[i] = nil
+			limit = i + 1
+			break
+		}
+		if info == nil || info.Digest == "" {
+			return plan, fmt.Errorf("verify %s: verifier returned no digest", job.src)
+		}
+		job.srcDigest = info.Digest
+		job.verification = toVerification(info)
+	}
 
-		// Snapshot referrers at plan time, not inside the retry closure —
-		// this fixes the set for the duration of any per-tag retries the
-		// runner does. Without this, a transient failure mid-mirror could
-		// re-list and mix referrers from before/after a publish.
-		if m.entry.IncludeReferrers {
-			if job.srcDigest == "" {
-				srcDigest, err := m.client.Digest(ctx, job.src)
+	// Snapshot referrers at plan time, not inside the retry closure — this
+	// fixes the set for the duration of any per-tag retries the runner does.
+	// Digest + referrer resolution dominates planning, so run it with the
+	// configured plan concurrency.
+	if m.entry.IncludeReferrers {
+		total := 0
+		for i := 0; i < limit; i++ {
+			if jobs[i] != nil {
+				total++
+			}
+		}
+		m.opts.Logger.Info("planning referrers",
+			"source", m.entry.Source,
+			"tags", total,
+			"concurrency", m.opts.PlanConcurrency)
+
+		var planned atomic.Int64
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(m.opts.PlanConcurrency)
+		for i := 0; i < limit; i++ {
+			job := jobs[i]
+			if job == nil {
+				continue
+			}
+			g.Go(func() error {
+				if job.srcDigest == "" {
+					srcDigest, err := m.client.Digest(gctx, job.src)
+					if err != nil {
+						return fmt.Errorf("resolve digest for referrers (%s): %w", job.src, err)
+					}
+					job.srcDigest = srcDigest
+				}
+				refs, err := m.client.SnapshotReferrers(gctx, m.entry.Source, job.srcDigest)
 				if err != nil {
-					return plan, fmt.Errorf("resolve digest for referrers (%s): %w", job.src, err)
+					return fmt.Errorf("snapshot referrers for %s: %w", job.src, err)
 				}
-				job.srcDigest = srcDigest
-			}
-			refs, err := m.client.SnapshotReferrers(ctx, m.entry.Source, job.srcDigest)
-			if err != nil {
-				return plan, fmt.Errorf("snapshot referrers for %s: %w", job.src, err)
-			}
-			job.refs = refs
+				job.refs = refs
+				done := int(planned.Add(1))
+				if done%50 == 0 || done == total {
+					m.opts.Logger.Info("planning progress",
+						"source", m.entry.Source,
+						"done", done,
+						"total", total,
+						"elapsed", time.Since(start).Round(time.Second))
+				}
+				return nil
+			})
 		}
+		if err := g.Wait(); err != nil {
+			return plan, err
+		}
+	}
 
+	plan.Jobs = make([]sync.Job, 0, limit)
+	for i := 0; i < limit; i++ {
+		if overrides[i] != nil {
+			plan.Jobs = append(plan.Jobs, *overrides[i])
+			continue
+		}
+		job := jobs[i]
+		if job == nil {
+			continue
+		}
 		plan.Jobs = append(plan.Jobs, sync.Job{
-			ID:           tag,
+			ID:           job.tag,
 			Dst:          job.dst,
 			Verification: job.verification,
-			Run:          func(jctx context.Context) (sync.JobResult, error) { return m.runTag(jctx, job) },
+			Run:          func(jctx context.Context) (sync.JobResult, error) { return m.runTag(jctx, *job) },
 		})
 	}
 	return plan, nil

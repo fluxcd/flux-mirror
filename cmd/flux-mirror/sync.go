@@ -93,7 +93,7 @@ var syncArgs = syncFlags{
 func init() {
 	syncCmd.Flags().VarP(&syncArgs.output, "output", "o", syncArgs.output.Description())
 	syncCmd.Flags().IntVar(&syncArgs.concurrency, "concurrency", syncArgs.concurrency,
-		"Maximum number of copy operations to run in parallel per job")
+		"Maximum number of copy and tag-planning operations to run in parallel")
 	syncCmd.Flags().DurationVar(&syncArgs.timeout, "timeout", syncArgs.timeout,
 		"The length of time to wait before giving up on the current operation.")
 	syncCmd.Flags().IntVar(&syncArgs.retries, "retries", syncArgs.retries,
@@ -148,18 +148,59 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 	if syncArgs.insecure {
 		clientOpts = append(clientOpts, oci.Insecure())
 	}
-	t, closeTransport, err := buildClientTransport(cmd.Context(), cfg.Hosts)
-	if err != nil {
-		return err
+	directional := false
+	for _, h := range cfg.Hosts {
+		if h.EffectiveDirection() != apiv1.DirectionBoth {
+			directional = true
+			break
+		}
 	}
-	defer closeTransport()
-	if t != nil {
-		clientOpts = append(clientOpts, oci.WithTransport(t))
-	}
-	if kc, err := registryauth.BuildKeychain(cmd.Context(), cfg.Hosts); err != nil {
-		return err
-	} else if kc != nil {
-		clientOpts = append(clientOpts, oci.WithKeychain(kc))
+
+	if !directional {
+		t, closeTransport, err := buildClientTransport(cmd.Context(), cfg.Hosts)
+		if err != nil {
+			return err
+		}
+		defer closeTransport()
+		if t != nil {
+			clientOpts = append(clientOpts, oci.WithTransport(t))
+		}
+		if kc, err := registryauth.BuildKeychain(cmd.Context(), cfg.Hosts); err != nil {
+			return err
+		} else if kc != nil {
+			clientOpts = append(clientOpts, oci.WithKeychain(kc))
+		}
+	} else {
+		sourceHosts := registryauth.HostsForDirection(cfg.Hosts, apiv1.DirectionSource)
+		destinationHosts := registryauth.HostsForDirection(cfg.Hosts, apiv1.DirectionDestination)
+
+		srcTransport, closeSrcTransport, err := buildClientTransport(cmd.Context(), sourceHosts)
+		if err != nil {
+			return err
+		}
+		defer closeSrcTransport()
+		if srcTransport != nil {
+			clientOpts = append(clientOpts, oci.WithSourceTransport(srcTransport))
+		}
+		dstTransport, closeDstTransport, err := buildClientTransport(cmd.Context(), destinationHosts)
+		if err != nil {
+			return err
+		}
+		defer closeDstTransport()
+		if dstTransport != nil {
+			clientOpts = append(clientOpts, oci.WithDestinationTransport(dstTransport))
+		}
+
+		if kc, err := registryauth.BuildKeychain(cmd.Context(), sourceHosts); err != nil {
+			return err
+		} else if kc != nil {
+			clientOpts = append(clientOpts, oci.WithSourceKeychain(kc))
+		}
+		if kc, err := registryauth.BuildKeychain(cmd.Context(), destinationHosts); err != nil {
+			return err
+		} else if kc != nil {
+			clientOpts = append(clientOpts, oci.WithDestinationKeychain(kc))
+		}
 	}
 	client := oci.NewClient(clientOpts...)
 
@@ -173,11 +214,12 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 	mirrors := make([]sync.EntryMirror, 0, len(cfg.Artifacts)+len(cfg.Charts))
 	for _, e := range cfg.Artifacts {
 		mirrors = append(mirrors, artifacts.New(client, e, artifacts.Options{
-			Overwrite: syncArgs.overwrite,
-			DryRun:    syncArgs.dryRun,
-			Verbose:   syncArgs.verbose,
-			CopyJobs:  syncArgs.concurrency,
-			Logger:    logger,
+			Overwrite:       syncArgs.overwrite,
+			DryRun:          syncArgs.dryRun,
+			Verbose:         syncArgs.verbose,
+			CopyJobs:        syncArgs.concurrency,
+			PlanConcurrency: syncArgs.concurrency,
+			Logger:          logger,
 		}))
 	}
 	for _, e := range cfg.Charts {

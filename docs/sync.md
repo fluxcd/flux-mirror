@@ -69,7 +69,7 @@ repository credentials automatically.
 | Flag                            | Default | Description                                                                                                                          |
 |---------------------------------|---------|------------------------------------------------------------------------------------------------------------------------------------|
 | `-o, --output text\|yaml\|json` | `text`  | Output format. `text` is human-friendly; `yaml` and `json` print the structured [sync report](report.md) to stdout.       |
-| `--concurrency N`               | `4`     | Maximum number of copy operations to run in parallel per job. Must be greater than `0`.                                            |
+| `--concurrency N`               | `4`     | Maximum number of copy and tag-planning operations to run in parallel. Must be greater than `0`.                                   |
 | `--retries N`                   | `3`     | Maximum number of retry attempts per job, within the `--timeout` budget. Must be greater than or equal to `0`.                     |
 | `--timeout DURATION`            | `5m`    | Per-job total budget covering all retry attempts. Must be greater than `0`.                                                         |
 | `--overwrite`                   | `false` | Force `overwrite: true` on every entry, regardless of per-entry config. See [Overwrite and drift behavior](config.md#overwrite-and-drift-behavior). |

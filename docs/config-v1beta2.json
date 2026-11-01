@@ -243,6 +243,15 @@
             },
             "type": "object"
           },
+          "direction": {
+            "description": "Direction limits the host entry to source pulls or destination pushes.\nIt defaults to both, and lets the same host carry different credentials\nfor each side of a mirror.",
+            "enum": [
+              "both",
+              "source",
+              "destination"
+            ],
+            "type": "string"
+          },
           "host": {
             "description": "Host is the registry host (and optional port) the auth applies to.",
             "type": "string"

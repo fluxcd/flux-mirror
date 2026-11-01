@@ -292,8 +292,10 @@ are not listed fall back to the Docker config and its credential helpers
 > config.
 
 Each entry has one required field, `.host`, the registry host (with optional
-port) the entry applies to (e.g. `registry.example.com` or `localhost:5000`),
-unique across `hosts`. Beyond that, an entry configures a
+port) the entry applies to (e.g. `registry.example.com` or `localhost:5000`).
+A host may appear more than once only when the entries are split by
+[`.direction`](#host-direction); overlapping entries are rejected. Beyond that,
+an entry configures a
 [`.credential`](#per-host-credential) and/or a [`.tls`](#transport-tls) block, or
 a cloud [`.provider`](#cloud-registry-providers). A cloud `provider` is mutually
 exclusive with `credential` and `tls`, because a cloud registry is managed and
@@ -311,6 +313,30 @@ hosts:
   # A cloud registry provider, via ambient workload identity.
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
     provider: ecr
+```
+
+#### Host direction
+
+`.hosts[].direction` limits an entry to one side of a mirror:
+
+- `both` (default) applies the entry to source pulls and destination pushes.
+- `source` applies it only to source pulls.
+- `destination` applies it only to destination pushes.
+
+This is what lets the same registry host carry different credentials for the
+source and destination, for example when copying between two repositories on
+`ghcr.io`.
+
+```yaml
+hosts:
+  - host: ghcr.io
+    direction: source
+    credential:
+      value: ${LEGACY_GHCR_TOKEN}
+  - host: ghcr.io
+    direction: destination
+    credential:
+      provider: github
 ```
 
 #### Per-host credential
@@ -590,6 +616,7 @@ first mirrored. Referrers that exist with a different digest are skipped
 | `charts[].version`               | `*`      |
 | `charts[].limit`                 | `1`      |
 | `charts[].overwrite`             | `false`  |
+| `hosts[].direction`              | `both`    |
 | `hosts[].provider`               | `generic` |
 | `hosts[].credential.audiences`   | `host`   |
 | `hosts[].credential.expiration`  | `60s`    |

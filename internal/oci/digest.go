@@ -50,7 +50,7 @@ type CompareResult struct {
 // 404 — caller decides what "missing" means in their context). Use Compare
 // when you specifically want to classify missing/equal/drifted between two refs.
 func (c *Client) Digest(ctx context.Context, ref string) (string, error) {
-	dig, err := crane.Digest(ref, c.craneOptions(ctx)...)
+	dig, err := crane.Digest(ref, c.sourceCraneOptions(ctx)...)
 	if err != nil {
 		return "", fmt.Errorf("digest %s: %w", ref, err)
 	}
@@ -77,7 +77,7 @@ func (c *Client) Compare(ctx context.Context, src, dst string) (CompareResult, e
 //     ref) — fetching it again would just round-trip back what we already
 //     know. This is the common case for referrer mirroring.
 func (c *Client) CompareWithKnownSrc(ctx context.Context, srcDigest, dst string) (CompareResult, error) {
-	dstDigest, err := crane.Digest(dst, c.craneOptions(ctx)...)
+	dstDigest, err := crane.Digest(dst, c.destinationCraneOptions(ctx)...)
 	if err != nil {
 		if isNotFound(err) {
 			return CompareResult{State: StateMissing, SrcDigest: srcDigest}, nil

@@ -78,6 +78,14 @@ const (
 	// per-host credential.
 	RegistryProviderGAR = "gar"
 
+	// DirectionBoth applies a host credential to source pulls and destination
+	// pushes. It is the default when hosts[].direction is unset.
+	DirectionBoth = "both"
+	// DirectionSource applies a host credential only to source pulls.
+	DirectionSource = "source"
+	// DirectionDestination applies a host credential only to destination pushes.
+	DirectionDestination = "destination"
+
 	// defaultChartVersion is the chart version constraint applied when unset.
 	defaultChartVersion = "*"
 	// defaultLimit is the chart/selector limit applied when unset.
@@ -127,6 +135,13 @@ type RegistryHost struct {
 	// Host is the registry host (and optional port) the auth applies to.
 	Host string `json:"host"`
 
+	// Direction limits the host entry to source pulls or destination pushes.
+	// It defaults to both, and lets the same host carry different credentials
+	// for each side of a mirror.
+	// +optional
+	// +kubebuilder:validation:Enum=both;source;destination
+	Direction string `json:"direction,omitempty"`
+
 	// Credential configures the HTTP-layer registry credential for the host.
 	// +optional
 	Credential *RegistryCredential `json:"credential,omitempty"`
@@ -152,6 +167,15 @@ type RegistryHost struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	MaxChunkSize int `json:"maxChunkSize,omitempty"`
+}
+
+// EffectiveDirection returns the host direction with the documented default
+// (both) applied.
+func (h RegistryHost) EffectiveDirection() string {
+	if h.Direction == "" {
+		return DirectionBoth
+	}
+	return h.Direction
 }
 
 // IsCloudProvider reports whether the host selects a cloud registry provider

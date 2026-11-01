@@ -34,7 +34,7 @@ func (c *Client) SnapshotReferrers(ctx context.Context, repo, digest string) ([]
 	}
 	srcDigest := srcRepo.Digest(digest)
 
-	idx, err := remote.Referrers(srcDigest, c.remoteOpts(ctx)...)
+	idx, err := remote.Referrers(srcDigest, c.sourceRemoteOptions(ctx)...)
 	if err != nil {
 		return nil, fmt.Errorf("list referrers for %s: %w", srcDigest, err)
 	}
@@ -63,12 +63,4 @@ func (c *Client) CopyReferrer(ctx context.Context, srcRepo, dstRepo, digest stri
 		return fmt.Errorf("copy referrer %s -> %s: %w", src, dst, err)
 	}
 	return nil
-}
-
-// remoteOpts is the lower-level transport+auth slice used when crane doesn't
-// expose what we need (e.g. remote.Referrers has no crane wrapper).
-func (c *Client) remoteOpts(ctx context.Context) []remote.Option {
-	opts := make([]remote.Option, 0, len(c.staticRemoteOpts)+1)
-	opts = append(opts, remote.WithContext(ctx))
-	return append(opts, c.staticRemoteOpts...)
 }

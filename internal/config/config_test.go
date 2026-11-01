@@ -973,6 +973,31 @@ func TestValidate_Table(t *testing.T) {
 			errMsg: "configured more than once",
 		},
 		{
+			name: "auth same host split by direction",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{
+					{Host: "ghcr.io", Direction: DirectionSource, Credential: &RegistryCredential{Type: CredentialTypeJWT, Value: "SRC"}},
+					{Host: "ghcr.io", Direction: DirectionDestination, Credential: &RegistryCredential{Type: CredentialTypeJWT, Value: "DST"}},
+				}},
+		},
+		{
+			name: "auth same host overlapping direction rejected",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{
+					{Host: "ghcr.io", Direction: DirectionSource, Credential: &RegistryCredential{Type: CredentialTypeJWT, Value: "SRC"}},
+					{Host: "ghcr.io", Direction: DirectionBoth, Credential: &RegistryCredential{Type: CredentialTypeJWT, Value: "DST"}},
+				}},
+			errMsg: "configured more than once",
+		},
+		{
+			name: "auth invalid direction rejected",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "ghcr.io", Direction: "sideways", Credential: &RegistryCredential{Type: CredentialTypeJWT, Value: "TOKEN"},
+				}}},
+			errMsg: "direction \"sideways\" must be one of",
+		},
+		{
 			name: "auth no source set",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{Host: "h.example", Credential: &RegistryCredential{Type: CredentialTypeJWT}}}},
