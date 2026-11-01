@@ -8,11 +8,16 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
+	"github.com/fluxcd/pkg/helmtestserver"
 
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/registryauth"
@@ -305,6 +311,77 @@ func TestSync_NoConfigError(t *testing.T) {
 	_, err := executeCommand([]string{"sync"})
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("config required"))
+}
+
+func TestSync_InsecureRegistryTLS(t *testing.T) {
+	g := NewWithT(t)
+	ensureRegistry(t)
+
+	backend, err := url.Parse("http://" + dockerReg)
+	g.Expect(err).ToNot(HaveOccurred())
+	registry := httptest.NewTLSServer(httputil.NewSingleHostReverseProxy(backend))
+	t.Cleanup(registry.Close)
+	tlsHost := strings.TrimPrefix(registry.URL, "https://")
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: registry.Certificate().Raw})
+
+	srcRepo := "tls-src-" + testregistry.RandSuffix()
+	testregistry.PushImage(t, dockerReg+"/"+srcRepo+":1.0.0")
+
+	helm, err := helmtestserver.NewTempHelmServer()
+	g.Expect(err).ToNot(HaveOccurred())
+	t.Cleanup(helm.Stop)
+	g.Expect(helm.PackageChartWithVersion("../../internal/helmrepo/testdata/podinfo", "1.0.0")).To(Succeed())
+	g.Expect(helm.GenerateIndex()).To(Succeed())
+	helm.Start()
+
+	for _, tt := range []struct {
+		name  string
+		entry string
+	}{
+		{
+			name: "artifacts",
+			entry: fmt.Sprintf(`artifacts:
+  - source: %s/%s
+    destination: %s/tls-dst-%s
+`, tlsHost, srcRepo, dockerReg, testregistry.RandSuffix()),
+		},
+		{
+			name: "referrers",
+			entry: fmt.Sprintf(`artifacts:
+  - source: %s/%s
+    destination: %s/tls-dst-%s
+    includeReferrers: true
+`, tlsHost, srcRepo, dockerReg, testregistry.RandSuffix()),
+		},
+		{
+			name: "charts",
+			entry: fmt.Sprintf(`charts:
+  - name: podinfo
+    source: %s
+    destination: oci://%s/tls-charts
+`, helm.URL(), tlsHost),
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			body := "apiVersion: mirror.plugin.fluxcd.io/v1beta2\nkind: Config\n" + tt.entry
+			out, err := executeCommandWithInput([]string{"sync", "-", "--retries=0", "-o", "json"}, body)
+			g.Expect(err).To(HaveOccurred())
+			g.Expect(out).To(ContainSubstring("certificate signed by unknown authority"))
+
+			for _, status := range []string{"copied", "skipped"} {
+				out, err := executeCommandWithInput([]string{"sync", "-", "--insecure", "--retries=0", "-o", "json"}, body)
+				g.Expect(err).ToNot(HaveOccurred(), out)
+				g.Expect(out).To(ContainSubstring(`"status": "` + status + `"`))
+			}
+
+			body += fmt.Sprintf("hosts:\n  - host: %s\n    tls:\n      ca.crt: |\n        %s\n",
+				tlsHost, strings.ReplaceAll(strings.TrimSpace(string(ca)), "\n", "\n        "))
+			out, err = executeCommandWithInput([]string{"sync", "-", "--retries=0", "-o", "json"}, body)
+			g.Expect(err).ToNot(HaveOccurred(), out)
+			g.Expect(out).To(ContainSubstring(`"status": "skipped"`))
+		})
+	}
 }
 
 func TestSync_DeprecatedAPIVersionWarns(t *testing.T) {
