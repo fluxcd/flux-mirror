@@ -7,6 +7,7 @@ artifacts:
       semver: ">=6.9.0"
       limit: 3
     includeReferrers: true
+    ignoreDriftForExitCode: true
   - source: ghcr.io/stefanprodan/manifests/podinfo
     destination: localhost:5050/manifests/podinfo
     selector:

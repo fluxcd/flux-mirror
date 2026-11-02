@@ -81,6 +81,14 @@ and writes them into the Docker config. Afterwards `flux push artifact` (and any
 other Docker-config-aware tool) authenticates **without** a `--provider` flag,
 because the credentials are already in the config.
 
+Instead of running the cloud provider's login action, set
+`credential.provider` to `github` or `forgejo` on the host. `flux-mirror`
+fetches the Actions OIDC token and exchanges it with the cloud provider. Set
+`credential.audiences` to the audience the cloud identity provider expects
+(e.g. `sts.amazonaws.com` or `api://AzureADTokenExchange`). Add the required
+`ecr.roleARN`, `acr.tenantID`/`acr.clientID`, or
+`gar.workloadIdentityProvider` block.
+
 A hosts-only config — switch clouds by changing the host and `provider`:
 
 ```yaml

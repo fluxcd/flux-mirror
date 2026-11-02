@@ -126,8 +126,8 @@ Each entry has two required fields:
 
 It also has optional fields documented below: `.selector`
 ([Tag selection](#tag-selection)), `.includeReferrers` ([Referrers](#referrers)),
-`.verify` ([Signature verification](#signature-verification)), and `.overwrite`
-([Overwrite and drift behavior](#overwrite-and-drift-behavior)).
+`.verify` ([Signature verification](#signature-verification)), `.overwrite` and
+`.ignoreDriftForExitCode` ([Overwrite and drift behavior](#overwrite-and-drift-behavior)).
 
 ```yaml
 artifacts:
@@ -137,6 +137,7 @@ artifacts:
       semver: ">=2.7.0 <3.0.0"
       limit: 10
     includeReferrers: true
+    ignoreDriftForExitCode: true
 ```
 
 #### Tag selection
@@ -298,9 +299,11 @@ A host may appear more than once only when the entries are split by
 an entry configures a
 [`.credential`](#per-host-credential) and/or a [`.tls`](#transport-tls) block, or
 a cloud [`.provider`](#cloud-registry-providers). A cloud `provider` is mutually
-exclusive with `credential` and `tls`, because a cloud registry is managed and
-its transport is not customized; the default `generic` provider is an ordinary
-registry and composes with both. [`.maxChunkSize`](#blob-upload-chunking) tunes
+exclusive with `tls`, because a cloud registry is managed and its transport is
+not customized; the default `generic` provider is an ordinary registry and
+composes with both. A cloud `provider` may also carry a `credential`: its
+identity is then exchanged for the cloud provider's registry credentials
+instead of using the ambient cloud identity. [`.maxChunkSize`](#blob-upload-chunking) tunes
 blob uploads independently of auth. At least one of `credential`, a cloud
 `provider`, `tls`, or `maxChunkSize` must be set.
 
@@ -313,6 +316,16 @@ hosts:
   # A cloud registry provider, via ambient workload identity.
   - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
     provider: ecr
+  # A cloud registry provider authenticated with a GitHub credential.
+  - host: myregistry.azurecr.io
+    provider: acr
+    acr:
+      tenantID: ${AZURE_TENANT_ID}
+      clientID: ${AZURE_CLIENT_ID}
+    credential:
+      provider: github
+      audiences:
+        - api://AzureADTokenExchange
 ```
 
 #### Host direction
@@ -368,9 +381,11 @@ The signed and minted sources take additional claim subfields:
 - `.audiences`, the audience claim as a list. Allowed with `.jwkPath`,
   `.jwkValue`, or `.provider`, and defaults to the host. The audience pins the
   credential to a specific registry, so it must match what the registry (or the
-  cloud identity provider) expects. Every source accepts multiple values except
-  the `gcp` and `azure` providers, which mint a token with a single `aud` and
-  therefore reject a list longer than one.
+  cloud identity provider) expects. On a cloud `provider` host, an unset
+  `.audiences` uses the cloud provider's own default (`sts.amazonaws.com` for
+  ECR, `api://AzureADTokenExchange` for ACR) instead of the host. Every source
+  accepts multiple values except the `gcp` and `azure` providers, which mint a
+  token with a single `aud` and therefore reject a list longer than one.
 - `.expiration`, the signed JWT lifetime, as a
   [duration](https://pkg.go.dev/time#ParseDuration). Allowed only with `.jwkPath`
   or `.jwkValue` — the sources whose lifetime `flux mirror` controls — and defaults
@@ -402,10 +417,13 @@ what the registry on the other side has to accept:
 - `github` and `forgejo` request an OIDC ID token from the CI Actions OIDC
   endpoint (`ACTIONS_ID_TOKEN_REQUEST_URL` / `ACTIONS_ID_TOKEN_REQUEST_TOKEN`).
   The registry must trust the GitHub/Forgejo Actions issuer and match the token's
-  audience and subject (e.g. `repo:my-org/my-repo:ref:refs/heads/main`). The two
-  mint tokens the same way today but are kept distinct so each platform can
-  diverge. Each audience is sent as a repeated `audience` query parameter; how
-  the endpoint folds them into the token is up to the provider.
+  audience and subject (e.g. `repo:my-org/my-repo:ref:refs/heads/main`). On a
+  cloud `provider` host (`ecr`, `acr`, or `gar`), the same token is instead
+  exchanged with the cloud provider for registry credentials, so the cloud
+  identity provider must trust the GitHub/Forgejo Actions issuer. The two mint
+  tokens the same way today but are kept distinct so each platform can diverge.
+  Each audience is sent as a repeated `audience` query parameter; how the
+  endpoint folds them into the token is up to the provider.
 - `gcp` obtains a Google ID token for the audience via Application Default
   Credentials (the GKE/GCE metadata server, a service account key, or workload
   identity federation). The registry must trust Google's OIDC issuer and the
@@ -434,9 +452,11 @@ what the registry on the other side has to accept:
 - `spiffe` fetches a JWT-SVID from the SPIFFE Workload API
   (`SPIFFE_ENDPOINT_SOCKET`) for the audiences and sends it as the credential.
   The extra audiences are carried as additional JWT-SVID audiences. The registry
-  must trust the SPIFFE trust domain's JWT bundle. This is the HTTP-layer
-  counterpart to the transport-layer SPIFFE X.509-SVID mTLS configured under
-  [`.tls`](#transport-tls); the two are independent.
+  must trust the SPIFFE trust domain's JWT bundle. On a cloud provider host, the
+  JWT-SVID is exchanged with the cloud provider, which must trust the SPIFFE
+  trust domain. This is the HTTP-layer counterpart to the transport-layer SPIFFE
+  X.509-SVID mTLS configured under [`.tls`](#transport-tls); the two are
+  independent.
 
 ##### Resolving file paths
 
@@ -477,19 +497,69 @@ leave it unset when the registry validates a self-contained bearer token.
 `.hosts[].provider` selects how the host's registry credentials are obtained. It
 defaults to `generic`, an ordinary registry for which `credential` and/or `tls`
 configure the connection directly. The other values authenticate the host with a
-cloud registry provider's ambient workload identity — the same mechanism the
+cloud registry provider's workload identity — the same mechanism the
 `flux push artifact` family uses — and obtain the registry's native credentials
-directly (no `credential`/JWT involved). A cloud provider is mutually exclusive
-with `credential` and `tls`. The supported values are:
+directly. A cloud provider is mutually exclusive with `tls`; it composes with a
+`credential`, whose identity is exchanged for the cloud provider's registry
+credentials instead of using the ambient cloud identity. The supported values
+are:
 
 - `generic` (default), an ordinary registry whose authentication is configured
   through `credential` and/or `tls`. It is the implicit value when `provider` is
   omitted, and composes with both.
 - `ecr`, for Amazon ECR. It uses the AWS credential chain (IRSA, EC2 instance
-  role, environment, SSO), reading the region from the host.
+  role, environment, SSO), reading the region from the host. With a
+  `credential`, the identity is exchanged via `AssumeRoleWithWebIdentity` (set
+  `.audiences` to the role's expected audience, typically `sts.amazonaws.com`,
+  and grant the role trust to the credential issuer).
 - `acr`, for Azure ACR. It uses the default Azure credential chain (managed
-  identity, workload identity, environment, ...).
-- `gar`, for Google GAR. It uses Google Application Default Credentials.
+  identity, workload identity, environment, ...). With a `credential`, the
+  identity is exchanged as a client assertion, typically with the
+  `api://AzureADTokenExchange` audience.
+- `gar`, for Google GAR. It uses Google Application Default Credentials. With a
+  `credential`, the identity is exchanged through Google Workload Identity
+  Federation.
+
+When a cloud `provider` carries a `credential`, the matching `.ecr`, `.acr`, or
+`.gar` block is required:
+
+- `.ecr.roleARN` is the IAM role assumed with the credential identity via
+  `AssumeRoleWithWebIdentity`. The region is derived from the ECR host, as in
+  the rest of Flux. `.ecr.stsEndpoint` optionally overrides the STS endpoint.
+- `.acr.tenantID` and `.acr.clientID` identify the Microsoft Entra application
+  used as the client assertion.
+- `.gar.workloadIdentityProvider` is the workload identity pool provider
+  resource name; `.gar.gcpServiceAccount` optionally impersonates a service
+  account. The built-in GKE workload identity pool only trusts GKE
+  ServiceAccount tokens, so an external credential provider always needs an
+  explicit `.gar` block.
+
+```yaml
+hosts:
+  - host: 123456789012.dkr.ecr.us-east-1.amazonaws.com
+    provider: ecr
+    ecr:
+      roleARN: arn:aws:iam::123456789012:role/flux-mirror
+      # stsEndpoint: https://sts.us-east-1.amazonaws.com
+    credential:
+      provider: github
+      audiences:
+        - sts.amazonaws.com
+  - host: myregistry.azurecr.io
+    provider: acr
+    acr:
+      tenantID: ${AZURE_TENANT_ID}
+      clientID: ${AZURE_CLIENT_ID}
+    credential:
+      provider: forgejo
+  - host: us-docker.pkg.dev
+    provider: gar
+    gar:
+      workloadIdentityProvider: projects/123/locations/global/workloadIdentityPools/gh/providers/gh
+      # gcpServiceAccount: flux-mirror@my-project.iam.gserviceaccount.com
+    credential:
+      provider: github
+```
 
 The cloud providers' resolved credentials are presented to the registry as a
 username/password pair through the standard registry auth challenge, and written
@@ -598,6 +668,13 @@ cannot be resolved automatically: it surfaces in the run output and the
 into. The [`--overwrite`](sync.md#flags) CLI flag forces `overwrite:
 true` for every entry, overriding per-entry values, for one-off resyncs.
 
+`.artifacts[].ignoreDriftForExitCode` is an optional boolean, `false` by default. When
+`true`, drifted tags for that entry are still logged and reported as `drifted`,
+but they do not contribute to the drift exit code. If every drifted tag belongs
+to an entry with `ignoreDriftForExitCode: true`, the run exits `0` and
+`--drift-exit-code` is not applied. Use it for an artifact whose destination is
+expected to diverge, without muting drift for the rest of the config.
+
 With `includeReferrers: true`, the same rule applies to referrers. Referrers
 missing at the destination are always mirrored (there is nothing to overwrite) —
 the common case when an upstream signature is published after the artifact was
@@ -606,22 +683,26 @@ first mirrored. Referrers that exist with a different digest are skipped
 
 ### Defaults
 
-| Field                            | Default  |
-|----------------------------------|----------|
-| `artifacts[].selector.sortBy`    | `semver` |
-| `artifacts[].selector.limit`     | `1`      |
-| `artifacts[].overwrite`          | `false`  |
-| `artifacts[].includeReferrers`   | `false`  |
-| `artifacts[].verify`             | unset    |
-| `charts[].version`               | `*`      |
-| `charts[].limit`                 | `1`      |
-| `charts[].overwrite`             | `false`  |
-| `hosts[].direction`              | `both`    |
-| `hosts[].provider`               | `generic` |
-| `hosts[].credential.audiences`   | `host`   |
-| `hosts[].credential.expiration`  | `60s`    |
-| `hosts[].credential.envelope`    | unset    |
-| `hosts[].maxChunkSize`           | `0`      |
+| Field                                | Default    |
+|--------------------------------------|------------|
+| `artifacts[].selector.sortBy`        | `semver`   |
+| `artifacts[].selector.limit`         | `1`        |
+| `artifacts[].overwrite`              | `false`    |
+| `artifacts[].includeReferrers`       | `false`    |
+| `artifacts[].ignoreDriftForExitCode` | `false`    |
+| `artifacts[].verify`                 | unset      |
+| `charts[].version`                   | `*`        |
+| `charts[].limit`                     | `1`        |
+| `charts[].overwrite`                 | `false`    |
+| `hosts[].direction`                  | `both`     |
+| `hosts[].provider`                   | `generic`  |
+| `hosts[].ecr`                        | unset      |
+| `hosts[].acr`                        | unset      |
+| `hosts[].gar`                        | unset      |
+| `hosts[].credential.audiences`       | `host`     |
+| `hosts[].credential.expiration`      | `60s`      |
+| `hosts[].credential.envelope`        | unset      |
+| `hosts[].maxChunkSize`               | `0`        |
 
 A `limit` of `0` disables the cap and mirrors every matching tag or version. Use
 it with care: unrestricted mirrors can consume significant bandwidth and storage

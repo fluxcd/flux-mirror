@@ -37,7 +37,9 @@ func (r Result) TotalFailures() int {
 	return n
 }
 
-// TotalDrifted sums per-tag drift counts.
+// TotalDrifted sums per-tag drift counts, including drift on entries that set
+// IgnoreDriftForExitCode. Use TotalDriftedForExitCode for the subset that
+// affects the exit code.
 func (r Result) TotalDrifted() int {
 	n := 0
 	for _, e := range r.Entries {
@@ -50,10 +52,34 @@ func (r Result) TotalDrifted() int {
 	return n
 }
 
+// TotalDriftedForExitCode sums per-tag drift counts that contribute to the
+// exit code, excluding entries that set IgnoreDriftForExitCode.
+func (r Result) TotalDriftedForExitCode() int {
+	n := 0
+	for _, e := range r.Entries {
+		if e.IgnoreDriftForExitCode {
+			continue
+		}
+		for _, t := range e.Tags {
+			if t.Status == apiv1.StatusDrifted {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // HasDrift reports whether any tag was drifted (different digest, no
-// overwrite gate set).
+// overwrite gate set), including entries that set IgnoreDriftForExitCode.
 func (r Result) HasDrift() bool {
 	return r.TotalDrifted() > 0
+}
+
+// HasDriftForExitCode reports whether any drift should produce the drift exit
+// code. Drift on entries that set IgnoreDriftForExitCode is reported but
+// excluded here.
+func (r Result) HasDriftForExitCode() bool {
+	return r.TotalDriftedForExitCode() > 0
 }
 
 // ExitCode follows the documented convention:
@@ -62,12 +88,14 @@ func (r Result) HasDrift() bool {
 //	1 — at least one tag failed
 //	2 — no failures but at least one drift detected
 //
-// Failures take precedence over drift (a real error is always page-worthy).
+// Drift from entries that set IgnoreDriftForExitCode is reported but does not
+// trigger the drift exit code. Failures take precedence over drift (a real
+// error is always page-worthy).
 func (r Result) ExitCode() int {
 	if r.HasFailures() {
 		return 1
 	}
-	if r.HasDrift() {
+	if r.HasDriftForExitCode() {
 		return 2
 	}
 	return 0

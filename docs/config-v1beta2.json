@@ -18,6 +18,10 @@
             "description": "Destination is the OCI repository the artifact is mirrored to.",
             "type": "string"
           },
+          "ignoreDriftForExitCode": {
+            "description": "IgnoreDriftForExitCode still reports and logs drifted tags, but excludes\nthem from the drift exit code. When every drifted tag belongs to an entry\nwith this field set, the run does not exit with the --drift-exit-code\nvalue.",
+            "type": "boolean"
+          },
           "includeReferrers": {
             "description": "IncludeReferrers also mirrors the artifact's referrers (signatures, SBOMs).",
             "type": "boolean"
@@ -172,8 +176,27 @@
       "description": "Hosts configures per-host authentication for OCI registry requests, both\nsource pulls and destination pushes.",
       "items": {
         "additionalProperties": false,
-        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential (mutually exclusive for a\ncloud provider). TLS configures the transport-layer TLS/mTLS settings: it\ncomposes with Credential and with the default (generic) Provider, but is\nmutually exclusive with a cloud Provider — a cloud registry provider is a\nmanaged registry whose transport flux-mirror does not customize. At least one\nof Credential, a cloud Provider, TLS, or MaxChunkSize must be set.",
+        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential. A cloud Provider accepts\na Credential, in which case the credential identity is exchanged for the cloud\nprovider's access credential instead of using the ambient cloud identity. TLS\nconfigures the transport-layer TLS/mTLS settings: it composes with Credential\nand with the default (generic) Provider, but is mutually exclusive with a cloud\nProvider — a cloud registry provider is a managed registry whose transport\nflux-mirror does not customize. At least one of Credential, a cloud Provider,\nTLS, or MaxChunkSize must be set.",
         "properties": {
+          "acr": {
+            "additionalProperties": false,
+            "description": "ACR configures Azure ACR authentication when this host uses the acr\nprovider together with a credential.",
+            "properties": {
+              "clientID": {
+                "description": "ClientID is the Microsoft Entra application (client) ID.",
+                "type": "string"
+              },
+              "tenantID": {
+                "description": "TenantID is the Microsoft Entra tenant ID.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "clientID",
+              "tenantID"
+            ],
+            "type": "object"
+          },
           "credential": {
             "additionalProperties": false,
             "description": "Credential configures the HTTP-layer registry credential for the host.",
@@ -210,7 +233,7 @@
                 "type": "string"
               },
               "provider": {
-                "description": "Provider mints a per-request credential for the audiences, one of\nJWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,\nJWTProviderAWS, or JWTProviderSPIFFE.",
+                "description": "Provider mints a per-request credential for the audiences, one of\nJWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,\nJWTProviderAWS, or JWTProviderSPIFFE. On a cloud provider host (ecr, acr,\ngar), the credential identity is exchanged with the cloud provider.",
                 "enum": [
                   "github",
                   "forgejo",
@@ -252,6 +275,42 @@
             ],
             "type": "string"
           },
+          "ecr": {
+            "additionalProperties": false,
+            "description": "ECR configures Amazon ECR authentication when this host uses the ecr\nprovider together with a credential.",
+            "properties": {
+              "roleARN": {
+                "description": "RoleARN is the IAM role assumed with the credential identity via\nAssumeRoleWithWebIdentity.",
+                "type": "string"
+              },
+              "stsEndpoint": {
+                "description": "STSEndpoint overrides the AWS STS endpoint used for the role exchange.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "roleARN"
+            ],
+            "type": "object"
+          },
+          "gar": {
+            "additionalProperties": false,
+            "description": "GAR configures Google Artifact Registry authentication when this host\nuses the gar provider together with a credential. Without a credential,\nthe provider uses the ambient Google identity instead.",
+            "properties": {
+              "gcpServiceAccount": {
+                "description": "GCPServiceAccount is the optional service account to impersonate.",
+                "type": "string"
+              },
+              "workloadIdentityProvider": {
+                "description": "WorkloadIdentityProvider is the full resource name of the workload\nidentity pool provider.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "workloadIdentityProvider"
+            ],
+            "type": "object"
+          },
           "host": {
             "description": "Host is the registry host (and optional port) the auth applies to.",
             "type": "string"
@@ -262,7 +321,7 @@
             "type": "integer"
           },
           "provider": {
-            "description": "Provider selects a cloud registry provider's workload-identity credentials\nfor the host: RegistryProviderECR, RegistryProviderACR, or\nRegistryProviderGAR. Omitted (or RegistryProviderGeneric) means an ordinary\nregistry, for which flux-mirror configures the credential and/or TLS\ndirectly. A cloud provider is mutually exclusive with Credential and TLS.",
+            "description": "Provider selects a cloud registry provider's workload-identity credentials\nfor the host: RegistryProviderECR, RegistryProviderACR, or\nRegistryProviderGAR. Omitted (or RegistryProviderGeneric) means an ordinary\nregistry, for which flux-mirror configures the credential and/or TLS\ndirectly. A cloud provider is mutually exclusive with TLS, but accepts a\nCredential to source the identity exchanged with the cloud provider.",
             "enum": [
               "generic",
               "ecr",

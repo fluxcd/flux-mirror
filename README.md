@@ -38,10 +38,12 @@ on upstream chart repositories.
 - **Drift gating** — destination drift (different content under the same tag) is reported
   as a distinct outcome and exit code, so audit pipelines can differentiate "out of date" from "mutated tags".
 - **Registry auth** — OCI auth supports Docker config and credential helpers,
-  cloud workload identity for ECR/ACR/GAR, and per-host bearer credentials from
-  GitHub/Forgejo OIDC, GCP, Azure, AWS STS, SPIFFE JWT-SVID, env vars, files, or
-  JWK-signed JWTs. Per-host TLS/mTLS (a certificate directory, inline PEMs, or SPIFFE X.509-SVID)
-  is also supported. Helm HTTP/S credentials come from Helm's repositories config.
+  cloud workload identity for ECR/ACR/GAR, including exchanging credential
+  identities such as GitHub/Forgejo OIDC tokens for cloud registry credentials,
+  and per-host bearer credentials from GitHub/Forgejo OIDC, GCP, Azure, AWS STS,
+  SPIFFE JWT-SVID, env vars, files, or JWK-signed JWTs. Per-host TLS/mTLS (a
+  certificate directory, inline PEMs, or SPIFFE X.509-SVID) is also supported.
+  Helm HTTP/S credentials come from Helm's repositories config.
 - **Structured output** — `text` and `yaml`/`json` for downstream
   tooling, plus a verbose mode that streams every blob and manifest digest
   for diagnosing TLS, auth, or push failures.
@@ -125,7 +127,7 @@ real failures from drift, so a CI gate can react to each independently:
 |------|------------------------------------------------------------------------------------------------------------|
 | `0`  | Clean run, every tag was copied or skipped as expected.                                                    |
 | `1`  | At least one tag job failed (network error, push rejected, retries exhausted).                             |
-| `2`  | No failures, but at least one tag drifted with `overwrite: false` (configurable with `--drift-exit-code`). |
+| `2`  | No failures, but at least one tag drifted with `overwrite: false` (configurable with `--drift-exit-code`). Drift on artifacts with `ignoreDriftForExitCode: true` is excluded. |
 
 The `--no-progress` flag suppresses the live spinner so log output stays clean in CI:
 

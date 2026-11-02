@@ -43,9 +43,10 @@ func TestReport_Schema(t *testing.T) {
 		Duration: 1500 * time.Millisecond,
 		Entries: []apiv1.EntryResult{
 			{
-				Source:      "ghcr.io/foo/bar",
-				Destination: "ghcr.io/mirror/bar",
-				Status:      apiv1.EntryCompleted,
+				Source:                 "ghcr.io/foo/bar",
+				Destination:            "ghcr.io/mirror/bar",
+				IgnoreDriftForExitCode: true,
+				Status:                 apiv1.EntryCompleted,
 				Tags: []apiv1.TagResult{
 					{
 						Tag:    "v1.0.0",

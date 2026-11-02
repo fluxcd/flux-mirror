@@ -19,13 +19,19 @@ import (
 )
 
 type stubMirror struct {
-	name string
-	jobs []Job
-	err  error
+	name                   string
+	jobs                   []Job
+	err                    error
+	ignoreDriftForExitCode bool
 }
 
 func (s *stubMirror) Plan(_ context.Context) (Plan, error) {
-	return Plan{Source: s.name, Destination: s.name + "/dst", Jobs: s.jobs}, s.err
+	return Plan{
+		Source:                 s.name,
+		Destination:            s.name + "/dst",
+		IgnoreDriftForExitCode: s.ignoreDriftForExitCode,
+		Jobs:                   s.jobs,
+	}, s.err
 }
 
 func okJob(tag string, st Status) Job {
@@ -93,6 +99,72 @@ func TestRunner_AggregatesOutcomes(t *testing.T) {
 
 	g.Expect(res.HasDrift()).To(BeTrue())
 	g.Expect(res.HasFailures()).To(BeFalse())
+	g.Expect(res.ExitCode()).To(Equal(2))
+}
+
+func TestRunner_IgnoreDriftForExitCode(t *testing.T) {
+	tests := []struct {
+		name                   string
+		ignoreDriftForExitCode bool
+		wantDrifted            int
+		wantExit               int
+		wantHasDrift           bool
+		wantExitDrift          bool
+	}{
+		{
+			name:                   "drift counts by default",
+			ignoreDriftForExitCode: false,
+			wantDrifted:            1,
+			wantExit:               2,
+			wantHasDrift:           true,
+			wantExitDrift:          true,
+		},
+		{
+			name:                   "ignored drift is reported but does not affect exit",
+			ignoreDriftForExitCode: true,
+			wantDrifted:            1,
+			wantExit:               0,
+			wantHasDrift:           true,
+			wantExitDrift:          false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			r := newRunner(t)
+
+			res, err := r.Run(context.Background(), []EntryMirror{
+				&stubMirror{name: "drift", ignoreDriftForExitCode: tt.ignoreDriftForExitCode, jobs: []Job{
+					okJob("v1", StatusDrifted),
+				}},
+			})
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(res.Entries[0].IgnoreDriftForExitCode).To(Equal(tt.ignoreDriftForExitCode))
+			g.Expect(res.TotalDrifted()).To(Equal(tt.wantDrifted))
+			g.Expect(res.HasDrift()).To(Equal(tt.wantHasDrift))
+			g.Expect(res.HasDriftForExitCode()).To(Equal(tt.wantExitDrift))
+			g.Expect(res.HasFailures()).To(BeFalse())
+			g.Expect(res.ExitCode()).To(Equal(tt.wantExit))
+		})
+	}
+}
+
+func TestRunner_MixedIgnoreDriftForExitCode(t *testing.T) {
+	g := NewWithT(t)
+	r := newRunner(t)
+
+	res, err := r.Run(context.Background(), []EntryMirror{
+		&stubMirror{name: "ignored", ignoreDriftForExitCode: true, jobs: []Job{
+			okJob("v1", StatusDrifted),
+		}},
+		&stubMirror{name: "counted", jobs: []Job{
+			okJob("v1", StatusDrifted),
+		}},
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(res.TotalDrifted()).To(Equal(2))
+	g.Expect(res.TotalDriftedForExitCode()).To(Equal(1))
+	g.Expect(res.HasDriftForExitCode()).To(BeTrue())
 	g.Expect(res.ExitCode()).To(Equal(2))
 }
 

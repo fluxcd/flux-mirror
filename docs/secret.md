@@ -86,6 +86,12 @@ identity. A [`provider`](config.md#cloud-registry-providers) host mints the
 registry's native username/password from the ambient cloud identity, and `secret`
 writes it as a `dockerconfigjson` Secret usable as an `imagePullSecret`.
 
+When running in GitHub or Forgejo Actions, the host can instead set
+`credential.provider` to `github` or `forgejo`; `flux-mirror` exchanges the
+Actions OIDC token with the cloud provider, so the pod does not need ambient
+cloud credentials. Add the required `ecr.roleARN`,
+`acr.tenantID`/`acr.clientID`, or `gar.workloadIdentityProvider` block.
+
 The ServiceAccount carries each provider's workload-identity annotations:
 
 ```yaml

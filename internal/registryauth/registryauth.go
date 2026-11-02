@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/authn"
 
+	cryptov1 "github.com/fluxcd/pkg/apis/crypto/v1"
 	"github.com/fluxcd/pkg/auth"
 	"github.com/fluxcd/pkg/auth/azure"
 	"github.com/fluxcd/pkg/auth/utils"
@@ -127,13 +128,14 @@ func pkgAuthProviderName(provider string) (string, error) {
 
 // providerAuthenticator obtains an authn.Authenticator for a provider host from
 // the cloud provider's ambient workload identity, the same way the
-// `flux push artifact` family does.
+// `flux push artifact` family does. When the host sets a credential, the cloud
+// provider instead exchanges the credential identity for its access credential.
 func providerAuthenticator(ctx context.Context, h apiv1.RegistryHost) (authn.Authenticator, error) {
 	name, err := pkgAuthProviderName(h.Provider)
 	if err != nil {
 		return nil, err
 	}
-	var opts []auth.Option
+	opts := providerOptions(h)
 	if name == azure.ProviderName {
 		// ACR token exchange shells out to fetch an ARM access token; without
 		// this the azure provider cannot mint registry credentials.
@@ -144,6 +146,70 @@ func providerAuthenticator(ctx context.Context, h apiv1.RegistryHost) (authn.Aut
 		return nil, fmt.Errorf("get %s registry credentials for %q: %w", h.Provider, h.Host, err)
 	}
 	return a, nil
+}
+
+// providerIdentity is the workload identity passed to the auth package when
+// exchanging a credential for cloud registry access. It names the AWS role
+// session and the generic provider identity.
+const providerIdentity = "flux-mirror"
+
+// cloudCredentialProvider maps a flux-mirror credential provider to the auth
+// package's credential provider. Providers that are not renamed map through
+// unchanged.
+func cloudCredentialProvider(provider string) string {
+	switch provider {
+	case apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo:
+		return cryptov1.CredentialProviderActionsOIDC
+	default:
+		return provider
+	}
+}
+
+// providerOptions maps a cloud provider host to auth options. Provider-specific
+// settings come from the matching ecr/acr/gar block. A credential selects the
+// ID token source used for the exchange; explicitly configured audiences are
+// forwarded, otherwise the cloud provider applies its own default audience,
+// which is what AWS and Azure expect for federation.
+func providerOptions(h apiv1.RegistryHost) []auth.Option {
+	var opts []auth.Option
+	switch h.Provider {
+	case apiv1.RegistryProviderECR:
+		if h.ECR != nil {
+			opts = append(opts, auth.WithAWSRoleARN(strings.TrimSpace(h.ECR.RoleARN)))
+			if endpoint := strings.TrimSpace(h.ECR.STSEndpoint); endpoint != "" {
+				opts = append(opts, auth.WithAWSSTSEndpoint(endpoint))
+			}
+		}
+	case apiv1.RegistryProviderACR:
+		if h.ACR != nil {
+			opts = append(opts,
+				auth.WithAzureTenantID(strings.TrimSpace(h.ACR.TenantID)),
+				auth.WithAzureClientID(strings.TrimSpace(h.ACR.ClientID)))
+		}
+	case apiv1.RegistryProviderGAR:
+		if h.GAR != nil {
+			opts = append(opts, auth.WithGCPWorkloadIdentityProvider(strings.TrimSpace(h.GAR.WorkloadIdentityProvider)))
+			if sa := strings.TrimSpace(h.GAR.GCPServiceAccount); sa != "" {
+				opts = append(opts, auth.WithGCPServiceAccount(sa))
+			}
+		}
+	}
+	if h.Credential == nil {
+		return opts
+	}
+	opts = append(opts,
+		auth.WithCredentialProvider(cloudCredentialProvider(h.Credential.Provider)),
+		auth.WithIdentity(providerIdentity))
+	audiences := make([]string, 0, len(h.Credential.Audiences))
+	for _, raw := range h.Credential.Audiences {
+		if aud := strings.TrimSpace(raw); aud != "" {
+			audiences = append(audiences, aud)
+		}
+	}
+	if len(audiences) > 0 {
+		opts = append(opts, auth.WithCredentialAudiences(audiences...))
+	}
+	return opts
 }
 
 // providerKeychain serves pre-fetched cloud registry credentials for provider
@@ -208,11 +274,11 @@ func BuildKeychain(ctx context.Context, hosts []apiv1.RegistryHost) (authn.Keych
 }
 
 // usesCredentialTransport reports whether the cijwt bearer-stamp transport
-// manages this host: a credential host without a username (its credential is
-// stamped directly as a Bearer token). Cloud provider hosts and username
-// credentials authenticate through the keychain instead.
+// manages this host: a non-cloud credential host without a username (its
+// credential is stamped directly as a Bearer token). Cloud provider hosts and
+// username credentials authenticate through the keychain instead.
 func usesCredentialTransport(h apiv1.RegistryHost) bool {
-	return h.Credential != nil && h.Credential.Username == ""
+	return !h.IsCloudProvider() && h.Credential != nil && h.Credential.Username == ""
 }
 
 // NeedsCredentialTransport reports whether the cijwt bearer-stamp transport is

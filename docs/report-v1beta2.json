@@ -44,6 +44,10 @@
                 "description": "Error carries the plan-time failure message when Status is failed.",
                 "type": "string"
               },
+              "ignoreDriftForExitCode": {
+                "description": "IgnoreDriftForExitCode reports that this entry's drifted tags do not\ncontribute to the exit code. The tags are still reported with\nStatusDrifted.",
+                "type": "boolean"
+              },
               "source": {
                 "description": "Source identifies the entry's source.",
                 "type": "string"
@@ -195,7 +199,7 @@
               "type": "integer"
             },
             "drifted": {
-              "description": "Drifted is the number of tags that drifted.",
+              "description": "Drifted is the number of tags that drifted, including entries that set\nignoreDriftForExitCode.",
               "minimum": 0,
               "type": "integer"
             },
@@ -205,7 +209,7 @@
               "type": "integer"
             },
             "exitCode": {
-              "description": "ExitCode is the semantic sync exit code (0 clean, 1 failures, 2 drift).",
+              "description": "ExitCode is the semantic sync exit code (0 clean, 1 failures, 2 drift).\nDrift on entries that set ignoreDriftForExitCode is excluded.",
               "minimum": 0,
               "type": "integer"
             },

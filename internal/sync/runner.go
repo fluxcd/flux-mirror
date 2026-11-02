@@ -109,10 +109,11 @@ func (r *Runner) runEntry(ctx context.Context, m EntryMirror) (apiv1.EntryResult
 	// regardless of completion order — output is deterministic even under
 	// concurrency. Trimmed below to the number of jobs actually launched.
 	out := apiv1.EntryResult{
-		Source:      plan.Source,
-		Destination: plan.Destination,
-		Status:      apiv1.EntryCompleted,
-		Tags:        make([]apiv1.TagResult, len(plan.Jobs)),
+		Source:                 plan.Source,
+		Destination:            plan.Destination,
+		IgnoreDriftForExitCode: plan.IgnoreDriftForExitCode,
+		Status:                 apiv1.EntryCompleted,
+		Tags:                   make([]apiv1.TagResult, len(plan.Jobs)),
 	}
 	r.Logger.Info("entry started", "source", plan.Source, "jobs", len(plan.Jobs))
 	defer func(start time.Time) {

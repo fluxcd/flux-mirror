@@ -64,6 +64,7 @@ artifacts:
   - source: ghcr.io/dexidp/dex
     destination: ghcr.io/example/mirror/dex
     includeReferrers: true
+    ignoreDriftForExitCode: true
     selector:
       regex:
         pattern: '^v(?P<version>.*)$'

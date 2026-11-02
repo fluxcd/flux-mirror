@@ -264,10 +264,12 @@ func validateHost(h apiv1.RegistryHost) error {
 	}
 	h.Provider = strings.TrimSpace(h.Provider)
 	// A generic provider is the default and behaves like an unset provider: it
-	// composes with credential and tls, unlike a cloud provider.
+	// composes with credential and tls. A cloud provider also composes with a
+	// credential, which supplies the identity exchanged for registry
+	// credentials.
 	cloud := h.IsCloudProvider()
-	if h.Credential != nil && cloud {
-		return fmt.Errorf("credential and cloud provider are mutually exclusive")
+	if h.Credential != nil && cloud && strings.TrimSpace(h.Credential.Provider) == "" {
+		return fmt.Errorf("credential.provider is required with cloud provider %q", h.Provider)
 	}
 	if cloud && h.TLS != nil {
 		return fmt.Errorf("cloud provider and tls are mutually exclusive")
@@ -283,6 +285,9 @@ func validateHost(h apiv1.RegistryHost) error {
 		return fmt.Errorf("provider %q must be one of: %s, %s, %s, %s",
 			h.Provider, apiv1.RegistryProviderGeneric, apiv1.RegistryProviderECR, apiv1.RegistryProviderACR, apiv1.RegistryProviderGAR)
 	}
+	if err := validateProviderConfig(h); err != nil {
+		return err
+	}
 	if h.TLS != nil {
 		if err := validateTLS(*h.TLS); err != nil {
 			return fmt.Errorf("tls: %w", err)
@@ -293,6 +298,53 @@ func validateHost(h apiv1.RegistryHost) error {
 	}
 	if h.Credential == nil && !cloud && h.TLS == nil && h.MaxChunkSize == 0 {
 		return fmt.Errorf("one of credential, a cloud provider, tls, or maxChunkSize is required")
+	}
+	return nil
+}
+
+// validateProviderConfig checks the provider-specific block against the host
+// provider and credential. A credential needs the provider-specific exchange
+// configuration: the ecr role, acr application, or gar workload identity
+// provider. Without a credential, ambient cloud identity is used and the blocks
+// remain optional.
+func validateProviderConfig(h apiv1.RegistryHost) error {
+	if h.ECR != nil && h.Provider != apiv1.RegistryProviderECR {
+		return fmt.Errorf("ecr config requires provider %q", apiv1.RegistryProviderECR)
+	}
+	if h.ACR != nil && h.Provider != apiv1.RegistryProviderACR {
+		return fmt.Errorf("acr config requires provider %q", apiv1.RegistryProviderACR)
+	}
+	if h.GAR != nil && h.Provider != apiv1.RegistryProviderGAR {
+		return fmt.Errorf("gar config requires provider %q", apiv1.RegistryProviderGAR)
+	}
+
+	switch h.Provider {
+	case apiv1.RegistryProviderECR:
+		if h.Credential != nil && h.ECR == nil {
+			return fmt.Errorf("ecr is required when provider is %q and credential is set", apiv1.RegistryProviderECR)
+		}
+		if h.ECR != nil && strings.TrimSpace(h.ECR.RoleARN) == "" {
+			return fmt.Errorf("ecr.roleARN is required")
+		}
+	case apiv1.RegistryProviderACR:
+		if h.Credential != nil && h.ACR == nil {
+			return fmt.Errorf("acr is required when provider is %q and credential is set", apiv1.RegistryProviderACR)
+		}
+		if h.ACR != nil {
+			if strings.TrimSpace(h.ACR.TenantID) == "" {
+				return fmt.Errorf("acr.tenantID is required")
+			}
+			if strings.TrimSpace(h.ACR.ClientID) == "" {
+				return fmt.Errorf("acr.clientID is required")
+			}
+		}
+	case apiv1.RegistryProviderGAR:
+		if h.Credential != nil && h.GAR == nil {
+			return fmt.Errorf("gar is required when provider is %q and credential is set", apiv1.RegistryProviderGAR)
+		}
+		if h.GAR != nil && strings.TrimSpace(h.GAR.WorkloadIdentityProvider) == "" {
+			return fmt.Errorf("gar.workloadIdentityProvider is required")
+		}
 	}
 	return nil
 }
