@@ -17,6 +17,7 @@ import (
 	"github.com/fluxcd/pkg/auth/azure"
 	"github.com/fluxcd/pkg/auth/utils"
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
+	"github.com/fluxcd/pkg/cache"
 
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/envelope"
@@ -91,7 +92,7 @@ func ResolveHostAuth(ctx context.Context, h apiv1.RegistryHost) (HostAuth, error
 		return HostAuth{}, fmt.Errorf("host %q has no credential or provider configured", h.Host)
 	}
 	if h.IsCloudProvider() {
-		a, err := providerAuthenticator(ctx, h)
+		a, err := providerAuthenticator(ctx, h, nil)
 		if err != nil {
 			return HostAuth{}, err
 		}
@@ -130,7 +131,7 @@ func pkgAuthProviderName(provider string) (string, error) {
 // the cloud provider's ambient workload identity, the same way the
 // `flux push artifact` family does. When the host sets a credential, the cloud
 // provider instead exchanges the credential identity for its access credential.
-func providerAuthenticator(ctx context.Context, h apiv1.RegistryHost) (authn.Authenticator, error) {
+func providerAuthenticator(ctx context.Context, h apiv1.RegistryHost, tokenCache *cache.TokenCache) (authn.Authenticator, error) {
 	name, err := pkgAuthProviderName(h.Provider)
 	if err != nil {
 		return nil, err
@@ -140,6 +141,13 @@ func providerAuthenticator(ctx context.Context, h apiv1.RegistryHost) (authn.Aut
 		// ACR token exchange shells out to fetch an ARM access token; without
 		// this the azure provider cannot mint registry credentials.
 		opts = append(opts, auth.WithAllowShellOut())
+	}
+	if tokenCache != nil {
+		// Cache the provider access credential and registry token. Otherwise
+		// pkg/auth mints new credentials on every registry request, which for
+		// Actions OIDC means a new GitHub ID token and STS
+		// AssumeRoleWithWebIdentity call per request.
+		opts = append(opts, auth.WithCache(*tokenCache))
 	}
 	a, err := utils.GetArtifactRegistryCredentials(ctx, name, h.Host, opts...)
 	if err != nil {
@@ -253,12 +261,12 @@ func (m mintingAuthenticator) AuthorizationContext(ctx context.Context) (*authn.
 // credential hosts with a username — over the ambient Docker config. Provider
 // credentials are pre-fetched; username credentials are minted on demand.
 // Returns nil when no such host exists, so callers keep the default keychain.
-func BuildKeychain(ctx context.Context, hosts []apiv1.RegistryHost) (authn.Keychain, error) {
+func BuildKeychain(ctx context.Context, hosts []apiv1.RegistryHost, tokenCache *cache.TokenCache) (authn.Keychain, error) {
 	auths := make(map[string]authn.Authenticator)
 	for _, h := range hosts {
 		switch {
 		case h.IsCloudProvider():
-			a, err := providerAuthenticator(ctx, h)
+			a, err := providerAuthenticator(ctx, h, tokenCache)
 			if err != nil {
 				return nil, err
 			}

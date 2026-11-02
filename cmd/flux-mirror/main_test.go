@@ -14,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+
+	pkgcache "github.com/fluxcd/pkg/cache"
 )
 
 var (
@@ -58,6 +60,10 @@ func resetCmdArgs() {
 		timeout:       syncDefaultTimeout,
 		retries:       3,
 		driftExitCode: syncDefaultDriftExitCode,
+		tokenCacheOptions: pkgcache.TokenFlags{
+			MaxSize:     tokenCacheDefaultMaxSize,
+			MaxDuration: pkgcache.TokenMaxDuration,
+		},
 	}
 	loginArgs = loginFlags{}
 	secretArgs = secretFlags{}

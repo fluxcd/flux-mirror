@@ -17,6 +17,8 @@ import (
 	craneLogs "github.com/google/go-containerregistry/pkg/logs"
 	"github.com/spf13/cobra"
 
+	pkgcache "github.com/fluxcd/pkg/cache"
+
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/artifacts"
 	"github.com/fluxcd/flux-mirror/internal/charts"
@@ -32,6 +34,9 @@ const (
 	syncDefaultTimeout         = 5 * time.Minute
 	syncDefaultDriftExitCode   = 2
 	syncMaxCustomDriftExitCode = 255
+	// tokenCacheDefaultMaxSize matches the Flux controllers' default for the
+	// provider token cache.
+	tokenCacheDefaultMaxSize = 100
 )
 
 var syncCmd = &cobra.Command{
@@ -70,16 +75,17 @@ destination registry is known to be immutable.`,
 }
 
 type syncFlags struct {
-	output        flags.Output
-	concurrency   int
-	timeout       time.Duration
-	retries       int
-	overwrite     bool
-	driftExitCode int
-	dryRun        bool
-	verbose       bool
-	insecure      bool
-	noProgress    bool
+	output            flags.Output
+	concurrency       int
+	timeout           time.Duration
+	retries           int
+	overwrite         bool
+	driftExitCode     int
+	dryRun            bool
+	verbose           bool
+	insecure          bool
+	noProgress        bool
+	tokenCacheOptions pkgcache.TokenFlags
 }
 
 var syncArgs = syncFlags{
@@ -88,6 +94,10 @@ var syncArgs = syncFlags{
 	timeout:       syncDefaultTimeout,
 	retries:       3,
 	driftExitCode: syncDefaultDriftExitCode,
+	tokenCacheOptions: pkgcache.TokenFlags{
+		MaxSize:     tokenCacheDefaultMaxSize,
+		MaxDuration: pkgcache.TokenMaxDuration,
+	},
 }
 
 func init() {
@@ -110,13 +120,29 @@ func init() {
 		"Allow plaintext HTTP and skip TLS verification (test/dev only).")
 	syncCmd.Flags().BoolVar(&syncArgs.noProgress, "no-progress", false,
 		"Disable the live progress spinner.")
+	syncArgs.tokenCacheOptions.BindFlags(syncCmd.Flags(), syncArgs.tokenCacheOptions.MaxSize)
 
 	rootCmd.AddCommand(syncCmd)
+}
+
+func newTokenCache(opts pkgcache.TokenFlags) (*pkgcache.TokenCache, error) {
+	if opts.MaxSize <= 0 {
+		return nil, nil
+	}
+	return pkgcache.NewTokenCache(opts.MaxSize, pkgcache.WithMaxDuration(opts.MaxDuration))
 }
 
 func syncCmdRun(cmd *cobra.Command, args []string) error {
 	timeout := resolveSyncTimeout(cmd)
 	if err := validateSyncArgs(timeout); err != nil {
+		return err
+	}
+
+	// Cache provider credentials (including the GitHub OIDC token and STS
+	// exchange) for the lifetime of the sync run, so registry requests don't
+	// re-mint them. Uses the same defaults as the Flux controllers.
+	tokenCache, err := newTokenCache(syncArgs.tokenCacheOptions)
+	if err != nil {
 		return err
 	}
 
@@ -165,7 +191,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 		if t != nil {
 			clientOpts = append(clientOpts, oci.WithTransport(t))
 		}
-		if kc, err := registryauth.BuildKeychain(cmd.Context(), cfg.Hosts); err != nil {
+		if kc, err := registryauth.BuildKeychain(cmd.Context(), cfg.Hosts, tokenCache); err != nil {
 			return err
 		} else if kc != nil {
 			clientOpts = append(clientOpts, oci.WithKeychain(kc))
@@ -191,12 +217,12 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 			clientOpts = append(clientOpts, oci.WithDestinationTransport(dstTransport))
 		}
 
-		if kc, err := registryauth.BuildKeychain(cmd.Context(), sourceHosts); err != nil {
+		if kc, err := registryauth.BuildKeychain(cmd.Context(), sourceHosts, tokenCache); err != nil {
 			return err
 		} else if kc != nil {
 			clientOpts = append(clientOpts, oci.WithSourceKeychain(kc))
 		}
-		if kc, err := registryauth.BuildKeychain(cmd.Context(), destinationHosts); err != nil {
+		if kc, err := registryauth.BuildKeychain(cmd.Context(), destinationHosts, tokenCache); err != nil {
 			return err
 		} else if kc != nil {
 			clientOpts = append(clientOpts, oci.WithDestinationKeychain(kc))

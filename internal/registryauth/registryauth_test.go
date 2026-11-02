@@ -95,7 +95,7 @@ func TestUsernameSwitch(t *testing.T) {
 	g.Expect(opts).To(HaveLen(1)) // only WithInner; the host is skipped
 
 	// ...and is served by the keychain instead.
-	kc, err := BuildKeychain(context.Background(), userpass)
+	kc, err := BuildKeychain(context.Background(), userpass, nil)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(kc).ToNot(BeNil())
 
@@ -107,7 +107,7 @@ func TestUsernameSwitch(t *testing.T) {
 		Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Provider: apiv1.JWTProviderGitHub},
 	}}
 	g.Expect(NeedsCredentialTransport(cloudActions)).To(BeFalse())
-	kc, err = BuildKeychain(context.Background(), cloudActions)
+	kc, err = BuildKeychain(context.Background(), cloudActions, nil)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(kc).ToNot(BeNil())
 }

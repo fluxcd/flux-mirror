@@ -59,6 +59,12 @@ certificate, or SPIFFE mutual TLS.
 With the default registry transport, `--insecure` skips TLS verification for OCI
 requests, including chart destinations and referrer lookups.
 
+Provider credentials obtained from a cloud registry provider or a `credential`
+token source are cached for the duration of the sync run. This avoids minting a
+new cloud/CI identity token and exchanging it for registry credentials on every
+request. Use `--token-cache-max-size` and `--token-cache-max-duration` to tune the
+cache, or set the size to `0` to disable it.
+
 HTTP/S Helm repository authentication (for `charts` sources) is separate from OCI
 auth and always comes from the ambient Helm repositories config:
 
@@ -83,6 +89,8 @@ repository credentials automatically.
 | `--verbose`                     | `false` | Log every operation and the involved digests on stderr. Suppresses the spinner.                                                     |
 | `--no-progress`                 | `false` | Disable the live progress spinner. Per-job lines and the summary still print.                                                       |
 | `--insecure`                    | `false` | Allow plaintext HTTP and skip TLS verification. Test/dev only.                                                                      |
+| `--token-cache-max-size N`      | `100`   | Maximum number of provider credentials cached. Set to `0` to disable the cache.                                                     |
+| `--token-cache-max-duration DURATION` | `1h` | Maximum duration a cached provider token is reused before it is refreshed.                                                         |
 
 Global flags: `--timeout` sets the default operation timeout, and `--no-envsubst` disables config environment substitution.
 
