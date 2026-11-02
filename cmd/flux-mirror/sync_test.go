@@ -18,10 +18,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
+	"github.com/google/go-containerregistry/pkg/crane"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -311,6 +313,57 @@ func TestSync_NoConfigError(t *testing.T) {
 	_, err := executeCommand([]string{"sync"})
 	g.Expect(err).To(HaveOccurred())
 	g.Expect(err.Error()).To(ContainSubstring("config required"))
+}
+
+func TestSync_CopiesComparedDigestWhenTagMoves(t *testing.T) {
+	g := NewWithT(t)
+	ensureRegistry(t)
+	src := testregistry.Repo(dockerReg, "move-src")
+	dstRepo := "move-dst-" + testregistry.RandSuffix()
+	movedDigest := testregistry.PushImage(t, src+":latest")
+	comparedDigest := testregistry.PushImage(t, src+":latest")
+	g.Expect(movedDigest).ToNot(Equal(comparedDigest))
+
+	backend, err := url.Parse("http://" + dockerReg)
+	g.Expect(err).ToNot(HaveOccurred())
+	proxy := httputil.NewSingleHostReverseProxy(backend)
+	moved := make(chan error, 1)
+	var once sync.Once
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		// A publisher updates the source tag after comparison resolves its
+		// digest, while the destination is being checked.
+		if resp.Request.Method == http.MethodHead && resp.Request.URL.Path == "/v2/"+dstRepo+"/manifests/latest" {
+			once.Do(func() {
+				moved <- crane.Tag(src+"@"+movedDigest, "latest", crane.Insecure)
+			})
+		}
+		return nil
+	}
+	registry := httptest.NewServer(proxy)
+	t.Cleanup(registry.Close)
+	dst := strings.TrimPrefix(registry.URL, "http://") + "/" + dstRepo
+	body := fmt.Sprintf(`apiVersion: mirror.plugin.fluxcd.io/v1beta2
+kind: Config
+artifacts:
+  - source: %s
+    destination: %s
+    selector:
+      sortBy: alphabetical
+      limit: 1
+`, src, dst)
+	out, err := executeCommandWithInput([]string{"sync", "-", "--insecure", "--retries=0", "-o", "json"}, body)
+	g.Expect(err).ToNot(HaveOccurred(), out)
+	g.Expect(moved).To(Receive(BeNil()))
+	var report apiv1.Report
+	g.Expect(json.Unmarshal([]byte(out), &report)).To(Succeed())
+	g.Expect(report.Report.Results).To(HaveLen(1))
+	g.Expect(report.Report.Results[0].Tags).To(HaveLen(1))
+	row := report.Report.Results[0].Tags[0]
+	g.Expect(row.Status).To(Equal(apiv1.StatusCopied))
+	g.Expect(row.Digest).To(Equal(comparedDigest))
+	actualDigest, err := crane.Digest(dockerReg+"/"+dstRepo+":latest", crane.Insecure)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(actualDigest).To(Equal(row.Digest))
 }
 
 func TestSync_InsecureRegistryTLS(t *testing.T) {

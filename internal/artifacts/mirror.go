@@ -277,10 +277,7 @@ func (m *mirror) runTag(ctx context.Context, j tagJob) (sync.JobResult, error) {
 		return sync.JobResult{}, err
 	}
 
-	copySrc := j.src
-	if j.srcDigest != "" {
-		copySrc = m.entry.Source + "@" + j.srcDigest
-	}
+	copySrc := m.entry.Source + "@" + cmp.SrcDigest
 	st, reason, err := m.applyOutcome(ctx, copySrc, j.dst, cmp, j.overwrite, m.opts.CopyJobs)
 	if err != nil {
 		// Compare resolved the source digest before the copy failed — keep it
