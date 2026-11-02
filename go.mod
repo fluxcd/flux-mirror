@@ -14,6 +14,7 @@ require (
 	github.com/docker/cli v29.9.2+incompatible
 	github.com/fluxcd/pkg/apis/crypto v0.7.0
 	github.com/fluxcd/pkg/auth v0.68.0
+	github.com/fluxcd/pkg/cache v0.19.0
 	github.com/fluxcd/pkg/envsubst v1.9.0
 	github.com/fluxcd/pkg/helmtestserver v0.45.0
 	github.com/fluxcd/pkg/runtime v0.122.0
@@ -100,7 +101,6 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fluxcd/cli-utils v1.4.0 // indirect
 	github.com/fluxcd/pkg/apis/meta v1.38.0 // indirect
-	github.com/fluxcd/pkg/cache v0.19.0 // indirect
 	github.com/fluxcd/pkg/testserver v0.15.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
