@@ -41,6 +41,8 @@ FLUX_MIRROR_CONFIG=./flux-mirror.yaml flux mirror sync
    authentication:
    - [`provider: ecr|acr|gar`](config.md#cloud-registry-providers) obtains the
      registry's native credentials from the cloud provider's workload identity.
+     Combined with a `credential`, it exchanges the credential identity for
+     those credentials instead.
    - [`credential`](config.md#per-host-credential) resolves a per-host
      token from a cloud/CI identity, a JWK signature, or an environment variable
      or file. With no `credential.username` it is sent as an HTTP Bearer

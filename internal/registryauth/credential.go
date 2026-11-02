@@ -24,12 +24,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
-	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/idtoken"
 
+	cryptov1 "github.com/fluxcd/pkg/apis/crypto/v1"
+	"github.com/fluxcd/pkg/auth"
 	"github.com/fluxcd/pkg/auth/actionsoidc"
+	"github.com/fluxcd/pkg/auth/generic"
 	"github.com/fluxcd/pkg/auth/jwt"
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 
@@ -201,22 +202,22 @@ func providerTokenFunc(provider string, audiences []string, audiencesSet bool) (
 			return mintAWSSTSToken(ctx, cfg.Credentials, signer, region, audiences)
 		}, nil
 	case apiv1.JWTProviderSPIFFE:
-		extra := audiences[1:]
 		return func(ctx context.Context) (string, error) {
 			// Fetch a JWT-SVID for the audiences from the ambient Workload API
-			// (SPIFFE_ENDPOINT_SOCKET). The source is opened per cache-miss call
-			// and closed immediately; cijwt caches the returned token's exp, so
-			// this does not dial the socket on every request.
-			src, err := workloadapi.NewJWTSource(ctx)
+			// through the auth package. cijwt caches the returned token's exp,
+			// so the identity is fetched only on a cache miss.
+			credential, err := auth.NewAccessCredential(ctx, generic.Provider{},
+				auth.WithCredentialProvider(cryptov1.CredentialProviderSPIFFE),
+				auth.WithIdentity(providerIdentity),
+				auth.WithCredentialAudiences(audiences...))
 			if err != nil {
-				return "", fmt.Errorf("create SPIFFE JWT source: %w", err)
+				return "", err
 			}
-			defer src.Close()
-			svid, err := src.FetchJWTSVID(ctx, jwtsvid.Params{Audience: aud, ExtraAudiences: extra})
-			if err != nil {
-				return "", fmt.Errorf("fetch JWT-SVID: %w", err)
+			jwtCred, ok := credential.(*auth.JWTCredential)
+			if !ok {
+				return "", fmt.Errorf("SPIFFE credential is %T, want *auth.JWTCredential", credential)
 			}
-			return svid.Marshal(), nil
+			return jwtCred.Token, nil
 		}, nil
 	default:
 		return nil, fmt.Errorf("unknown provider %q", provider)

@@ -934,13 +934,146 @@ func TestValidate_Table(t *testing.T) {
 			errMsg: "provider \"dockerhub\" must be one of: generic, ecr, acr, gar",
 		},
 		{
-			name: "auth credential and provider mutually exclusive",
+			name: "auth cloud provider with credential is valid",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: RegistryProviderECR,
+					ECR: &ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderGitHub,
+						Audiences: []string{"sts.amazonaws.com"}},
+				}}},
+		},
+		{
+			name: "auth cloud provider with forgejo credential is valid",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "myregistry.azurecr.io", Provider: RegistryProviderACR,
+					ACR:        &ACRConfig{TenantID: "tenant", ClientID: "client"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderForgejo},
+				}}},
+		},
+		{
+			name: "auth gar with credential requires gar config",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "us-docker.pkg.dev", Provider: RegistryProviderGAR,
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderGitHub},
+				}}},
+			errMsg: `gar is required when provider is "gar" and credential is set`,
+		},
+		{
+			name: "auth gar with credential is valid with gar config",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "us-docker.pkg.dev", Provider: RegistryProviderGAR,
+					GAR:        &GARConfig{WorkloadIdentityProvider: "projects/1/locations/global/workloadIdentityPools/p/providers/x"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderGitHub},
+				}}},
+		},
+		{
+			name: "auth ecr with credential requires ecr config",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: RegistryProviderECR,
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderGitHub},
+				}}},
+			errMsg: `ecr is required when provider is "ecr" and credential is set`,
+		},
+		{
+			name: "auth acr with credential requires acr config",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "myregistry.azurecr.io", Provider: RegistryProviderACR,
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderForgejo},
+				}}},
+			errMsg: `acr is required when provider is "acr" and credential is set`,
+		},
+		{
+			name: "auth ecr role arn is required",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: RegistryProviderECR,
+					ECR:        &ECRConfig{},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderGitHub},
+				}}},
+			errMsg: "ecr.roleARN is required",
+		},
+		{
+			name: "auth acr tenant id is required",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "myregistry.azurecr.io", Provider: RegistryProviderACR,
+					ACR:        &ACRConfig{ClientID: "client"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderForgejo},
+				}}},
+			errMsg: "acr.tenantID is required",
+		},
+		{
+			name: "auth acr client id is required",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "myregistry.azurecr.io", Provider: RegistryProviderACR,
+					ACR:        &ACRConfig{TenantID: "tenant"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderForgejo},
+				}}},
+			errMsg: "acr.clientID is required",
+		},
+		{
+			name: "auth gar config requires workload identity provider",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "us-docker.pkg.dev", Provider: RegistryProviderGAR,
+					GAR:        &GARConfig{GCPServiceAccount: "mirror@example.iam.gserviceaccount.com"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderGitHub},
+				}}},
+			errMsg: "gar.workloadIdentityProvider is required",
+		},
+		{
+			name: "auth ecr config requires ecr provider",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "h.example", Provider: RegistryProviderGeneric,
+					ECR: &ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
+				}}},
+			errMsg: `ecr config requires provider "ecr"`,
+		},
+		{
+			name: "auth acr config requires acr provider",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "h.example", Provider: RegistryProviderECR,
+					ACR: &ACRConfig{TenantID: "tenant", ClientID: "client"},
+					ECR: &ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
+				}}},
+			errMsg: `acr config requires provider "acr"`,
+		},
+		{
+			name: "auth gar config requires gar provider",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "h.example", Provider: RegistryProviderECR,
+					GAR: &GARConfig{WorkloadIdentityProvider: "projects/1/locations/global/workloadIdentityPools/p/providers/x"},
+					ECR: &ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
+				}}},
+			errMsg: `gar config requires provider "gar"`,
+		},
+		{
+			name: "auth cloud provider accepts another credential provider",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "us-docker.pkg.dev", Provider: RegistryProviderGAR,
+					GAR:        &GARConfig{WorkloadIdentityProvider: "projects/1/locations/global/workloadIdentityPools/p/providers/x"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderSPIFFE},
+				}}},
+		},
+		{
+			name: "auth cloud provider requires credential provider",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{
 					Host: "h.example", Provider: RegistryProviderGAR,
 					Credential: &RegistryCredential{Type: CredentialTypeJWT, Value: "TOKEN"},
 				}}},
-			errMsg: "credential and cloud provider are mutually exclusive",
+			errMsg: `credential.provider is required with cloud provider "gar"`,
 		},
 		{
 			name: "auth username with credential is valid",

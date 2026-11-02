@@ -188,12 +188,12 @@ github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeO
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
 github.com/fluxcd/cli-utils v1.4.0 h1:zlTiCWcVDQvvwZXILYeu5rpbnGt1sS+w32y3+rkOpig=
 github.com/fluxcd/cli-utils v1.4.0/go.mod h1:OupUOj2boEKTbiguMbGMz5Z/d59JUcb1c7pPESe8Pjw=
-github.com/fluxcd/pkg/apis/crypto v0.5.0 h1:buy9YCvrD8IpKqOVCSV9k2wlF2iVPaETLOZBqsbyfVs=
-github.com/fluxcd/pkg/apis/crypto v0.5.0/go.mod h1:bEwkDgBjLXMVJ2BwmVbbj32PkirmNSicabgl2Jvw7Dk=
+github.com/fluxcd/pkg/apis/crypto v0.7.0 h1:0mgFQRW4/+/NbPpzf3X6+r3j2TCL9T86mEaG1XqwkyY=
+github.com/fluxcd/pkg/apis/crypto v0.7.0/go.mod h1:bEwkDgBjLXMVJ2BwmVbbj32PkirmNSicabgl2Jvw7Dk=
 github.com/fluxcd/pkg/apis/meta v1.38.0 h1:7t6/DuGFAPx2LE4MsRh1jskjnVE6qELKfr/LrfG7KE8=
 github.com/fluxcd/pkg/apis/meta v1.38.0/go.mod h1:lmdugeiZyt6w+DRm8ypkB+nwrzm+saMbqSfZKGBbTOE=
-github.com/fluxcd/pkg/auth v0.66.0 h1:fNS6cf1WOVxVCdEKfCfDgbEgk2t3kzepaI1IKuiXuYo=
-github.com/fluxcd/pkg/auth v0.66.0/go.mod h1:eD0iXDzt4BCHVNoBoDkYCsD3+LD39WN/r1qaqsgPJWk=
+github.com/fluxcd/pkg/auth v0.68.0 h1:qW2s50QRAnB5LMna0w5hgxU73eWoZWGMLij8rrJ5bK0=
+github.com/fluxcd/pkg/auth v0.68.0/go.mod h1:QgJ83DHxt78tlLYokxqR3KiowikP/+ccWB2uh4oJo3k=
 github.com/fluxcd/pkg/cache v0.19.0 h1:gcpASwfXLkaHTq8dv9AkXD+IvD54IfskRwGv3SDwC+E=
 github.com/fluxcd/pkg/cache v0.19.0/go.mod h1:HYfYegfUsGBIttmTDZDFa0xmbeba4wPyND1YKitXm0w=
 github.com/fluxcd/pkg/envsubst v1.9.0 h1:QTagwV4WLmqF+JsD1rGkcKFmmj4HV64BnqNM1T311kc=
@@ -202,8 +202,8 @@ github.com/fluxcd/pkg/helmtestserver v0.45.0 h1:erSSj767Z3+LX1oq8Fuu1ybO1da0alg4
 github.com/fluxcd/pkg/helmtestserver v0.45.0/go.mod h1:Rc+VEXsTqfmcluj2IIVkujsOFaHxZ49leVBvr46/Rso=
 github.com/fluxcd/pkg/runtime v0.122.0 h1:5nT+3PqbRvnzIMBNW6g/lIqsg6B715zaF12J3KnvjJY=
 github.com/fluxcd/pkg/runtime v0.122.0/go.mod h1:46y8/GVMFotQkQxzzePecv7cn09DLbQhq6cl2VQ5l9A=
-github.com/fluxcd/pkg/spiffe v0.2.0 h1:UM5USXRkl92nZZov3R5gAfPxnRpudowsCprqPG/GNaA=
-github.com/fluxcd/pkg/spiffe v0.2.0/go.mod h1:zLRMyp/vOwQEGWLhe04qKOBorUuTQvwBKBgpmWwkKQE=
+github.com/fluxcd/pkg/spiffe v0.4.0 h1:OqYdMkgQ07bDMuzsslghZsWEHDuw2ob/OkhDETE1pyY=
+github.com/fluxcd/pkg/spiffe v0.4.0/go.mod h1:FPfK66livdwZL3JFF+GnRfohvUHQZxnkFnaPdIprdj8=
 github.com/fluxcd/pkg/testserver v0.15.0 h1:6Pao9oK1Cu5ssh9c7QoDnnyfPUtxHbw7gJ+5tSOmkWc=
 github.com/fluxcd/pkg/testserver v0.15.0/go.mod h1:uSiItABsGd13YQDkYpIWeV1mww6KEYcH9wk/L4p2PKw=
 github.com/foxcpp/go-mockdns v1.2.0 h1:omK3OrHRD1IWJz1FuFBCFquhXslXoF17OvBS6JPzZF0=

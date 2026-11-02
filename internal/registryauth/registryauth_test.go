@@ -24,7 +24,11 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 	gojwt "github.com/golang-jwt/jwt/v5"
 	. "github.com/onsi/gomega"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	cryptov1 "github.com/fluxcd/pkg/apis/crypto/v1"
+	"github.com/fluxcd/pkg/auth"
 
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
@@ -94,6 +98,116 @@ func TestUsernameSwitch(t *testing.T) {
 	kc, err := BuildKeychain(context.Background(), userpass)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(kc).ToNot(BeNil())
+
+	// A cloud provider with an Actions OIDC credential also goes through the
+	// keychain; the GitHub/Forgejo token must not be stamped directly on
+	// registry requests.
+	cloudActions := []apiv1.RegistryHost{{
+		Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: apiv1.RegistryProviderECR,
+		Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Provider: apiv1.JWTProviderGitHub},
+	}}
+	g.Expect(NeedsCredentialTransport(cloudActions)).To(BeFalse())
+	kc, err = BuildKeychain(context.Background(), cloudActions)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(kc).ToNot(BeNil())
+}
+
+func TestProviderOptions(t *testing.T) {
+	for _, provider := range []string{apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo} {
+		t.Run(provider, func(t *testing.T) {
+			g := NewWithT(t)
+
+			opts := providerOptions(apiv1.RegistryHost{
+				Provider: apiv1.RegistryProviderECR,
+				ECR:      &apiv1.ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror", STSEndpoint: "https://sts.example.com"},
+				Credential: &apiv1.RegistryCredential{
+					Type:      apiv1.CredentialTypeJWT,
+					Provider:  provider,
+					Audiences: []string{" sts.amazonaws.com ", ""},
+				},
+			})
+			var o auth.Options
+			o.Apply(opts...)
+			g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderActionsOIDC))
+			g.Expect(o.CredentialAudiences).To(Equal([]string{"sts.amazonaws.com"}))
+			g.Expect(o.AWSRoleARN).To(Equal("arn:aws:iam::123:role/mirror"))
+			g.Expect(o.AWSSTSEndpoint).To(Equal("https://sts.example.com"))
+			g.Expect(o.AWSRoleSessionSubdomain()).To(Equal(providerIdentity))
+		})
+	}
+
+	t.Run("no credential", func(t *testing.T) {
+		g := NewWithT(t)
+		g.Expect(providerOptions(apiv1.RegistryHost{
+			Provider: apiv1.RegistryProviderECR,
+		})).To(BeEmpty())
+	})
+
+	t.Run("acr", func(t *testing.T) {
+		g := NewWithT(t)
+		opts := providerOptions(apiv1.RegistryHost{
+			Provider: apiv1.RegistryProviderACR,
+			ACR:      &apiv1.ACRConfig{TenantID: "tenant", ClientID: "client"},
+			Credential: &apiv1.RegistryCredential{
+				Type:     apiv1.CredentialTypeJWT,
+				Provider: apiv1.JWTProviderForgejo,
+			},
+		})
+		var o auth.Options
+		o.Apply(opts...)
+		g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderActionsOIDC))
+		g.Expect(o.CredentialAudiences).To(BeEmpty())
+		g.Expect(o.AzureTenantID).To(Equal("tenant"))
+		g.Expect(o.AzureClientID).To(Equal("client"))
+	})
+
+	t.Run("gar", func(t *testing.T) {
+		g := NewWithT(t)
+		opts := providerOptions(apiv1.RegistryHost{
+			Provider: apiv1.RegistryProviderGAR,
+			GAR: &apiv1.GARConfig{
+				WorkloadIdentityProvider: "projects/1/locations/global/workloadIdentityPools/p/providers/x",
+				GCPServiceAccount:        "mirror@example.iam.gserviceaccount.com",
+			},
+			Credential: &apiv1.RegistryCredential{
+				Type:     apiv1.CredentialTypeJWT,
+				Provider: apiv1.JWTProviderGitHub,
+			},
+		})
+		var o auth.Options
+		o.Apply(opts...)
+		g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderActionsOIDC))
+		g.Expect(o.GCPWorkloadIdentityProvider).To(Equal("projects/1/locations/global/workloadIdentityPools/p/providers/x"))
+		g.Expect(o.GCPServiceAccount).To(Equal("mirror@example.iam.gserviceaccount.com"))
+	})
+
+	t.Run("credential provider passes through", func(t *testing.T) {
+		g := NewWithT(t)
+		opts := providerOptions(apiv1.RegistryHost{
+			Provider: apiv1.RegistryProviderECR,
+			ECR:      &apiv1.ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
+			Credential: &apiv1.RegistryCredential{
+				Type:     apiv1.CredentialTypeJWT,
+				Provider: apiv1.JWTProviderSPIFFE,
+			},
+		})
+		var o auth.Options
+		o.Apply(opts...)
+		g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderSPIFFE))
+		g.Expect(o.AWSRoleSessionSubdomain()).To(Equal(providerIdentity))
+	})
+}
+
+// TestProviderTokenFunc_SPIFFEUsesAuthWorkloadAPI proves the spiffe credential
+// provider is delegated to the auth package's Workload API implementation.
+func TestProviderTokenFunc_SPIFFEUsesAuthWorkloadAPI(t *testing.T) {
+	g := NewWithT(t)
+	t.Setenv(workloadapi.SocketEnv, "unix://"+filepath.Join(t.TempDir(), "missing.sock"))
+
+	fn, err := providerTokenFunc(apiv1.JWTProviderSPIFFE, []string{"audience.example"}, false)
+	g.Expect(err).ToNot(HaveOccurred())
+	_, err = fn(context.Background())
+	g.Expect(err).To(MatchError(ContainSubstring("failed to fetch SPIFFE JWT-SVID from the Workload API")))
 }
 
 // TestProviderTokenFunc_GCPUserCredentialRejectsAud proves the GCP provider

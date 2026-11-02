@@ -125,12 +125,14 @@ type Config struct {
 }
 
 // RegistryHost binds an authentication method to a registry host. Credential and
-// Provider configure the HTTP-layer registry credential (mutually exclusive for a
-// cloud provider). TLS configures the transport-layer TLS/mTLS settings: it
-// composes with Credential and with the default (generic) Provider, but is
-// mutually exclusive with a cloud Provider — a cloud registry provider is a
-// managed registry whose transport flux-mirror does not customize. At least one
-// of Credential, a cloud Provider, TLS, or MaxChunkSize must be set.
+// Provider configure the HTTP-layer registry credential. A cloud Provider accepts
+// a Credential, in which case the credential identity is exchanged for the cloud
+// provider's access credential instead of using the ambient cloud identity. TLS
+// configures the transport-layer TLS/mTLS settings: it composes with Credential
+// and with the default (generic) Provider, but is mutually exclusive with a cloud
+// Provider — a cloud registry provider is a managed registry whose transport
+// flux-mirror does not customize. At least one of Credential, a cloud Provider,
+// TLS, or MaxChunkSize must be set.
 type RegistryHost struct {
 	// Host is the registry host (and optional port) the auth applies to.
 	Host string `json:"host"`
@@ -150,10 +152,27 @@ type RegistryHost struct {
 	// for the host: RegistryProviderECR, RegistryProviderACR, or
 	// RegistryProviderGAR. Omitted (or RegistryProviderGeneric) means an ordinary
 	// registry, for which flux-mirror configures the credential and/or TLS
-	// directly. A cloud provider is mutually exclusive with Credential and TLS.
+	// directly. A cloud provider is mutually exclusive with TLS, but accepts a
+	// Credential to source the identity exchanged with the cloud provider.
 	// +optional
 	// +kubebuilder:validation:Enum=generic;ecr;acr;gar
 	Provider string `json:"provider,omitempty"`
+
+	// ECR configures Amazon ECR authentication when this host uses the ecr
+	// provider together with a credential.
+	// +optional
+	ECR *ECRConfig `json:"ecr,omitempty"`
+
+	// ACR configures Azure ACR authentication when this host uses the acr
+	// provider together with a credential.
+	// +optional
+	ACR *ACRConfig `json:"acr,omitempty"`
+
+	// GAR configures Google Artifact Registry authentication when this host
+	// uses the gar provider together with a credential. Without a credential,
+	// the provider uses the ambient Google identity instead.
+	// +optional
+	GAR *GARConfig `json:"gar,omitempty"`
 
 	// TLS configures transport-layer TLS for the host: a PEM directory or inline
 	// PEM fields (custom CA and/or client certificate), or SPIFFE mutual TLS.
@@ -167,6 +186,40 @@ type RegistryHost struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	MaxChunkSize int `json:"maxChunkSize,omitempty"`
+}
+
+// ECRConfig configures the AWS IAM role assumed for Amazon ECR when a host
+// combines the ecr provider with a credential.
+type ECRConfig struct {
+	// RoleARN is the IAM role assumed with the credential identity via
+	// AssumeRoleWithWebIdentity.
+	RoleARN string `json:"roleARN"`
+
+	// STSEndpoint overrides the AWS STS endpoint used for the role exchange.
+	// +optional
+	STSEndpoint string `json:"stsEndpoint,omitempty"`
+}
+
+// ACRConfig configures the Microsoft Entra application used for Azure ACR when
+// a host combines the acr provider with a credential.
+type ACRConfig struct {
+	// TenantID is the Microsoft Entra tenant ID.
+	TenantID string `json:"tenantID"`
+
+	// ClientID is the Microsoft Entra application (client) ID.
+	ClientID string `json:"clientID"`
+}
+
+// GARConfig configures Google Workload Identity Federation for Google Artifact
+// Registry when a host combines the gar provider with a credential.
+type GARConfig struct {
+	// WorkloadIdentityProvider is the full resource name of the workload
+	// identity pool provider.
+	WorkloadIdentityProvider string `json:"workloadIdentityProvider"`
+
+	// GCPServiceAccount is the optional service account to impersonate.
+	// +optional
+	GCPServiceAccount string `json:"gcpServiceAccount,omitempty"`
 }
 
 // EffectiveDirection returns the host direction with the documented default
@@ -232,7 +285,8 @@ type RegistryCredential struct {
 
 	// Provider mints a per-request credential for the audiences, one of
 	// JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,
-	// JWTProviderAWS, or JWTProviderSPIFFE.
+	// JWTProviderAWS, or JWTProviderSPIFFE. On a cloud provider host (ecr, acr,
+	// gar), the credential identity is exchanged with the cloud provider.
 	// +optional
 	// +kubebuilder:validation:Enum=github;forgejo;gcp;azure;aws;spiffe
 	Provider string `json:"provider,omitempty"`
