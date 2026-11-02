@@ -8,7 +8,9 @@ linkTitle: Sync Command
 The `flux mirror sync` command mirrors Helm charts and OCI artifacts between
 registries based on a declarative [`Config`](config.md). It is
 idempotent: re-running against the same config produces the same destination
-state, copying only what is missing or drifted.
+state, copying only what is missing or drifted. OCI artifacts are copied by the
+source digest used for comparison, even if the source tag changes during the
+operation.
 
 ## Synopsis
 
