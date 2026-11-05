@@ -84,13 +84,14 @@ and writes them into the Docker config. Afterwards `flux push artifact` (and any
 other Docker-config-aware tool) authenticates **without** a `--provider` flag,
 because the credentials are already in the config.
 
-Instead of running the cloud provider's login action, set
-`credential.provider` to `github` or `forgejo` on the host. `flux-mirror`
-fetches the Actions OIDC token and exchanges it with the cloud provider. Set
-`credential.audiences` to the audience the cloud identity provider expects
-(e.g. `sts.amazonaws.com` or `api://AzureADTokenExchange`). Add the required
-`ecr.roleARN`, `acr.tenantID`/`acr.clientID`, or
-`gar.workloadIdentityProvider` block.
+Instead of running the cloud provider's login action, give the host a
+`credential` whose JWT is exchanged with the cloud provider: `provider: github`,
+`forgejo`, or `spiffe`, a `value`, a `fromPath` token, or a `jwkPath`/`jwkValue`
+JWK. Set `credential.audiences` to the audience the cloud identity provider
+expects (e.g. `sts.amazonaws.com` or `api://AzureADTokenExchange`). Add the
+required `ecr.roleARN`, `acr.tenantID`/`acr.clientID`, or
+`gar.workloadIdentityProvider` block. `provider: gcp`, `azure`, `aws`,
+`credential.username`, and `credential.envelope` are rejected on a cloud host.
 
 A hosts-only config — switch clouds by changing the host and `provider`:
 
@@ -245,4 +246,4 @@ flux mirror login --plaintext
   [keygen](keygen.md).
 - For `aws`, the credential is a JWT-shaped envelope wrapping a signed
   `sts:GetCallerIdentity` request, not an OIDC token. The destination registry
-  must understand this scheme — see [Token providers](config.md#token-providers).
+  must understand this scheme — see [Credential providers](config.md#credential-providers).

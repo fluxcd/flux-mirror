@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -29,6 +30,7 @@ import (
 
 	cryptov1 "github.com/fluxcd/pkg/apis/crypto/v1"
 	"github.com/fluxcd/pkg/auth"
+	"github.com/fluxcd/pkg/cache"
 
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 )
@@ -196,6 +198,132 @@ func TestProviderOptions(t *testing.T) {
 		g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderSPIFFE))
 		g.Expect(o.AWSRoleSessionSubdomain()).To(Equal(providerIdentity))
 	})
+}
+
+func TestInputJWTCredentialProviderOptions(t *testing.T) {
+	g := NewWithT(t)
+	opts := providerOptions(apiv1.RegistryHost{
+		Provider: apiv1.RegistryProviderECR,
+		ECR:      &apiv1.ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
+		Credential: &apiv1.RegistryCredential{
+			Type:  apiv1.CredentialTypeJWT,
+			Value: "TOKEN",
+		},
+	})
+	var o auth.Options
+	o.Apply(opts...)
+	g.Expect(o.CredentialProvider).To(BeEmpty())
+	g.Expect(o.JWTCredential).To(BeNil())
+	g.Expect(o.CredentialAudiences).To(BeEmpty())
+	g.Expect(o.AWSRoleARN).To(Equal("arn:aws:iam::123:role/mirror"))
+}
+
+func TestCloudAudiences(t *testing.T) {
+	garWIP := "projects/1/locations/global/workloadIdentityPools/p/providers/x"
+	for _, tt := range []struct {
+		name string
+		host apiv1.RegistryHost
+		want []string
+	}{
+		{
+			name: "ecr default",
+			host: apiv1.RegistryHost{Provider: apiv1.RegistryProviderECR, Credential: &apiv1.RegistryCredential{}},
+			want: []string{cryptov1.DefaultAudienceAWS},
+		},
+		{
+			name: "acr default",
+			host: apiv1.RegistryHost{Provider: apiv1.RegistryProviderACR, Credential: &apiv1.RegistryCredential{}},
+			want: []string{cryptov1.DefaultAudienceAzure},
+		},
+		{
+			name: "gar default",
+			host: apiv1.RegistryHost{
+				Provider:   apiv1.RegistryProviderGAR,
+				GAR:        &apiv1.GARConfig{WorkloadIdentityProvider: garWIP},
+				Credential: &apiv1.RegistryCredential{},
+			},
+			want: []string{cryptov1.GetDefaultAudienceGCP(garWIP)},
+		},
+		{
+			name: "explicit audiences win",
+			host: apiv1.RegistryHost{
+				Provider: apiv1.RegistryProviderECR,
+				Credential: &apiv1.RegistryCredential{
+					Audiences: []string{" custom.example ", ""},
+				},
+			},
+			want: []string{"custom.example"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			got, err := cloudAudiences(tt.host)
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(got).To(Equal(tt.want))
+		})
+	}
+}
+
+func TestResolveInputJWTCredential(t *testing.T) {
+	g := NewWithT(t)
+	expiresAt := time.Now().Add(time.Hour).Truncate(time.Second)
+	token, err := gojwt.NewWithClaims(gojwt.SigningMethodHS256, gojwt.MapClaims{
+		"exp": expiresAt.Unix(),
+	}).SignedString([]byte("secret"))
+	g.Expect(err).ToNot(HaveOccurred())
+
+	host := apiv1.RegistryHost{
+		Host:       "h.example",
+		Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: token},
+	}
+	credential, err := resolveInputJWTCredential(context.Background(), host, []string{"audience"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(credential.Token).To(Equal(token))
+	g.Expect(credential.ExpiresAt.Unix()).To(Equal(expiresAt.Unix()))
+
+	host.Credential.Value = "not-a-jwt"
+	_, err = resolveInputJWTCredential(context.Background(), host, []string{"audience"})
+	g.Expect(err).To(MatchError(ContainSubstring("parse credential as JWT")))
+}
+
+func TestInputJWTAuthenticatorCachesToken(t *testing.T) {
+	g := NewWithT(t)
+	tokenCache, err := cache.NewTokenCache(10)
+	g.Expect(err).ToNot(HaveOccurred())
+
+	calls := 0
+	expiresAt := time.Now().Add(time.Hour)
+	a := &inputJWTAuthenticator{
+		tokenCache: tokenCache,
+		tokenKey:   "key",
+		resolve: func(context.Context) (*auth.JWTCredential, error) {
+			calls++
+			return &auth.JWTCredential{Token: fmt.Sprintf("token-%d", calls), ExpiresAt: expiresAt}, nil
+		},
+	}
+
+	first, err := a.credential(context.Background())
+	g.Expect(err).ToNot(HaveOccurred())
+	second, err := a.credential(context.Background())
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(calls).To(Equal(1))
+	g.Expect(second.Token).To(Equal(first.Token))
+}
+
+func TestInputJWTTokenKey(t *testing.T) {
+	g := NewWithT(t)
+	host := apiv1.RegistryHost{
+		Host:       "h.example",
+		Provider:   apiv1.RegistryProviderECR,
+		Credential: &apiv1.RegistryCredential{Value: "secret-token"},
+	}
+	key := inputJWTTokenKey(host)
+	g.Expect(inputJWTTokenKey(host)).To(Equal(key))
+	g.Expect(key).ToNot(ContainSubstring("secret-token"))
+
+	other := host
+	other.Credential = &apiv1.RegistryCredential{Value: "another-token"}
+	g.Expect(inputJWTTokenKey(other)).ToNot(Equal(key))
 }
 
 // TestProviderTokenFunc_SPIFFEUsesAuthWorkloadAPI proves the spiffe credential
