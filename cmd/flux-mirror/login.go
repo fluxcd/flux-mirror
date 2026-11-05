@@ -11,6 +11,8 @@ import (
 	dockercfg "github.com/docker/cli/cli/config"
 	"github.com/docker/cli/cli/config/credentials"
 	"github.com/docker/cli/cli/config/types"
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/spf13/cobra"
 
 	"github.com/fluxcd/flux-mirror/internal/registryauth"
@@ -108,13 +110,17 @@ func loginCmdRun(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("host %q: %w", h.Host, err)
 		}
+		serverAddress := h.Host
+		if serverAddress == "docker.io" || serverAddress == name.DefaultRegistry {
+			serverAddress = authn.DefaultAuthKey
+		}
 
 		// A bearer RegistryToken can't live in a credential helper (those store
 		// username/secret pairs), so it always goes to the config file. A
 		// username/password pair respects --plaintext and any configured helper.
 		if ha.RegistryToken != "" {
 			if err := credentials.NewFileStore(dcf).Store(types.AuthConfig{
-				ServerAddress: h.Host,
+				ServerAddress: serverAddress,
 				RegistryToken: ha.RegistryToken,
 			}); err != nil {
 				return fmt.Errorf("store docker credential for %q: %w", h.Host, err)
@@ -128,19 +134,19 @@ func loginCmdRun(cmd *cobra.Command, _ []string) error {
 			// Force a base64 config.json entry, bypassing any helper.
 			store = credentials.NewFileStore(dcf)
 		} else {
-			store = dcf.GetCredentialsStore(h.Host)
+			store = dcf.GetCredentialsStore(serverAddress)
 		}
 		if err := store.Store(types.AuthConfig{
 			Username:      ha.Username,
 			Password:      ha.Password,
-			ServerAddress: h.Host,
+			ServerAddress: serverAddress,
 		}); err != nil {
 			return fmt.Errorf("store docker credential for %q: %w", h.Host, err)
 		}
 
 		helper := ""
 		if !loginArgs.plaintext {
-			if helper = dcf.CredentialHelpers[h.Host]; helper == "" {
+			if helper = dcf.CredentialHelpers[serverAddress]; helper == "" {
 				helper = dcf.CredentialsStore
 			}
 		}
