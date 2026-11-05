@@ -15,10 +15,14 @@ import (
 	"testing"
 	"time"
 
+	dockercfg "github.com/docker/cli/cli/config"
+	gojwt "github.com/golang-jwt/jwt/v5"
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	. "github.com/onsi/gomega"
+
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
 	"github.com/fluxcd/flux-mirror/internal/registryauth"
-	gojwt "github.com/golang-jwt/jwt/v5"
-	. "github.com/onsi/gomega"
 )
 
 // writeLoginConfig writes a valid config whose single host carries a value credential from MY_LOGIN_TOKEN.
@@ -344,6 +348,44 @@ func TestLogin_UsernameStoresUserPassword(t *testing.T) {
 	dec, err := base64.StdEncoding.DecodeString(entry.Auth)
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(string(dec)).To(Equal("robot:static-token-value"))
+}
+
+func TestLogin_CredentialsRoundTrip(t *testing.T) {
+	for _, host := range []string{"docker.io", "index.docker.io", "registry.example.com"} {
+		t.Run(host, func(t *testing.T) {
+			g := NewWithT(t)
+			dockerDir := t.TempDir()
+			t.Setenv("DOCKER_CONFIG", dockerDir)
+			src := fmt.Sprintf(`apiVersion: mirror.plugin.fluxcd.io/v1beta2
+kind: Config
+hosts:
+  - host: %s
+    credential:
+      username: robot
+      value: test-password
+`, host)
+			_, err := executeCommandWithInput([]string{
+				"login", "--config", "-", "--docker-config", dockerDir, "--plaintext",
+			}, src)
+			g.Expect(err).ToNot(HaveOccurred())
+
+			cfg, err := dockercfg.Load(dockerDir)
+			g.Expect(err).ToNot(HaveOccurred())
+			stored, err := cfg.GetAuthConfig(host)
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(stored.Username).To(Equal("robot"))
+			g.Expect(stored.Password).To(Equal("test-password"))
+
+			registry, err := name.NewRegistry(host)
+			g.Expect(err).ToNot(HaveOccurred())
+			authenticator, err := authn.DefaultKeychain.Resolve(registry)
+			g.Expect(err).ToNot(HaveOccurred())
+			authorization, err := authenticator.Authorization()
+			g.Expect(err).ToNot(HaveOccurred())
+			g.Expect(authorization.Username).To(Equal("robot"))
+			g.Expect(authorization.Password).To(Equal("test-password"))
+		})
+	}
 }
 
 func TestLogin_AllHostsByDefault(t *testing.T) {

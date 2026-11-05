@@ -52,6 +52,9 @@ exactly like `docker login`:
 - Otherwise, it falls back to a base64-encoded entry in `config.json` (the same
   plaintext fallback `docker login` uses when no helper is available).
 
+Docker Hub hosts (`docker.io` and `index.docker.io`) use Docker's credential
+store address `https://index.docker.io/v1/`.
+
 What gets written depends on the host:
 
 - A cloud [`provider`](config.md#cloud-registry-providers) host, or a
