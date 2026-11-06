@@ -268,15 +268,17 @@ func validateHost(h apiv1.RegistryHost) error {
 	// credential, which supplies the identity exchanged for registry
 	// credentials.
 	cloud := h.IsCloudProvider()
-	if h.Credential != nil && cloud && strings.TrimSpace(h.Credential.Provider) == "" {
-		return fmt.Errorf("credential.provider is required with cloud provider %q", h.Provider)
-	}
 	if cloud && h.TLS != nil {
 		return fmt.Errorf("cloud provider and tls are mutually exclusive")
 	}
 	if h.Credential != nil {
 		if err := validateCredential(*h.Credential); err != nil {
 			return fmt.Errorf("credential: %w", err)
+		}
+		if cloud {
+			if err := validateCloudCredential(*h.Credential); err != nil {
+				return fmt.Errorf("credential: %w", err)
+			}
 		}
 	}
 	switch h.Provider {
@@ -298,6 +300,27 @@ func validateHost(h apiv1.RegistryHost) error {
 	}
 	if h.Credential == nil && !cloud && h.TLS == nil && h.MaxChunkSize == 0 {
 		return fmt.Errorf("one of credential, a cloud provider, tls, or maxChunkSize is required")
+	}
+	return nil
+}
+
+// validateCloudCredential checks the credential fields that are not compatible
+// with a cloud provider host. The credential identity is exchanged for the
+// cloud provider's registry credentials: only an OIDC/JWT source is usable, and
+// the cloud provider determines the username and the token transport. Static
+// values, files, and JWK-signed tokens are exchanged too, so they are allowed.
+func validateCloudCredential(c apiv1.RegistryCredential) error {
+	switch c.Provider {
+	case "", apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo, apiv1.JWTProviderSPIFFE:
+	default:
+		return fmt.Errorf("provider %q cannot be exchanged with a cloud provider; must be one of: %s, %s, %s",
+			c.Provider, apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo, apiv1.JWTProviderSPIFFE)
+	}
+	if strings.TrimSpace(c.Username) != "" {
+		return fmt.Errorf("username cannot be set with a cloud provider; the cloud provider determines the registry username")
+	}
+	if strings.TrimSpace(c.Envelope) != "" {
+		return fmt.Errorf("envelope cannot be set with a cloud provider; the credential must be exchanged as a JWT")
 	}
 	return nil
 }

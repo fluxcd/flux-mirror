@@ -1067,13 +1067,82 @@ func TestValidate_Table(t *testing.T) {
 				}}},
 		},
 		{
-			name: "auth cloud provider requires credential provider",
+			name: "auth cloud provider with value credential is valid",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{
-					Host: "h.example", Provider: RegistryProviderGAR,
+					Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: RegistryProviderECR,
+					ECR:        &ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
 					Credential: &RegistryCredential{Type: CredentialTypeJWT, Value: "TOKEN"},
 				}}},
-			errMsg: `credential.provider is required with cloud provider "gar"`,
+		},
+		{
+			name: "auth cloud provider with fromPath credential is valid",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: RegistryProviderECR,
+					ECR:        &ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, FromPath: "/var/run/token"},
+				}}},
+		},
+		{
+			name: "auth cloud provider with jwk credential is valid",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: RegistryProviderECR,
+					ECR: &ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, JWKPath: "/path/jwk.json",
+						Issuer: "https://issuer.example.com", Subject: "subject"},
+				}}},
+		},
+		{
+			name: "auth cloud provider rejects unsupported credential provider",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "us-docker.pkg.dev", Provider: RegistryProviderGAR,
+					GAR:        &GARConfig{WorkloadIdentityProvider: "projects/1/locations/global/workloadIdentityPools/p/providers/x"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderGCP},
+				}}},
+			errMsg: `credential: provider "gcp" cannot be exchanged with a cloud provider`,
+		},
+		{
+			name: "auth cloud provider rejects azure credential provider",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "us-docker.pkg.dev", Provider: RegistryProviderGAR,
+					GAR:        &GARConfig{WorkloadIdentityProvider: "projects/1/locations/global/workloadIdentityPools/p/providers/x"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderAzure},
+				}}},
+			errMsg: `credential: provider "azure" cannot be exchanged with a cloud provider`,
+		},
+		{
+			name: "auth cloud provider rejects aws credential provider",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "us-docker.pkg.dev", Provider: RegistryProviderGAR,
+					GAR:        &GARConfig{WorkloadIdentityProvider: "projects/1/locations/global/workloadIdentityPools/p/providers/x"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Provider: JWTProviderAWS},
+				}}},
+			errMsg: `credential: provider "aws" cannot be exchanged with a cloud provider`,
+		},
+		{
+			name: "auth cloud provider rejects username",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: RegistryProviderECR,
+					ECR:        &ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Value: "TOKEN", Username: "robot"},
+				}}},
+			errMsg: "credential: username cannot be set with a cloud provider",
+		},
+		{
+			name: "auth cloud provider rejects envelope",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "123.dkr.ecr.us-east-1.amazonaws.com", Provider: RegistryProviderECR,
+					ECR:        &ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Value: "TOKEN", Envelope: "token-{{ .Token }}"},
+				}}},
+			errMsg: "credential: envelope cannot be set with a cloud provider",
 		},
 		{
 			name: "auth username with credential is valid",

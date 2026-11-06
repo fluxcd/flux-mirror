@@ -87,10 +87,12 @@ registry's native username/password from the ambient cloud identity, and `secret
 writes it as a `dockerconfigjson` Secret usable as an `imagePullSecret`.
 
 When running in GitHub or Forgejo Actions, the host can instead set
-`credential.provider` to `github` or `forgejo`; `flux-mirror` exchanges the
-Actions OIDC token with the cloud provider, so the pod does not need ambient
-cloud credentials. Add the required `ecr.roleARN`,
-`acr.tenantID`/`acr.clientID`, or `gar.workloadIdentityProvider` block.
+`credential.provider` to `github`, `forgejo`, or `spiffe`; `flux-mirror`
+exchanges that JWT with the cloud provider, so the pod does not need ambient
+cloud credentials. A `value`, `fromPath` token, or `jwkPath`/`jwkValue` JWK is
+also accepted. Add the required `ecr.roleARN`, `acr.tenantID`/`acr.clientID`, or
+`gar.workloadIdentityProvider` block. `provider: gcp`, `azure`, `aws`,
+`credential.username`, and `credential.envelope` are rejected on a cloud host.
 
 The ServiceAccount carries each provider's workload-identity annotations:
 
@@ -277,7 +279,7 @@ spec:
 ### Rotate credentials using a SPIFFE JWT-SVID
 
 When the registry accepts SPIFFE JWT-SVIDs, use the
-[`spiffe` credential provider](config.md#token-providers): it fetches
+[`spiffe` credential provider](config.md#credential-providers): it fetches
 a JWT-SVID for the audiences (defaulting to the registry host) from the SPIFFE
 Workload API. Setting `credential.username` writes the JWT-SVID as the password
 of a username/password pair, so the resulting Secret works as a pod

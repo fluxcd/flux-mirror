@@ -303,7 +303,12 @@ exclusive with `tls`, because a cloud registry is managed and its transport is
 not customized; the default `generic` provider is an ordinary registry and
 composes with both. A cloud `provider` may also carry a `credential`: its
 identity is then exchanged for the cloud provider's registry credentials
-instead of using the ambient cloud identity. [`.maxChunkSize`](#blob-upload-chunking) tunes
+instead of using the ambient cloud identity. On a cloud `provider` host the
+credential must use `value`, `fromPath`, `jwkPath`, `jwkValue`, or
+`provider: github|forgejo|spiffe`; `username`, `envelope`, and
+`provider: gcp|azure|aws` are rejected — see
+[Cloud registry providers](#cloud-registry-providers).
+[`.maxChunkSize`](#blob-upload-chunking) tunes
 blob uploads independently of auth. At least one of `credential`, a cloud
 `provider`, `tls`, or `maxChunkSize` must be set.
 
@@ -362,17 +367,28 @@ Exactly one **token source** subfield selects how the credential is obtained:
 - `.provider`, mints a fresh, per-request credential for the audiences using a
   cloud, CI, or SPIFFE identity, then caches and refreshes it on demand. One of
   `github`, `forgejo`, `gcp`, `azure`, `aws`, or `spiffe` — see
-  [Token providers](#token-providers) for what each obtains and what the registry
+  [Credential providers](#credential-providers) for what each obtains and what the registry
   must accept.
 - `.value`, sends the JSON Web Token configured inline as-is (e.g. a GitLab CI/CD `id_token`). Use `${VAR}` to substitute it from the environment while loading the config.
 - `.fromPath`, sends the token read from the file at the path, with surrounding
-  whitespace trimmed. The file is re-read on every request, so the token can be
-  rotated without restarting (useful for a projected ServiceAccount token).
-- `.jwkPath`, signs a fresh JWT per request with the private JSON Web Key in the
-  file at the path. The key may be a bare JWK or a single-key JWK set
-  (`{"keys":[...]}`), and its `kid` is carried in the JWT header. Generate a key
-  pair with [`flux mirror keygen`](keygen.md).
-- `.jwkValue`, signs a fresh JWT per request with the private JSON Web Key configured inline. Use `${VAR}` to substitute it from the environment while loading the config.
+  whitespace trimmed. On a `generic` host the file is re-read on every request,
+  so the token can be rotated without restarting (useful for a projected
+  ServiceAccount token); on a cloud `provider` host it is cached until near
+  expiration.
+- `.jwkPath`, signs a JWT with the private JSON Web Key in the file at the path.
+  On a `generic` host a fresh JWT is signed per request; on a cloud `provider`
+  host it is cached until near expiration. The key may be a bare JWK or a
+  single-key JWK set (`{"keys":[...]}`), and its `kid` is carried in the JWT
+  header. Generate a key pair with [`flux mirror keygen`](keygen.md).
+- `.jwkValue`, signs a JWT with the private JSON Web Key configured inline, with
+  the same per-request versus cached behavior as `.jwkPath`. Use `${VAR}` to
+  substitute it from the environment while loading the config.
+
+> **Cloud provider hosts:** `value`, `fromPath`, `jwkPath`, `jwkValue`, and
+> `provider: github|forgejo|spiffe` are exchanged for the cloud registry
+> credentials. `provider: gcp|azure|aws`, `username`, and `envelope` are rejected
+> during config validation — see
+> [Cloud registry providers](#cloud-registry-providers).
 
 The signed and minted sources take additional claim subfields:
 
@@ -383,9 +399,10 @@ The signed and minted sources take additional claim subfields:
   credential to a specific registry, so it must match what the registry (or the
   cloud identity provider) expects. On a cloud `provider` host, an unset
   `.audiences` uses the cloud provider's own default (`sts.amazonaws.com` for
-  ECR, `api://AzureADTokenExchange` for ACR) instead of the host. Every source
-  accepts multiple values except the `gcp` and `azure` providers, which mint a
-  token with a single `aud` and therefore reject a list longer than one.
+  ECR, `api://AzureADTokenExchange` for ACR, and the workload identity provider's
+  default audience for GAR) instead of the host. Every source accepts multiple
+  values except the `gcp` and `azure` providers, which mint a token with a single
+  `aud` and therefore reject a list longer than one.
 - `.expiration`, the signed JWT lifetime, as a
   [duration](https://pkg.go.dev/time#ParseDuration). Allowed only with `.jwkPath`
   or `.jwkValue` — the sources whose lifetime `flux mirror` controls — and defaults
@@ -403,16 +420,21 @@ Two subfields apply to every token source:
   `token-` prefix. The envelope applies to both
   [transport styles](#bearer-token-vs-usernamepassword): it transforms the bearer
   token, or the password when `.credential.username` is set. An unset envelope
-  sends the credential unchanged.
+  sends the credential unchanged. It is only valid on a `generic` (or unset)
+  `hosts[].provider`; it is rejected with a cloud `provider`.
 - `.username`, controls how the resolved credential is transported, and therefore
   what the registry must accept — see
-  [Bearer token vs. username/password](#bearer-token-vs-usernamepassword).
+  [Bearer token vs. username/password](#bearer-token-vs-usernamepassword). It is
+  only valid on a `generic` (or unset) `hosts[].provider`; it is rejected with a
+  cloud `provider`.
 
-##### Token providers
+##### Credential providers
 
 When `.credential.provider` is set, the credential is obtained from the
 provider's ambient identity for the audiences (defaulting to the host). This is
-what the registry on the other side has to accept:
+what the registry on the other side has to accept. On a cloud `provider` host,
+only `github`, `forgejo`, and `spiffe` can be exchanged; `gcp`, `azure`, and
+`aws` are rejected during config validation.
 
 - `github` and `forgejo` request an OIDC ID token from the CI Actions OIDC
   endpoint (`ACTIONS_ID_TOKEN_REQUEST_URL` / `ACTIONS_ID_TOKEN_REQUEST_TOKEN`).
@@ -501,8 +523,39 @@ cloud registry provider's workload identity — the same mechanism the
 `flux push artifact` family uses — and obtain the registry's native credentials
 directly. A cloud provider is mutually exclusive with `tls`; it composes with a
 `credential`, whose identity is exchanged for the cloud provider's registry
-credentials instead of using the ambient cloud identity. The supported values
-are:
+credentials instead of using the ambient cloud identity.
+
+##### Credential combinations
+
+A cloud `provider` accepts only an OIDC/JWT credential source, because the
+credential is exchanged with the cloud provider. The allowed combinations are:
+
+| `hosts[].credential` | With `hosts[].provider: ecr`, `acr`, or `gar` |
+| --- | --- |
+| unset | Allowed. Uses the ambient cloud identity. |
+| `provider: github` or `forgejo` | Allowed. Exchanged via the CI Actions OIDC token. |
+| `provider: spiffe` | Allowed. Exchanged as a JWT-SVID. |
+| `value` | Allowed. Exchanged as an OIDC token. |
+| `fromPath` | Allowed. Exchanged as an OIDC token. |
+| `jwkPath` or `jwkValue` | Allowed with the required `issuer` and `subject`; optional `audiences` and `expiration`. The signed JWT is exchanged as an OIDC token. |
+| `provider: gcp`, `azure`, or `aws` | Rejected. |
+| `username` | Rejected; the cloud provider determines the registry username. |
+| `envelope` | Rejected; the exchange requires the raw JWT. |
+| any other combination | Rejected during config validation. |
+
+`credential.type`, when set, must still be `jwt`. Tokens from `value`,
+`fromPath`, `jwkPath`, and `jwkValue` must be JWTs with an `exp` claim. When
+`audiences` is unset, the credential is minted for the cloud provider's
+federation audience instead of the host: `sts.amazonaws.com` for ECR,
+`api://AzureADTokenExchange` for ACR, and the workload identity provider's
+default audience for GAR.
+
+`flux-mirror` caches the resolved token for a cloud host and refreshes it when
+it approaches expiration (80% of its lifetime, capped by
+`--token-cache-max-duration`), so a `fromPath` file or JWK is not re-read or
+re-signed on every request. Set `--token-cache-max-size 0` to disable the cache.
+
+The supported `hosts[].provider` values are:
 
 - `generic` (default), an ordinary registry whose authentication is configured
   through `credential` and/or `tls`. It is the implicit value when `provider` is

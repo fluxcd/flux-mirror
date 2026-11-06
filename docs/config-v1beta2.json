@@ -176,7 +176,7 @@
       "description": "Hosts configures per-host authentication for OCI registry requests, both\nsource pulls and destination pushes.",
       "items": {
         "additionalProperties": false,
-        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential. A cloud Provider accepts\na Credential, in which case the credential identity is exchanged for the cloud\nprovider's access credential instead of using the ambient cloud identity. TLS\nconfigures the transport-layer TLS/mTLS settings: it composes with Credential\nand with the default (generic) Provider, but is mutually exclusive with a cloud\nProvider — a cloud registry provider is a managed registry whose transport\nflux-mirror does not customize. At least one of Credential, a cloud Provider,\nTLS, or MaxChunkSize must be set.",
+        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential. A cloud Provider (ecr,\nacr, or gar) accepts a Credential whose identity is exchanged for the cloud\nprovider's access credential instead of using the ambient cloud identity. On a\ncloud provider host the credential source may be Provider (github, forgejo, or\nspiffe only), Value, FromPath, JWKPath, or JWKValue; Username and Envelope are\nrejected, as are the gcp, azure, and aws credential providers. TLS configures\nthe transport-layer TLS/mTLS settings: it composes with Credential and with the\ndefault (generic) Provider, but is mutually exclusive with a cloud Provider — a\ncloud registry provider is a managed registry whose transport flux-mirror does\nnot customize. At least one of Credential, a cloud Provider, TLS, or\nMaxChunkSize must be set.",
         "properties": {
           "acr": {
             "additionalProperties": false,
@@ -199,17 +199,17 @@
           },
           "credential": {
             "additionalProperties": false,
-            "description": "Credential configures the HTTP-layer registry credential for the host.",
+            "description": "Credential configures the HTTP-layer registry credential for the host. A\ncloud Provider host accepts Value, FromPath, JWKPath, JWKValue, or a\ngithub, forgejo, or spiffe Provider; see RegistryCredential.",
             "properties": {
               "audiences": {
-                "description": "Audiences is the audience claim. Defaults to Host.",
+                "description": "Audiences is the audience claim. Defaults to Host, or to the cloud\nprovider's federation audience on a cloud Provider host.",
                 "items": {
                   "type": "string"
                 },
                 "type": "array"
               },
               "envelope": {
-                "description": "Envelope transforms the resolved credential before it is sent to the\nregistry. It is a Go template whose data is a single Token field holding\nthe credential, with two functions available: base64 (standard base64)\nand hex (lowercase hexadecimal). For example, \"token-{{ hex .Token }}\"\nsends the hex-encoded credential with a token- prefix. An unset envelope\nsends the credential unchanged.",
+                "description": "Envelope transforms the resolved credential before it is sent to the\nregistry. It is a Go template whose data is a single Token field holding\nthe credential, with two functions available: base64 (standard base64)\nand hex (lowercase hexadecimal). For example, \"token-{{ hex .Token }}\"\nsends the hex-encoded credential with a token- prefix. An unset envelope\nsends the credential unchanged. It is only valid on a generic Provider\nhost.",
                 "type": "string"
               },
               "expiration": {
@@ -233,7 +233,7 @@
                 "type": "string"
               },
               "provider": {
-                "description": "Provider mints a per-request credential for the audiences, one of\nJWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,\nJWTProviderAWS, or JWTProviderSPIFFE. On a cloud provider host (ecr, acr,\ngar), the credential identity is exchanged with the cloud provider.",
+                "description": "Provider mints a per-request credential for the audiences, one of\nJWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,\nJWTProviderAWS, or JWTProviderSPIFFE. On a cloud provider host (ecr, acr,\ngar) the credential identity is exchanged with the cloud provider, so only\nJWTProviderGitHub, JWTProviderForgejo, and JWTProviderSPIFFE are accepted\nthere.",
                 "enum": [
                   "github",
                   "forgejo",
@@ -256,7 +256,7 @@
                 "type": "string"
               },
               "username": {
-                "description": "Username presents the credential as the password of a username/password\npair. When unset, the credential is used as a bearer token.",
+                "description": "Username presents the credential as the password of a username/password\npair. When unset, the credential is used as a bearer token. It is only\nvalid on a generic Provider host.",
                 "type": "string"
               },
               "value": {
@@ -321,7 +321,7 @@
             "type": "integer"
           },
           "provider": {
-            "description": "Provider selects a cloud registry provider's workload-identity credentials\nfor the host: RegistryProviderECR, RegistryProviderACR, or\nRegistryProviderGAR. Omitted (or RegistryProviderGeneric) means an ordinary\nregistry, for which flux-mirror configures the credential and/or TLS\ndirectly. A cloud provider is mutually exclusive with TLS, but accepts a\nCredential to source the identity exchanged with the cloud provider.",
+            "description": "Provider selects a cloud registry provider's workload-identity credentials\nfor the host: RegistryProviderECR, RegistryProviderACR, or\nRegistryProviderGAR. Omitted (or RegistryProviderGeneric) means an ordinary\nregistry, for which flux-mirror configures the credential and/or TLS\ndirectly. A cloud provider is mutually exclusive with TLS, but accepts a\nCredential to source the identity exchanged with the cloud provider. That\ncredential must come from Value, FromPath, JWKPath, JWKValue, or a github,\nforgejo, or spiffe Provider; see RegistryCredential.",
             "enum": [
               "generic",
               "ecr",

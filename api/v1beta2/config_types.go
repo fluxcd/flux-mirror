@@ -125,14 +125,17 @@ type Config struct {
 }
 
 // RegistryHost binds an authentication method to a registry host. Credential and
-// Provider configure the HTTP-layer registry credential. A cloud Provider accepts
-// a Credential, in which case the credential identity is exchanged for the cloud
-// provider's access credential instead of using the ambient cloud identity. TLS
-// configures the transport-layer TLS/mTLS settings: it composes with Credential
-// and with the default (generic) Provider, but is mutually exclusive with a cloud
-// Provider — a cloud registry provider is a managed registry whose transport
-// flux-mirror does not customize. At least one of Credential, a cloud Provider,
-// TLS, or MaxChunkSize must be set.
+// Provider configure the HTTP-layer registry credential. A cloud Provider (ecr,
+// acr, or gar) accepts a Credential whose identity is exchanged for the cloud
+// provider's access credential instead of using the ambient cloud identity. On a
+// cloud provider host the credential source may be Provider (github, forgejo, or
+// spiffe only), Value, FromPath, JWKPath, or JWKValue; Username and Envelope are
+// rejected, as are the gcp, azure, and aws credential providers. TLS configures
+// the transport-layer TLS/mTLS settings: it composes with Credential and with the
+// default (generic) Provider, but is mutually exclusive with a cloud Provider — a
+// cloud registry provider is a managed registry whose transport flux-mirror does
+// not customize. At least one of Credential, a cloud Provider, TLS, or
+// MaxChunkSize must be set.
 type RegistryHost struct {
 	// Host is the registry host (and optional port) the auth applies to.
 	Host string `json:"host"`
@@ -144,7 +147,9 @@ type RegistryHost struct {
 	// +kubebuilder:validation:Enum=both;source;destination
 	Direction string `json:"direction,omitempty"`
 
-	// Credential configures the HTTP-layer registry credential for the host.
+	// Credential configures the HTTP-layer registry credential for the host. A
+	// cloud Provider host accepts Value, FromPath, JWKPath, JWKValue, or a
+	// github, forgejo, or spiffe Provider; see RegistryCredential.
 	// +optional
 	Credential *RegistryCredential `json:"credential,omitempty"`
 
@@ -153,7 +158,9 @@ type RegistryHost struct {
 	// RegistryProviderGAR. Omitted (or RegistryProviderGeneric) means an ordinary
 	// registry, for which flux-mirror configures the credential and/or TLS
 	// directly. A cloud provider is mutually exclusive with TLS, but accepts a
-	// Credential to source the identity exchanged with the cloud provider.
+	// Credential to source the identity exchanged with the cloud provider. That
+	// credential must come from Value, FromPath, JWKPath, JWKValue, or a github,
+	// forgejo, or spiffe Provider; see RegistryCredential.
 	// +optional
 	// +kubebuilder:validation:Enum=generic;ecr;acr;gar
 	Provider string `json:"provider,omitempty"`
@@ -234,8 +241,8 @@ func (h RegistryHost) EffectiveDirection() string {
 // IsCloudProvider reports whether the host selects a cloud registry provider
 // (RegistryProviderECR, RegistryProviderACR, or RegistryProviderGAR) rather than
 // the default (RegistryProviderGeneric) provider. A cloud provider authenticates
-// the host itself and is mutually exclusive with Credential and TLS. The value is
-// matched as written.
+// the host itself, accepts a JWT credential to exchange, and is mutually
+// exclusive with TLS. The value is matched as written.
 func (h RegistryHost) IsCloudProvider() bool {
 	switch h.Provider {
 	case RegistryProviderECR, RegistryProviderACR, RegistryProviderGAR:
@@ -271,11 +278,18 @@ func (h RegistryHost) IsCloudProvider() bool {
 // source's lifetime is fixed by an external issuer or is an opaque static token,
 // so Expiration is rejected for them.
 //
+// On a cloud provider host (ecr, acr, or gar) the credential must be an OIDC/JWT
+// source: Provider (github, forgejo, or spiffe only), Value, FromPath, JWKPath,
+// or JWKValue. Username and Envelope are rejected, because the cloud provider
+// determines the registry username and the raw JWT is required for the exchange.
+//
 // Username presents the credential as a username/password pair. When unset, the
-// credential is used as a bearer token.
+// credential is used as a bearer token. It is only valid on a generic provider
+// host.
 //
 // Envelope is an optional transform applied to the resolved credential on top of
-// whichever source is selected; see its field comment.
+// whichever source is selected; see its field comment. It is only valid on a
+// generic provider host.
 type RegistryCredential struct {
 	// Type is the kind of credential material (CredentialTypeJWT). Defaults to
 	// jwt; other types (such as x509) are reserved for a future release.
@@ -286,7 +300,9 @@ type RegistryCredential struct {
 	// Provider mints a per-request credential for the audiences, one of
 	// JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,
 	// JWTProviderAWS, or JWTProviderSPIFFE. On a cloud provider host (ecr, acr,
-	// gar), the credential identity is exchanged with the cloud provider.
+	// gar) the credential identity is exchanged with the cloud provider, so only
+	// JWTProviderGitHub, JWTProviderForgejo, and JWTProviderSPIFFE are accepted
+	// there.
 	// +optional
 	// +kubebuilder:validation:Enum=github;forgejo;gcp;azure;aws;spiffe
 	Provider string `json:"provider,omitempty"`
@@ -315,7 +331,8 @@ type RegistryCredential struct {
 	// +optional
 	Subject string `json:"subject,omitempty"`
 
-	// Audiences is the audience claim. Defaults to Host.
+	// Audiences is the audience claim. Defaults to Host, or to the cloud
+	// provider's federation audience on a cloud Provider host.
 	// +optional
 	Audiences []string `json:"audiences,omitempty"`
 
@@ -324,7 +341,8 @@ type RegistryCredential struct {
 	Expiration *metav1.Duration `json:"expiration,omitempty"`
 
 	// Username presents the credential as the password of a username/password
-	// pair. When unset, the credential is used as a bearer token.
+	// pair. When unset, the credential is used as a bearer token. It is only
+	// valid on a generic Provider host.
 	// +optional
 	Username string `json:"username,omitempty"`
 
@@ -333,7 +351,8 @@ type RegistryCredential struct {
 	// the credential, with two functions available: base64 (standard base64)
 	// and hex (lowercase hexadecimal). For example, "token-{{ hex .Token }}"
 	// sends the hex-encoded credential with a token- prefix. An unset envelope
-	// sends the credential unchanged.
+	// sends the credential unchanged. It is only valid on a generic Provider
+	// host.
 	// +optional
 	Envelope string `json:"envelope,omitempty"`
 }

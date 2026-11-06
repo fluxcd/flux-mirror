@@ -49,7 +49,9 @@ FLUX_MIRROR_CONFIG=./flux-mirror.yaml flux mirror sync
      token from a cloud/CI identity, a JWK signature, or an environment variable
      or file. With no `credential.username` it is sent as an HTTP Bearer
      credential; with `credential.username` it is the password in the standard
-     registry auth challenge.
+     registry auth challenge. On a cloud provider host the credential must come
+     from `provider: github|forgejo|spiffe`, `value`, `fromPath`, `jwkPath`, or
+     `jwkValue`; see [`Cloud registry providers`](config.md#cloud-registry-providers).
 2. Hosts not listed under `hosts` use the ambient Docker config and credential
    helpers (`~/.docker/config.json`, or `$DOCKER_CONFIG` when set).
 
@@ -560,7 +562,7 @@ spec:
 This `CronJob` pulls container images from a registry that authenticates the
 caller's AWS identity, and pushes them to a registry that requires SPIFFE
 X.509-SVID mTLS. The source host uses the
-[`aws` credential provider](config.md#token-providers), which signs an
+[`aws` credential provider](config.md#credential-providers), which signs an
 `sts:GetCallerIdentity` request the source registry replays to AWS STS, so the
 pod needs AWS credentials via IRSA. The destination host uses
 [`tls.spiffe`](config.md#transport-tls) and no HTTP credential — the registry

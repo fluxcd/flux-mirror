@@ -43,8 +43,14 @@ import (
 // the value directly. It assumes the config has passed validation (exactly one
 // source). The host's Envelope, if any, is applied to the resolved credential.
 func resolveCredential(ctx context.Context, h apiv1.RegistryHost) (string, error) {
+	return resolveCredentialWithAudiences(ctx, h, h.EffectiveAudiences())
+}
+
+// resolveCredentialWithAudiences is resolveCredential with explicit audiences,
+// used for cloud provider hosts where an unset audience defaults to the cloud
+// provider's audience rather than the registry host.
+func resolveCredentialWithAudiences(ctx context.Context, h apiv1.RegistryHost, audiences []string) (string, error) {
 	c := h.Credential
-	audiences := h.EffectiveAudiences()
 	var (
 		token string
 		err   error

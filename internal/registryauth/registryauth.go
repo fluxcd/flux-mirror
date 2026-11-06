@@ -5,11 +5,15 @@ package registryauth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"text/template"
 
+	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/go-containerregistry/pkg/authn"
 
 	cryptov1 "github.com/fluxcd/pkg/apis/crypto/v1"
@@ -96,7 +100,7 @@ func ResolveHostAuth(ctx context.Context, h apiv1.RegistryHost) (HostAuth, error
 		if err != nil {
 			return HostAuth{}, err
 		}
-		ac, err := a.Authorization()
+		ac, err := authorize(ctx, a)
 		if err != nil {
 			return HostAuth{}, fmt.Errorf("authorization for %q: %w", h.Host, err)
 		}
@@ -110,6 +114,15 @@ func ResolveHostAuth(ctx context.Context, h apiv1.RegistryHost) (HostAuth, error
 		return HostAuth{Username: h.Credential.Username, Password: cred}, nil
 	}
 	return HostAuth{RegistryToken: cred}, nil
+}
+
+// authorize calls the authenticator with ctx when it supports context, so
+// callers such as login and secret keep their timeout.
+func authorize(ctx context.Context, a authn.Authenticator) (*authn.AuthConfig, error) {
+	if ca, ok := a.(authn.ContextAuthenticator); ok {
+		return ca.AuthorizationContext(ctx)
+	}
+	return a.Authorization()
 }
 
 // pkgAuthProviderName maps a flux-mirror registry provider (ecr/acr/gar) to the
@@ -131,10 +144,15 @@ func pkgAuthProviderName(provider string) (string, error) {
 // the cloud provider's ambient workload identity, the same way the
 // `flux push artifact` family does. When the host sets a credential, the cloud
 // provider instead exchanges the credential identity for its access credential.
+// A credential from value, fromPath, jwkPath, or jwkValue is exchanged by a
+// dedicated authenticator, because pkg/auth cannot acquire it by itself.
 func providerAuthenticator(ctx context.Context, h apiv1.RegistryHost, tokenCache *cache.TokenCache) (authn.Authenticator, error) {
 	name, err := pkgAuthProviderName(h.Provider)
 	if err != nil {
 		return nil, err
+	}
+	if h.Credential != nil && h.Credential.Provider == "" {
+		return newInputJWTAuthenticator(h, name, tokenCache)
 	}
 	opts := providerOptions(h)
 	if name == azure.ProviderName {
@@ -156,6 +174,153 @@ func providerAuthenticator(ctx context.Context, h apiv1.RegistryHost, tokenCache
 	return a, nil
 }
 
+// inputJWTAuthenticator exchanges a caller-provided JWT for a cloud registry
+// access credential. The JWT is resolved lazily and cached, so a new token is
+// minted only when the cached one approaches expiration. This keeps the
+// access-credential cache key stable across requests: pkg/auth scopes that key
+// to a fingerprint of the exact JWT.
+type inputJWTAuthenticator struct {
+	provider   auth.ArtifactRegistryCredentialsProvider
+	host       string
+	opts       []auth.Option
+	tokenCache *cache.TokenCache
+	tokenKey   string
+	resolve    func(context.Context) (*auth.JWTCredential, error)
+}
+
+// Authorization implements authn.Authenticator.
+func (a *inputJWTAuthenticator) Authorization() (*authn.AuthConfig, error) {
+	return a.AuthorizationContext(context.Background())
+}
+
+// AuthorizationContext implements authn.ContextAuthenticator.
+func (a *inputJWTAuthenticator) AuthorizationContext(ctx context.Context) (*authn.AuthConfig, error) {
+	credential, err := a.credential(ctx)
+	if err != nil {
+		return nil, err
+	}
+	opts := append(append([]auth.Option{}, a.opts...), auth.WithJWTCredential(*credential))
+	creds, err := auth.GetArtifactRegistryCredentials(ctx, a.provider, a.host, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("get %s registry credentials for %q: %w", a.provider.GetName(), a.host, err)
+	}
+	return creds.Authorization()
+}
+
+// credential returns the cached JWT or mints a new one. The cache key is
+// derived from the host configuration, not the token, so a JWK-signed or
+// file-backed token is reused until it is close to expiration.
+func (a *inputJWTAuthenticator) credential(ctx context.Context) (*auth.JWTCredential, error) {
+	if a.tokenCache == nil {
+		return a.resolve(ctx)
+	}
+	token, _, err := a.tokenCache.GetOrSet(ctx, a.tokenKey, func(ctx context.Context) (cache.Token, error) {
+		return a.resolve(ctx)
+	})
+	if err != nil {
+		return nil, err
+	}
+	credential, ok := token.(*auth.JWTCredential)
+	if !ok {
+		return nil, fmt.Errorf("cached credential is %T, want *auth.JWTCredential", token)
+	}
+	return credential, nil
+}
+
+// newInputJWTAuthenticator builds the authenticator for a cloud provider host
+// whose credential is acquired locally from value, fromPath, jwkPath, or
+// jwkValue.
+func newInputJWTAuthenticator(h apiv1.RegistryHost, providerName string, tokenCache *cache.TokenCache) (authn.Authenticator, error) {
+	provider, err := utils.ProviderByName[auth.ArtifactRegistryCredentialsProvider](providerName)
+	if err != nil {
+		return nil, err
+	}
+	audiences, err := cloudAudiences(h)
+	if err != nil {
+		return nil, err
+	}
+	opts := providerOptions(h)
+	if providerName == azure.ProviderName {
+		opts = append(opts, auth.WithAllowShellOut())
+	}
+	opts = append(opts, auth.WithCredentialAudiences(audiences...))
+	if tokenCache != nil {
+		opts = append(opts, auth.WithCache(*tokenCache))
+	}
+	return &inputJWTAuthenticator{
+		provider:   provider,
+		host:       h.Host,
+		opts:       opts,
+		tokenCache: tokenCache,
+		tokenKey:   inputJWTTokenKey(h),
+		resolve: func(ctx context.Context) (*auth.JWTCredential, error) {
+			return resolveInputJWTCredential(ctx, h, audiences)
+		},
+	}, nil
+}
+
+// inputJWTTokenKey identifies a credential host's JWT source. It hashes the
+// host configuration so the key stays stable as tokens rotate and never embeds
+// credential material.
+func inputJWTTokenKey(h apiv1.RegistryHost) string {
+	b, err := json.Marshal(h)
+	if err != nil {
+		return "registryauth/jwt/" + h.Host
+	}
+	sum := sha256.Sum256(b)
+	return "registryauth/jwt/" + hex.EncodeToString(sum[:])
+}
+
+// cloudAudiences returns the audiences a credential for a cloud provider host
+// is minted for. Explicit audiences win; otherwise the provider's federation
+// audience is used, matching what pkg/auth applies when it acquires the
+// credential itself.
+func cloudAudiences(h apiv1.RegistryHost) ([]string, error) {
+	if h.Credential != nil && len(h.Credential.Audiences) > 0 {
+		audiences := make([]string, 0, len(h.Credential.Audiences))
+		for _, raw := range h.Credential.Audiences {
+			if aud := strings.TrimSpace(raw); aud != "" {
+				audiences = append(audiences, aud)
+			}
+		}
+		return audiences, nil
+	}
+	switch h.Provider {
+	case apiv1.RegistryProviderECR:
+		return []string{cryptov1.DefaultAudienceAWS}, nil
+	case apiv1.RegistryProviderACR:
+		return []string{cryptov1.DefaultAudienceAzure}, nil
+	case apiv1.RegistryProviderGAR:
+		if h.GAR != nil && strings.TrimSpace(h.GAR.WorkloadIdentityProvider) != "" {
+			return []string{cryptov1.GetDefaultAudienceGCP(strings.TrimSpace(h.GAR.WorkloadIdentityProvider))}, nil
+		}
+		return nil, fmt.Errorf("gar.workloadIdentityProvider is required to derive the credential audience")
+	default:
+		return nil, fmt.Errorf("unknown registry provider %q", h.Provider)
+	}
+}
+
+// resolveInputJWTCredential resolves a locally acquired credential and extracts
+// its expiration, which the token cache uses to decide when to re-mint.
+func resolveInputJWTCredential(ctx context.Context, h apiv1.RegistryHost, audiences []string) (*auth.JWTCredential, error) {
+	token, err := resolveCredentialWithAudiences(ctx, h, audiences)
+	if err != nil {
+		return nil, err
+	}
+	claims := gojwt.MapClaims{}
+	if _, _, err := gojwt.NewParser().ParseUnverified(token, claims); err != nil {
+		return nil, fmt.Errorf("parse credential as JWT: %w", err)
+	}
+	expiration, err := claims.GetExpirationTime()
+	if err != nil {
+		return nil, fmt.Errorf("credential expiration: %w", err)
+	}
+	if expiration == nil {
+		return nil, fmt.Errorf("credential has no expiration")
+	}
+	return &auth.JWTCredential{Token: token, ExpiresAt: expiration.Time}, nil
+}
+
 // providerIdentity is the workload identity passed to the auth package when
 // exchanging a credential for cloud registry access. It names the AWS role
 // session and the generic provider identity.
@@ -174,10 +339,12 @@ func cloudCredentialProvider(provider string) string {
 }
 
 // providerOptions maps a cloud provider host to auth options. Provider-specific
-// settings come from the matching ecr/acr/gar block. A credential selects the
-// ID token source used for the exchange; explicitly configured audiences are
-// forwarded, otherwise the cloud provider applies its own default audience,
-// which is what AWS and Azure expect for federation.
+// settings come from the matching ecr/acr/gar block. A credential-provider
+// source selects the ID token source used for the exchange; explicitly
+// configured audiences are forwarded, otherwise the cloud provider applies its
+// own default audience, which is what AWS and Azure expect for federation. A
+// locally acquired credential has its audiences and token attached by
+// newInputJWTAuthenticator instead.
 func providerOptions(h apiv1.RegistryHost) []auth.Option {
 	var opts []auth.Option
 	switch h.Provider {
@@ -205,9 +372,13 @@ func providerOptions(h apiv1.RegistryHost) []auth.Option {
 	if h.Credential == nil {
 		return opts
 	}
-	opts = append(opts,
-		auth.WithCredentialProvider(cloudCredentialProvider(h.Credential.Provider)),
-		auth.WithIdentity(providerIdentity))
+	opts = append(opts, auth.WithIdentity(providerIdentity))
+	if h.Credential.Provider == "" {
+		// A locally acquired credential is resolved and attached by
+		// inputJWTAuthenticator.
+		return opts
+	}
+	opts = append(opts, auth.WithCredentialProvider(cloudCredentialProvider(h.Credential.Provider)))
 	audiences := make([]string, 0, len(h.Credential.Audiences))
 	for _, raw := range h.Credential.Audiences {
 		if aud := strings.TrimSpace(raw); aud != "" {
