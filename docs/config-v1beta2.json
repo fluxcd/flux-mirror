@@ -69,6 +69,14 @@
                   "numerical"
                 ],
                 "type": "string"
+              },
+              "tags": {
+                "description": "Tags lists the exact tags to mirror, skipping the tag listing and the\npipeline. Mutually exclusive with the other selector fields.",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
               }
             },
             "type": "object"

@@ -523,7 +523,7 @@ type OIDCIdentity struct {
 }
 
 // Selector is the four-step tag selection pipeline:
-// regex → semver → sort → top-N.
+// regex → semver → sort → top-N, or an explicit list of tags.
 type Selector struct {
 	// Regex applies a Go regexp prefilter to tags.
 	// +optional
@@ -542,6 +542,12 @@ type Selector struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	Limit *int `json:"limit,omitempty"`
+
+	// Tags lists the exact tags to mirror, skipping the tag listing and the
+	// pipeline. Mutually exclusive with the other selector fields.
+	// +optional
+	// +kubebuilder:validation:MinItems=1
+	Tags []string `json:"tags,omitempty"`
 }
 
 // EffectiveSortBy returns the sort strategy with the documented default applied.
