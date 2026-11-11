@@ -49,6 +49,10 @@ artifacts:
         extract: '$ts'
       sortBy: numerical
       limit: 5
+  - source: ghcr.io/example/pinned
+    destination: ghcr.io/example/mirror/pinned
+    selector:
+      tags: ["9.5.6", "latest"]
 `
 	cfg, _, err := Decode(strings.NewReader(src))
 	g.Expect(err).ToNot(HaveOccurred())
@@ -58,7 +62,7 @@ artifacts:
 	g.Expect(cfg.Charts[0].Name).To(Equal("dex"))
 	g.Expect(cfg.Charts[0].EffectiveLimit()).To(Equal(5))
 
-	g.Expect(cfg.Artifacts).To(HaveLen(2))
+	g.Expect(cfg.Artifacts).To(HaveLen(3))
 	g.Expect(cfg.Artifacts[0].IncludeReferrers).To(BeTrue())
 	g.Expect(cfg.Artifacts[0].IgnoreDriftForExitCode).To(BeTrue())
 	g.Expect(cfg.Artifacts[1].IgnoreDriftForExitCode).To(BeFalse())
@@ -73,6 +77,7 @@ artifacts:
 	g.Expect(cfg.Artifacts[0].Selector.EffectiveSortBy()).To(Equal(SortBySemver))
 	g.Expect(cfg.Artifacts[1].Selector.Regex.Extract).To(Equal("$ts"))
 	g.Expect(cfg.Artifacts[1].Selector.EffectiveSortBy()).To(Equal(SortByNumerical))
+	g.Expect(cfg.Artifacts[2].Selector.Tags).To(Equal([]string{"9.5.6", "latest"}))
 }
 
 func TestDecode_EnvSubstitution(t *testing.T) {
@@ -552,6 +557,16 @@ func TestValidate_Table(t *testing.T) {
 			},
 		},
 		{
+			name: "valid artifacts with explicit tags",
+			cfg: Config{
+				TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind},
+				Artifacts: []ArtifactEntry{{
+					Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+					Selector: Selector{Tags: []string{"9.5.6", "latest"}},
+				}},
+			},
+		},
+		{
 			name: "valid charts only with unlimited",
 			cfg: Config{
 				TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind},
@@ -667,6 +682,62 @@ func TestValidate_Table(t *testing.T) {
 				Selector: Selector{Limit: &negOne},
 			}}},
 			errMsg: "limit must be >= 0",
+		},
+		{
+			name: "selector tags with regex",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Selector: Selector{Tags: []string{"1.0.0"}, Regex: &RegexFilter{Pattern: "^1"}},
+			}}},
+			errMsg: "mutually exclusive",
+		},
+		{
+			name: "selector tags with semver",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Selector: Selector{Tags: []string{"1.0.0"}, Semver: ">=1.0.0"},
+			}}},
+			errMsg: "mutually exclusive",
+		},
+		{
+			name: "selector tags with sortBy",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Selector: Selector{Tags: []string{"1.0.0"}, SortBy: SortBySemver},
+			}}},
+			errMsg: "mutually exclusive",
+		},
+		{
+			name: "selector tags with limit",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Selector: Selector{Tags: []string{"1.0.0"}, Limit: new(1)},
+			}}},
+			errMsg: "mutually exclusive",
+		},
+		{
+			name: "selector empty tags",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Selector: Selector{Tags: []string{}},
+			}}},
+			errMsg: "at least one tag",
+		},
+		{
+			name: "selector invalid tag",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Selector: Selector{Tags: []string{"1.0.0", ".bad"}},
+			}}},
+			errMsg: `tags[1] ".bad" is not a valid tag`,
+		},
+		{
+			name: "selector duplicate tag",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: []ArtifactEntry{{
+				Source: "ghcr.io/a/b", Destination: "ghcr.io/c/d",
+				Selector: Selector{Tags: []string{"1.0.0", "1.0.0"}},
+			}}},
+			errMsg: "duplicate",
 		},
 		{
 			name: "verify unknown provider",

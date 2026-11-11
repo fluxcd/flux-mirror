@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +81,16 @@ func tagsWithStatus(e apiv1.EntryResult, st apiv1.Status) []apiv1.TagResult {
 		}
 	}
 	return out
+}
+
+// noListTransport fails any tag list request.
+type noListTransport struct{}
+
+func (noListTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(req.URL.Path, "/tags/list") {
+		return nil, fmt.Errorf("unexpected tag list request: %s", req.URL)
+	}
+	return http.DefaultTransport.RoundTrip(req)
 }
 
 func TestMirror_CopiesSelectedTags(t *testing.T) {
@@ -545,4 +557,55 @@ func TestMirror_DryRun(t *testing.T) {
 
 	_, err = c.ListTags(context.Background(), dst)
 	g.Expect(err).To(HaveOccurred()) // 404 — repo was never created
+}
+
+func TestMirror_CopiesExplicitTagsWithoutListing(t *testing.T) {
+	g := NewWithT(t)
+	src := repo("tags-src")
+	dst := repo("tags-dst")
+
+	testregistry.PushImage(t, src+":1.0.0")
+	testregistry.PushImage(t, src+":1.1.0")
+	testregistry.PushImage(t, src+":1.2.0")
+
+	c := oci.NewClient(oci.Insecure(), oci.WithSourceTransport(noListTransport{}))
+	entry := apiv1.ArtifactEntry{
+		Source:      src,
+		Destination: dst,
+		Selector:    apiv1.Selector{Tags: []string{"1.1.0", "1.0.0"}},
+	}
+	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
+		New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(res.HasFailures()).To(BeFalse())
+	g.Expect(tagsWithStatus(res.Entries[0], apiv1.StatusCopied)).To(HaveLen(2))
+
+	tags, err := oci.NewClient(oci.Insecure()).ListTags(context.Background(), dst)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(tags).To(ConsistOf("1.0.0", "1.1.0"))
+}
+
+func TestMirror_ExplicitTagMissingFromSource(t *testing.T) {
+	g := NewWithT(t)
+	src := repo("tags-missing-src")
+	dst := repo("tags-missing-dst")
+
+	testregistry.PushImage(t, src+":1.0.0")
+
+	c := oci.NewClient(oci.Insecure())
+	entry := apiv1.ArtifactEntry{
+		Source:      src,
+		Destination: dst,
+		Selector:    apiv1.Selector{Tags: []string{"1.0.0", "9.9.9"}},
+	}
+	res, err := newRunner().Run(context.Background(), []sync.EntryMirror{
+		New(c, entry, Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}),
+	})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(res.HasFailures()).To(BeTrue())
+	g.Expect(tagsWithStatus(res.Entries[0], apiv1.StatusCopied)).To(HaveLen(1))
+	failed := tagsWithStatus(res.Entries[0], apiv1.StatusFailed)
+	g.Expect(failed).To(HaveLen(1))
+	g.Expect(failed[0].Tag).To(Equal("9.9.9"))
 }

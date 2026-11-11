@@ -160,6 +160,8 @@ first and keeping the top N. The field offers the following subfields:
 - `.sortBy`, the sort strategy. The default is `semver`.
 - `.limit`, how many tags to mirror, taken from the top of the sorted result. It
   defaults to `1`; `0` disables the cap and mirrors every matching tag.
+- `.tags`, an optional list of exact tags to mirror. It replaces the pipeline
+  and cannot be combined with `.regex`, `.semver`, `.sortBy` or `.limit`.
 
 The supported sort strategies are:
 
@@ -183,6 +185,17 @@ selector:
   sortBy: numerical
   limit: 5
 ```
+
+To mirror a fixed set of tags, list them in `.tags` instead:
+
+```yaml
+selector:
+  tags: ["9.5.6", "9.5.5"]
+```
+
+With `.tags`, the source repository's tags are not listed, so planning cost
+does not grow with the size of the repository. A listed tag that does not exist
+at the source fails that tag's job.
 
 #### Referrers
 

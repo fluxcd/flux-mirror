@@ -25,6 +25,10 @@ import (
 	"github.com/fluxcd/flux-mirror/internal/envelope"
 )
 
+// tagPattern is the OCI distribution spec grammar for a tag, defined at
+// https://github.com/opencontainers/distribution-spec/blob/v1.1.1/spec.md?plain=1#L164-L166
+var tagPattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$`)
+
 // DeprecatedV1Beta1APIVersion is the deprecated v1beta1 apiVersion. A config
 // that declares it still loads, but is converted to v1beta2 and a migration
 // warning is printed.
@@ -581,6 +585,9 @@ func validateVerification(v apiv1.ArtifactVerification) error {
 }
 
 func validateSelector(s apiv1.Selector) error {
+	if s.Tags != nil {
+		return validateSelectorTags(s)
+	}
 	if s.Regex != nil {
 		if strings.TrimSpace(s.Regex.Pattern) == "" {
 			return fmt.Errorf("regex.pattern is required when regex is set")
@@ -601,6 +608,28 @@ func validateSelector(s apiv1.Selector) error {
 	}
 	if s.Limit != nil && *s.Limit < 0 {
 		return fmt.Errorf("limit must be >= 0 (0 = unlimited)")
+	}
+	return nil
+}
+
+// validateSelectorTags checks an explicit tag list: it must stand alone, be
+// non-empty, and hold unique, well-formed tags.
+func validateSelectorTags(s apiv1.Selector) error {
+	if s.Regex != nil || s.Semver != "" || s.SortBy != "" || s.Limit != nil {
+		return fmt.Errorf("tags is mutually exclusive with regex, semver, sortBy and limit")
+	}
+	if len(s.Tags) == 0 {
+		return fmt.Errorf("tags must contain at least one tag")
+	}
+	seen := make(map[string]struct{}, len(s.Tags))
+	for i, tag := range s.Tags {
+		if !tagPattern.MatchString(tag) {
+			return fmt.Errorf("tags[%d] %q is not a valid tag", i, tag)
+		}
+		if _, dup := seen[tag]; dup {
+			return fmt.Errorf("tags[%d] %q is a duplicate", i, tag)
+		}
+		seen[tag] = struct{}{}
 	}
 	return nil
 }

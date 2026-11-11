@@ -97,14 +97,9 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 	start := time.Now()
 
 	m.opts.Logger.Info("planning tags", "source", m.entry.Source, "destination", m.entry.Destination)
-	tags, err := m.client.ListTags(ctx, m.entry.Source)
+	sel, err := m.selectTags(ctx)
 	if err != nil {
 		return plan, err
-	}
-
-	sel, err := selector.Select(tags, m.entry.Selector, selector.Options{Verbose: m.opts.Verbose})
-	if err != nil {
-		return plan, fmt.Errorf("select tags: %w", err)
 	}
 	for _, ex := range sel.Excluded {
 		m.opts.Logger.Debug("tag excluded by selector",
@@ -262,6 +257,23 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 		})
 	}
 	return plan, nil
+}
+
+// selectTags returns the tags to mirror. Explicit selector tags are used
+// as given, without listing the source repository.
+func (m *mirror) selectTags(ctx context.Context) (selector.Result, error) {
+	if len(m.entry.Selector.Tags) > 0 {
+		return selector.Result{Tags: m.entry.Selector.Tags}, nil
+	}
+	tags, err := m.client.ListTags(ctx, m.entry.Source)
+	if err != nil {
+		return selector.Result{}, err
+	}
+	sel, err := selector.Select(tags, m.entry.Selector, selector.Options{Verbose: m.opts.Verbose})
+	if err != nil {
+		return selector.Result{}, fmt.Errorf("select tags: %w", err)
+	}
+	return sel, nil
 }
 
 // runTag executes one tag's mirror flow. Idempotent — safe to retry under
