@@ -26,7 +26,7 @@ import (
 )
 
 // tagPattern is the OCI distribution spec grammar for a tag, defined at
-// https://github.com/opencontainers/distribution-spec/blob/v1.1.1/spec.md#L166
+// https://github.com/opencontainers/distribution-spec/blob/v1.1.1/spec.md?plain=1#L164-L166
 var tagPattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$`)
 
 // DeprecatedV1Beta1APIVersion is the deprecated v1beta1 apiVersion. A config
