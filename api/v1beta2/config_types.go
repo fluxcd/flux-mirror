@@ -77,6 +77,10 @@ const (
 	// host (hosts[].provider). It maps to GCP and is mutually exclusive with the
 	// per-host credential.
 	RegistryProviderGAR = "gar"
+	// RegistryProviderDockerHub selects Docker Hub OIDC connection credentials
+	// for a host (hosts[].provider). It exchanges the required credential
+	// identity for a Docker Hub access token and is mutually exclusive with tls.
+	RegistryProviderDockerHub = "dockerhub"
 
 	// DirectionBoth applies a host credential to source pulls and destination
 	// pushes. It is the default when hosts[].direction is unset.
@@ -95,6 +99,16 @@ const (
 	// It matches cijwt's per-request signing lifetime, keeping the default behavior
 	// of short-lived, freshly signed tokens.
 	defaultJWKExp = 60 * time.Second
+
+	// DefaultDockerHubExpiration is the Docker Hub OIDC access token lifetime
+	// requested when credential.expiration is unset.
+	DefaultDockerHubExpiration = time.Hour
+	// MinDockerHubExpiration is the minimum lifetime bound
+	// accepted by the Docker Hub OIDC token exchange.
+	MinDockerHubExpiration = 5 * time.Minute
+	// MaxDockerHubExpiration is the maximum lifetime bound
+	// accepted by the Docker Hub OIDC token exchange.
+	MaxDockerHubExpiration = 6 * time.Hour
 )
 
 // Config is the flux-mirror configuration file.
@@ -127,15 +141,17 @@ type Config struct {
 // RegistryHost binds an authentication method to a registry host. Credential and
 // Provider configure the HTTP-layer registry credential. A cloud Provider (ecr,
 // acr, or gar) accepts a Credential whose identity is exchanged for the cloud
-// provider's access credential instead of using the ambient cloud identity. On a
-// cloud provider host the credential source may be Provider (github, forgejo, or
-// spiffe only), Value, FromPath, JWKPath, or JWKValue; Username and Envelope are
-// rejected, as are the gcp, azure, and aws credential providers. TLS configures
-// the transport-layer TLS/mTLS settings: it composes with Credential and with the
-// default (generic) Provider, but is mutually exclusive with a cloud Provider — a
-// cloud registry provider is a managed registry whose transport flux-mirror does
-// not customize. At least one of Credential, a cloud Provider, TLS, or
-// MaxChunkSize must be set.
+// provider's access credential instead of using the ambient cloud identity. The
+// dockerhub Provider exchanges a required Credential identity for a Docker Hub
+// access token. On a provider host the credential source may be Provider
+// (github, forgejo, or spiffe only), Value, FromPath, JWKPath, or JWKValue. The
+// dockerhub provider additionally requires Username and accepts Expiration,
+// while rejecting Audiences and Envelope. Username and Envelope are rejected on
+// a cloud provider host. TLS configures the transport-layer TLS/mTLS settings:
+// it composes with Credential and with the default (generic) Provider, but is
+// mutually exclusive with a provider — a provider host is a managed registry
+// whose transport flux-mirror does not customize. At least one of Credential, a
+// Provider, TLS, or MaxChunkSize must be set.
 type RegistryHost struct {
 	// Host is the registry host (and optional port) the auth applies to.
 	Host string `json:"host"`
@@ -147,22 +163,27 @@ type RegistryHost struct {
 	// +kubebuilder:validation:Enum=both;source;destination
 	Direction string `json:"direction,omitempty"`
 
-	// Credential configures the HTTP-layer registry credential for the host. A
-	// cloud Provider host accepts Value, FromPath, JWKPath, JWKValue, or a
-	// github, forgejo, or spiffe Provider; see RegistryCredential.
+	// Credential configures the HTTP-layer registry credential for the host. On
+	// a provider host (ecr, acr, gar, dockerhub) it selects the identity
+	// exchanged for the registry credential through Value, FromPath, JWKPath,
+	// JWKValue, or a github, forgejo, or spiffe Provider. The dockerhub provider
+	// requires it and additionally uses Username (the Docker Hub account) and
+	// Expiration (the requested access token lifetime). See RegistryCredential.
 	// +optional
 	Credential *RegistryCredential `json:"credential,omitempty"`
 
-	// Provider selects a cloud registry provider's workload-identity credentials
-	// for the host: RegistryProviderECR, RegistryProviderACR, or
-	// RegistryProviderGAR. Omitted (or RegistryProviderGeneric) means an ordinary
-	// registry, for which flux-mirror configures the credential and/or TLS
-	// directly. A cloud provider is mutually exclusive with TLS, but accepts a
+	// Provider selects how the host's registry credentials are obtained:
+	// RegistryProviderECR, RegistryProviderACR, RegistryProviderGAR, or
+	// RegistryProviderDockerHub. Omitted (or RegistryProviderGeneric) means an
+	// ordinary registry, for which flux-mirror configures the credential and/or
+	// TLS directly. A cloud provider is mutually exclusive with TLS, but accepts a
 	// Credential to source the identity exchanged with the cloud provider. That
 	// credential must come from Value, FromPath, JWKPath, JWKValue, or a github,
-	// forgejo, or spiffe Provider; see RegistryCredential.
+	// forgejo, or spiffe Provider; see RegistryCredential. The dockerhub provider
+	// rejects TLS, requires a Credential, and exchanges its identity for a Docker
+	// Hub access token; see Docker Hub OIDC provider.
 	// +optional
-	// +kubebuilder:validation:Enum=generic;ecr;acr;gar
+	// +kubebuilder:validation:Enum=generic;ecr;acr;gar;dockerhub
 	Provider string `json:"provider,omitempty"`
 
 	// ECR configures Amazon ECR authentication when this host uses the ecr
@@ -180,6 +201,12 @@ type RegistryHost struct {
 	// the provider uses the ambient Google identity instead.
 	// +optional
 	GAR *GARConfig `json:"gar,omitempty"`
+
+	// DockerHub configures the Docker Hub OIDC connection when this host uses
+	// the dockerhub provider. The username and token lifetime are set on
+	// Credential.
+	// +optional
+	DockerHub *DockerHubConfig `json:"dockerhub,omitempty"`
 
 	// TLS configures transport-layer TLS for the host: a PEM directory or inline
 	// PEM fields (custom CA and/or client certificate), or SPIFFE mutual TLS.
@@ -229,6 +256,27 @@ type GARConfig struct {
 	GCPServiceAccount string `json:"gcpServiceAccount,omitempty"`
 }
 
+// DockerHubConfig configures Docker Hub OIDC connection authentication for a
+// dockerhub provider host. The host exchanges its Credential identity for a
+// short-lived Docker Hub access token; its username and token lifetime come from
+// Credential.
+type DockerHubConfig struct {
+	// ConnectionID is the Docker Hub OIDC connection UUID from the Docker Hub
+	// organization settings. Environment substitution can fill it from an
+	// environment variable.
+	ConnectionID string `json:"connectionID"`
+}
+
+// EffectiveDockerHubExpiration returns the Docker Hub access token lifetime with
+// the documented default (1h) applied. It is only meaningful for a dockerhub
+// provider host.
+func (h RegistryHost) EffectiveDockerHubExpiration() time.Duration {
+	if h.Credential != nil && h.Credential.Expiration != nil {
+		return h.Credential.Expiration.Duration
+	}
+	return DefaultDockerHubExpiration
+}
+
 // EffectiveDirection returns the host direction with the documented default
 // (both) applied.
 func (h RegistryHost) EffectiveDirection() string {
@@ -250,6 +298,21 @@ func (h RegistryHost) IsCloudProvider() bool {
 	default:
 		return false
 	}
+}
+
+// IsDockerHubProvider reports whether the host selects Docker Hub OIDC
+// connection authentication (RegistryProviderDockerHub). A Docker Hub OIDC host
+// exchanges the identity from its required Credential for a Docker Hub access
+// token, so it rejects TLS. The value is matched as written.
+func (h RegistryHost) IsDockerHubProvider() bool {
+	return h.Provider == RegistryProviderDockerHub
+}
+
+// IsProvider reports whether the host selects a provider that obtains the
+// registry credential directly: a cloud provider (ecr, acr, gar) or Docker Hub
+// OIDC (dockerhub).
+func (h RegistryHost) IsProvider() bool {
+	return h.IsCloudProvider() || h.IsDockerHubProvider()
 }
 
 // RegistryCredential configures a per-host credential. Type selects the kind of
@@ -276,16 +339,23 @@ func (h RegistryHost) IsCloudProvider() bool {
 // the JWT lifetime and may only be set with JWKPath or JWKValue, the sources
 // whose lifetime flux-mirror controls; it defaults to a short 60s. Every other
 // source's lifetime is fixed by an external issuer or is an opaque static token,
-// so Expiration is rejected for them.
+// so Expiration is rejected for them. On a dockerhub provider host Expiration is
+// instead the requested Docker Hub access token lifetime, defaulting to 1h.
 //
 // On a cloud provider host (ecr, acr, or gar) the credential must be an OIDC/JWT
 // source: Provider (github, forgejo, or spiffe only), Value, FromPath, JWKPath,
 // or JWKValue. Username and Envelope are rejected, because the cloud provider
 // determines the registry username and the raw JWT is required for the exchange.
 //
+// On a dockerhub provider host the credential is required and follows the same
+// OIDC/JWT source rules. Username is required and is the Docker Hub account the
+// token is issued for. Expiration is the requested Docker Hub access token
+// lifetime and is accepted with any source. Audiences and Envelope are rejected:
+// the audience is fixed by the Docker Hub identity endpoint.
+//
 // Username presents the credential as a username/password pair. When unset, the
 // credential is used as a bearer token. It is only valid on a generic provider
-// host.
+// host, or as the Docker Hub account on a dockerhub provider host.
 //
 // Envelope is an optional transform applied to the resolved credential on top of
 // whichever source is selected; see its field comment. It is only valid on a
@@ -300,9 +370,9 @@ type RegistryCredential struct {
 	// Provider mints a per-request credential for the audiences, one of
 	// JWTProviderGitHub, JWTProviderForgejo, JWTProviderGCP, JWTProviderAzure,
 	// JWTProviderAWS, or JWTProviderSPIFFE. On a cloud provider host (ecr, acr,
-	// gar) the credential identity is exchanged with the cloud provider, so only
-	// JWTProviderGitHub, JWTProviderForgejo, and JWTProviderSPIFFE are accepted
-	// there.
+	// gar) or a dockerhub provider host the credential identity is exchanged
+	// with the provider, so only JWTProviderGitHub, JWTProviderForgejo, and
+	// JWTProviderSPIFFE are accepted there.
 	// +optional
 	// +kubebuilder:validation:Enum=github;forgejo;gcp;azure;aws;spiffe
 	Provider string `json:"provider,omitempty"`
@@ -332,17 +402,22 @@ type RegistryCredential struct {
 	Subject string `json:"subject,omitempty"`
 
 	// Audiences is the audience claim. Defaults to Host, or to the cloud
-	// provider's federation audience on a cloud Provider host.
+	// provider's federation audience on a cloud Provider host. It is rejected
+	// on a dockerhub provider host, where the audience is fixed.
 	// +optional
 	Audiences []string `json:"audiences,omitempty"`
 
-	// Expiration is the jwkPath/jwkValue JWT lifetime. Defaults to 60s.
+	// Expiration is the jwkPath/jwkValue JWT lifetime, or the requested Docker
+	// Hub OIDC access token lifetime on a dockerhub provider host. Defaults to
+	// 60s for jwkPath/jwkValue and 1h for dockerhub. On a dockerhub provider
+	// host it is accepted with any credential source.
 	// +optional
 	Expiration *metav1.Duration `json:"expiration,omitempty"`
 
 	// Username presents the credential as the password of a username/password
 	// pair. When unset, the credential is used as a bearer token. It is only
-	// valid on a generic Provider host.
+	// valid on a generic Provider host, or as the Docker Hub account on a
+	// dockerhub provider host.
 	// +optional
 	Username string `json:"username,omitempty"`
 
