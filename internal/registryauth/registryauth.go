@@ -19,7 +19,10 @@ import (
 
 	cryptov1 "github.com/fluxcd/pkg/apis/crypto/v1"
 	"github.com/fluxcd/pkg/auth"
+	"github.com/fluxcd/pkg/auth/aws"
 	"github.com/fluxcd/pkg/auth/azure"
+	"github.com/fluxcd/pkg/auth/dockerhub"
+	"github.com/fluxcd/pkg/auth/gcp"
 	"github.com/fluxcd/pkg/auth/utils"
 	"github.com/fluxcd/pkg/auth/utils/cijwt"
 	"github.com/fluxcd/pkg/cache"
@@ -80,11 +83,13 @@ func SelectAuthHosts(cfg *apiv1.Config, filter []string) ([]apiv1.RegistryHost, 
 // sets a provider or a credential. A TLS-only host (only tls configured) does
 // not, so the login/secret commands skip it.
 func HasCredential(h apiv1.RegistryHost) bool {
-	return h.IsCloudProvider() || h.Credential != nil
+	return h.IsProvider() || h.Credential != nil
 }
 
 // ResolveHostAuth resolves the credential for any auth host:
-//   - a provider host yields the cloud registry username/password;
+//   - a cloud provider host yields the cloud registry username/password;
+//   - a dockerhub provider host yields the Docker Hub username and the access
+//     token exchanged for the credential identity;
 //   - a credential host with a username yields that username and the
 //     minted/static credential as the password;
 //   - a credential host without a username yields the credential as a bearer
@@ -96,7 +101,7 @@ func ResolveHostAuth(ctx context.Context, h apiv1.RegistryHost) (HostAuth, error
 	if !HasCredential(h) {
 		return HostAuth{}, fmt.Errorf("host %q has no credential or provider configured", h.Host)
 	}
-	if h.IsCloudProvider() {
+	if h.IsProvider() {
 		a, err := providerAuthenticator(ctx, h, nil)
 		if err != nil {
 			return HostAuth{}, err
@@ -126,33 +131,36 @@ func authorize(ctx context.Context, a authn.Authenticator) (*authn.AuthConfig, e
 	return a.Authorization()
 }
 
-// pkgAuthProviderName maps a flux-mirror registry provider (ecr/acr/gar) to the
-// pkg/auth provider name (aws/azure/gcp).
+// pkgAuthProviderName maps a flux-mirror registry provider (ecr/acr/gar/
+// dockerhub) to the pkg/auth provider name (aws/azure/gcp/dockerhub).
 func pkgAuthProviderName(provider string) (string, error) {
 	switch provider {
 	case apiv1.RegistryProviderECR:
-		return "aws", nil
+		return aws.ProviderName, nil
 	case apiv1.RegistryProviderACR:
-		return "azure", nil
+		return azure.ProviderName, nil
 	case apiv1.RegistryProviderGAR:
-		return "gcp", nil
+		return gcp.ProviderName, nil
+	case apiv1.RegistryProviderDockerHub:
+		return dockerhub.ProviderName, nil
 	default:
 		return "", fmt.Errorf("unknown registry provider %q", provider)
 	}
 }
 
 // providerAuthenticator obtains an authn.Authenticator for a provider host from
-// the cloud provider's ambient workload identity, the same way the
-// `flux push artifact` family does. When the host sets a credential, the cloud
+// pkg/auth. Cloud providers use their ambient workload identity, the same way
+// the `flux push artifact` family does; when the host sets a credential, the
 // provider instead exchanges the credential identity for its access credential.
-// A credential from value, fromPath, jwkPath, or jwkValue is exchanged by a
-// dedicated authenticator, because pkg/auth cannot acquire it by itself.
+// Docker Hub always exchanges the host credential identity. A credential from
+// value, fromPath, jwkPath, or jwkValue is exchanged by a dedicated
+// authenticator, because pkg/auth cannot acquire it by itself.
 func providerAuthenticator(ctx context.Context, h apiv1.RegistryHost, tokenCache *cache.TokenCache) (authn.Authenticator, error) {
 	name, err := pkgAuthProviderName(h.Provider)
 	if err != nil {
 		return nil, err
 	}
-	if h.Credential != nil && h.Credential.Provider == "" {
+	if h.IsProvider() && h.Credential != nil && h.Credential.Provider == "" {
 		return newInputJWTAuthenticator(h, name, tokenCache)
 	}
 	opts := providerOptions(h)
@@ -228,15 +236,14 @@ func (a *inputJWTAuthenticator) credential(ctx context.Context) (*auth.JWTCreden
 	return credential, nil
 }
 
-// newInputJWTAuthenticator builds the authenticator for a cloud provider host
-// whose credential is acquired locally from value, fromPath, jwkPath, or
-// jwkValue.
+// newInputJWTAuthenticator builds the authenticator for a provider host whose
+// credential is acquired locally from value, fromPath, jwkPath, or jwkValue.
 func newInputJWTAuthenticator(h apiv1.RegistryHost, providerName string, tokenCache *cache.TokenCache) (authn.Authenticator, error) {
 	provider, err := utils.ProviderByName[auth.ArtifactRegistryCredentialsProvider](providerName)
 	if err != nil {
 		return nil, err
 	}
-	audiences, err := cloudAudiences(h)
+	audiences, err := exchangeAudiences(h)
 	if err != nil {
 		return nil, err
 	}
@@ -272,11 +279,11 @@ func inputJWTTokenKey(h apiv1.RegistryHost) string {
 	return "registryauth/jwt/" + hex.EncodeToString(sum[:])
 }
 
-// cloudAudiences returns the audiences a credential for a cloud provider host
-// is minted for. Explicit audiences win; otherwise the provider's federation
-// audience is used, matching what pkg/auth applies when it acquires the
-// credential itself.
-func cloudAudiences(h apiv1.RegistryHost) ([]string, error) {
+// exchangeAudiences returns the audiences a credential for a provider host is
+// minted for. Explicit audiences win; otherwise the provider's own default is
+// used: the cloud federation audience for ecr/acr/gar, and the Docker Hub
+// identity endpoint for dockerhub.
+func exchangeAudiences(h apiv1.RegistryHost) ([]string, error) {
 	if h.Credential != nil && len(h.Credential.Audiences) > 0 {
 		audiences := make([]string, 0, len(h.Credential.Audiences))
 		for _, raw := range h.Credential.Audiences {
@@ -296,6 +303,20 @@ func cloudAudiences(h apiv1.RegistryHost) ([]string, error) {
 			return []string{cryptov1.GetDefaultAudienceGCP(strings.TrimSpace(h.GAR.WorkloadIdentityProvider))}, nil
 		}
 		return nil, fmt.Errorf("gar.workloadIdentityProvider is required to derive the credential audience")
+	case apiv1.RegistryProviderDockerHub:
+		// The auth package pins the Docker Hub identity endpoint for the
+		// registry host; extract it from the provider options instead of
+		// duplicating the mapping.
+		opts, err := (dockerhub.Provider{}).GetAccessCredentialOptionsForArtifactRepository(h.Host)
+		if err != nil {
+			return nil, err
+		}
+		var o auth.Options
+		o.Apply(opts...)
+		if len(o.CredentialAudiences) == 0 {
+			return nil, fmt.Errorf("failed to resolve the Docker Hub audience for %q", h.Host)
+		}
+		return o.CredentialAudiences, nil
 	default:
 		return nil, fmt.Errorf("unknown registry provider %q", h.Provider)
 	}
@@ -323,32 +344,32 @@ func resolveInputJWTCredential(ctx context.Context, h apiv1.RegistryHost, audien
 }
 
 // providerIdentity is the workload identity passed to the auth package when
-// exchanging a credential for cloud registry access. It names the AWS role
-// session and the generic provider identity.
+// exchanging a credential for registry access. It names the AWS role session
+// and the generic provider identity.
 const providerIdentity = "flux-mirror"
 
-// cloudCredentialProvider maps a flux-mirror credential provider to the auth
-// package's credential provider. Providers that are not renamed map through
-// unchanged.
-func cloudCredentialProvider(provider string) string {
-	switch provider {
-	case apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo:
-		return cryptov1.CredentialProviderActionsOIDC
-	default:
-		return provider
-	}
-}
-
-// providerOptions maps a cloud provider host to auth options. Provider-specific
-// settings come from the matching ecr/acr/gar block. A credential-provider
+// providerOptions maps a provider host to auth options. Cloud provider-specific
+// settings come from the matching ecr/acr/gar block; a credential provider
 // source selects the ID token source used for the exchange; explicitly
-// configured audiences are forwarded, otherwise the cloud provider applies its
-// own default audience, which is what AWS and Azure expect for federation. A
-// locally acquired credential has its audiences and token attached by
+// configured audiences are forwarded, otherwise the provider applies its own
+// default audience, which is what AWS and Azure expect for federation. Docker
+// Hub takes its connection ID, username, and token lifetime from the host
+// config, and its audience is pinned by the auth package from the registry host.
+// A locally acquired credential has its audiences and token attached by
 // newInputJWTAuthenticator instead.
 func providerOptions(h apiv1.RegistryHost) []auth.Option {
 	var opts []auth.Option
 	switch h.Provider {
+	case apiv1.RegistryProviderDockerHub:
+		if h.DockerHub != nil {
+			opts = append(opts, auth.WithDockerHubOIDCConnectionID(strings.TrimSpace(h.DockerHub.ConnectionID)))
+		}
+		if h.Credential != nil {
+			opts = append(opts, auth.WithCredentialUsername(strings.TrimSpace(h.Credential.Username)))
+			if h.Credential.Expiration != nil {
+				opts = append(opts, auth.WithCredentialExpiration(h.Credential.Expiration.Duration))
+			}
+		}
 	case apiv1.RegistryProviderECR:
 		if h.ECR != nil {
 			opts = append(opts, auth.WithAWSRoleARN(strings.TrimSpace(h.ECR.RoleARN)))
@@ -379,7 +400,7 @@ func providerOptions(h apiv1.RegistryHost) []auth.Option {
 		// inputJWTAuthenticator.
 		return opts
 	}
-	opts = append(opts, auth.WithCredentialProvider(cloudCredentialProvider(h.Credential.Provider)))
+	opts = append(opts, auth.WithCredentialProvider(h.Credential.Provider))
 	audiences := make([]string, 0, len(h.Credential.Audiences))
 	for _, raw := range h.Credential.Audiences {
 		if aud := strings.TrimSpace(raw); aud != "" {
@@ -428,21 +449,40 @@ func (m mintingAuthenticator) AuthorizationContext(ctx context.Context) (*authn.
 	return &authn.AuthConfig{Username: m.host.Credential.Username, Password: cred}, nil
 }
 
+// dockerHubKeychainHosts returns the registry names a Docker Hub host's
+// authenticator must serve. go-containerregistry canonicalizes docker.io to
+// index.docker.io, while the config and Docker config use both spellings.
+func dockerHubKeychainHosts(host string) []string {
+	switch strings.TrimSpace(host) {
+	case "docker.io", "index.docker.io":
+		return []string{"docker.io", "index.docker.io"}
+	default:
+		return []string{strings.TrimSpace(host)}
+	}
+}
+
 // BuildKeychain returns a keychain that serves the hosts which authenticate
-// through the standard registry auth challenge — cloud provider hosts and
-// credential hosts with a username — over the ambient Docker config. Provider
-// credentials are pre-fetched; username credentials are minted on demand.
-// Returns nil when no such host exists, so callers keep the default keychain.
+// through the standard registry auth challenge — cloud and Docker Hub provider
+// hosts and credential hosts with a username — over the ambient Docker config.
+// Cloud provider credentials are pre-fetched; Docker Hub exchanges and username
+// credentials are resolved on demand and cached. Returns nil when no such host
+// exists, so callers keep the default keychain.
 func BuildKeychain(ctx context.Context, hosts []apiv1.RegistryHost, tokenCache *cache.TokenCache) (authn.Keychain, error) {
 	auths := make(map[string]authn.Authenticator)
 	for _, h := range hosts {
 		switch {
-		case h.IsCloudProvider():
+		case h.IsProvider():
 			a, err := providerAuthenticator(ctx, h, tokenCache)
 			if err != nil {
 				return nil, err
 			}
-			auths[h.Host] = a
+			keychainHosts := []string{h.Host}
+			if h.IsDockerHubProvider() {
+				keychainHosts = dockerHubKeychainHosts(h.Host)
+			}
+			for _, keychainHost := range keychainHosts {
+				auths[keychainHost] = a
+			}
 		case h.Credential != nil && h.Credential.Username != "":
 			auths[h.Host] = mintingAuthenticator{host: h}
 		}
@@ -458,7 +498,7 @@ func BuildKeychain(ctx context.Context, hosts []apiv1.RegistryHost, tokenCache *
 // credential is stamped directly as a Bearer token). Cloud provider hosts and
 // username credentials authenticate through the keychain instead.
 func usesCredentialTransport(h apiv1.RegistryHost) bool {
-	return !h.IsCloudProvider() && h.Credential != nil && h.Credential.Username == ""
+	return !h.IsProvider() && h.Credential != nil && h.Credential.Username == ""
 }
 
 // NeedsCredentialTransport reports whether the cijwt bearer-stamp transport is

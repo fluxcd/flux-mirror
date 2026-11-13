@@ -188,12 +188,12 @@ github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeO
 github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
 github.com/fluxcd/cli-utils v1.4.0 h1:zlTiCWcVDQvvwZXILYeu5rpbnGt1sS+w32y3+rkOpig=
 github.com/fluxcd/cli-utils v1.4.0/go.mod h1:OupUOj2boEKTbiguMbGMz5Z/d59JUcb1c7pPESe8Pjw=
-github.com/fluxcd/pkg/apis/crypto v0.7.0 h1:0mgFQRW4/+/NbPpzf3X6+r3j2TCL9T86mEaG1XqwkyY=
-github.com/fluxcd/pkg/apis/crypto v0.7.0/go.mod h1:bEwkDgBjLXMVJ2BwmVbbj32PkirmNSicabgl2Jvw7Dk=
+github.com/fluxcd/pkg/apis/crypto v0.7.1-0.20261116120520-1e6be7b3ce5b h1:JL7AKFhnnBd7McDY1QLFmRyTWYVsVYwyFPfKqT/UknU=
+github.com/fluxcd/pkg/apis/crypto v0.7.1-0.20261116120520-1e6be7b3ce5b/go.mod h1:bEwkDgBjLXMVJ2BwmVbbj32PkirmNSicabgl2Jvw7Dk=
 github.com/fluxcd/pkg/apis/meta v1.38.0 h1:7t6/DuGFAPx2LE4MsRh1jskjnVE6qELKfr/LrfG7KE8=
 github.com/fluxcd/pkg/apis/meta v1.38.0/go.mod h1:lmdugeiZyt6w+DRm8ypkB+nwrzm+saMbqSfZKGBbTOE=
-github.com/fluxcd/pkg/auth v0.70.0 h1:9VzD/vHnah3jAOuv6XPsAxvWcWfwGRTgtDbA4iQriiQ=
-github.com/fluxcd/pkg/auth v0.70.0/go.mod h1:rLUe+Hzn7Be5MtyUjRplDqpOMKxJP4vVju7RP9mR/9M=
+github.com/fluxcd/pkg/auth v0.70.1-0.20261116120520-1e6be7b3ce5b h1:z9zTdf3eaNvfmj+I3lnjYPg2z9iE8DSfaehC9TtoZqY=
+github.com/fluxcd/pkg/auth v0.70.1-0.20261116120520-1e6be7b3ce5b/go.mod h1:rLUe+Hzn7Be5MtyUjRplDqpOMKxJP4vVju7RP9mR/9M=
 github.com/fluxcd/pkg/cache v0.19.0 h1:gcpASwfXLkaHTq8dv9AkXD+IvD54IfskRwGv3SDwC+E=
 github.com/fluxcd/pkg/cache v0.19.0/go.mod h1:HYfYegfUsGBIttmTDZDFa0xmbeba4wPyND1YKitXm0w=
 github.com/fluxcd/pkg/envsubst v1.9.0 h1:QTagwV4WLmqF+JsD1rGkcKFmmj4HV64BnqNM1T311kc=

@@ -509,6 +509,25 @@ func TestIsCloudProvider(t *testing.T) {
 	}
 }
 
+func TestIsDockerHubProvider(t *testing.T) {
+	g := NewWithT(t)
+
+	g.Expect(RegistryHost{Provider: RegistryProviderDockerHub}.IsDockerHubProvider()).To(BeTrue())
+	g.Expect(RegistryHost{Provider: RegistryProviderECR}.IsDockerHubProvider()).To(BeFalse())
+	g.Expect(RegistryHost{}.IsDockerHubProvider()).To(BeFalse())
+
+	for provider, want := range map[string]bool{
+		"":          false,
+		"generic":   false,
+		"ecr":       true,
+		"acr":       true,
+		"gar":       true,
+		"dockerhub": true,
+	} {
+		g.Expect(RegistryHost{Provider: provider}.IsProvider()).To(Equal(want), "provider %q", provider)
+	}
+}
+
 func TestResolvePaths(t *testing.T) {
 	g := NewWithT(t)
 
@@ -956,7 +975,7 @@ func TestValidate_Table(t *testing.T) {
 			name: "auth missing credential, provider, tls and maxChunkSize",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{Host: "h.example"}}},
-			errMsg: "one of credential, a cloud provider, tls, or maxChunkSize is required",
+			errMsg: "one of credential, a provider, tls, or maxChunkSize is required",
 		},
 		{
 			name: "auth maxChunkSize only is valid",
@@ -996,13 +1015,253 @@ func TestValidate_Table(t *testing.T) {
 			name: "auth generic provider alone is not enough",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
 				Hosts: []RegistryHost{{Host: "h.example", Provider: RegistryProviderGeneric}}},
-			errMsg: "one of credential, a cloud provider, tls, or maxChunkSize is required",
+			errMsg: "one of credential, a provider, tls, or maxChunkSize is required",
 		},
 		{
 			name: "auth invalid provider",
 			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
-				Hosts: []RegistryHost{{Host: "h.example", Provider: "dockerhub"}}},
-			errMsg: "provider \"dockerhub\" must be one of: generic, ecr, acr, gar",
+				Hosts: []RegistryHost{{Host: "h.example", Provider: "gitlab"}}},
+			errMsg: "provider \"gitlab\" must be one of: generic, ecr, acr, gar, dockerhub",
+		},
+		{
+			name: "auth dockerhub provider is valid",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:      "docker.io",
+					Provider:  RegistryProviderDockerHub,
+					DockerHub: &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{
+						Provider:   JWTProviderGitHub,
+						Username:   "my-org",
+						Expiration: &metav1.Duration{Duration: 2 * time.Hour},
+					},
+				}}},
+		},
+		{
+			name: "auth dockerhub with forgejo credential is valid",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:      "docker.io",
+					Provider:  RegistryProviderDockerHub,
+					DockerHub: &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{
+						Provider: JWTProviderForgejo,
+						Username: "my-org",
+					},
+				}}},
+		},
+		{
+			name: "auth dockerhub with spiffe credential is valid",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:      "docker.io",
+					Provider:  RegistryProviderDockerHub,
+					DockerHub: &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{
+						Provider: JWTProviderSPIFFE,
+						Username: "my-org",
+					},
+				}}},
+		},
+		{
+			name: "auth dockerhub with static credential is valid",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:      "docker.io",
+					Provider:  RegistryProviderDockerHub,
+					DockerHub: &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{
+						Value:      "TOKEN",
+						Username:   "my-org",
+						Expiration: &metav1.Duration{Duration: 5 * time.Minute},
+					},
+				}}},
+		},
+		{
+			name: "auth dockerhub with jwk credential is valid",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:      "docker.io",
+					Provider:  RegistryProviderDockerHub,
+					DockerHub: &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{
+						JWKPath:  "/key.json",
+						Issuer:   "https://issuer.example.com",
+						Subject:  "subject",
+						Username: "my-org",
+					},
+				}}},
+		},
+		{
+			name: "auth dockerhub requires credential source",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:      "docker.io",
+					Provider:  RegistryProviderDockerHub,
+					DockerHub: &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{
+						Username: "my-org",
+					},
+				}}},
+			errMsg: "credential: exactly one of provider, value, fromPath, jwkPath, or jwkValue must be set",
+		},
+		{
+			name: "auth dockerhub rejects audiences",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:      "docker.io",
+					Provider:  RegistryProviderDockerHub,
+					DockerHub: &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{
+						Provider:  JWTProviderGitHub,
+						Username:  "my-org",
+						Audiences: []string{"https://identity.docker.com"},
+					},
+				}}},
+			errMsg: `credential: audiences cannot be set with provider "dockerhub"`,
+		},
+		{
+			name: "auth dockerhub rejects envelope",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:      "docker.io",
+					Provider:  RegistryProviderDockerHub,
+					DockerHub: &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{
+						Value:    "TOKEN",
+						Username: "my-org",
+						Envelope: "token-{{ .Token }}",
+					},
+				}}},
+			errMsg: `credential: envelope cannot be set with provider "dockerhub"`,
+		},
+		{
+			name: "auth dockerhub requires config",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "docker.io", Provider: RegistryProviderDockerHub,
+					Credential: &RegistryCredential{Provider: JWTProviderGitHub, Username: "my-org"},
+				}}},
+			errMsg: `dockerhub is required when provider is "dockerhub"`,
+		},
+		{
+			name: "auth dockerhub requires credential",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "docker.io", Provider: RegistryProviderDockerHub,
+					DockerHub: &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+				}}},
+			errMsg: `credential is required with provider "dockerhub"`,
+		},
+		{
+			name: "auth dockerhub config requires dockerhub provider",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "h.example", Provider: RegistryProviderGeneric,
+					DockerHub:  &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{Type: CredentialTypeJWT, Value: "TOKEN"},
+				}}},
+			errMsg: `dockerhub config requires provider "dockerhub"`,
+		},
+		{
+			name: "auth dockerhub rejects unsupported host",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "registry.example.com", Provider: RegistryProviderDockerHub,
+					DockerHub:  &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{Provider: JWTProviderGitHub, Username: "org"},
+				}}},
+			errMsg: `host "registry.example.com" is not supported by provider "dockerhub"`,
+		},
+		{
+			name: "auth dockerhub requires connectionID",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "docker.io", Provider: RegistryProviderDockerHub,
+					DockerHub:  &DockerHubConfig{},
+					Credential: &RegistryCredential{Provider: JWTProviderGitHub, Username: "org"},
+				}}},
+			errMsg: "dockerhub.connectionID is required",
+		},
+		{
+			name: "auth dockerhub connectionID must be a UUID",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "docker.io", Provider: RegistryProviderDockerHub,
+					DockerHub:  &DockerHubConfig{ConnectionID: "not-a-uuid"},
+					Credential: &RegistryCredential{Provider: JWTProviderGitHub, Username: "org"},
+				}}},
+			errMsg: "dockerhub.connectionID must be a valid UUID",
+		},
+		{
+			name: "auth dockerhub requires username",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "docker.io", Provider: RegistryProviderDockerHub,
+					DockerHub:  &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{},
+				}}},
+			errMsg: `credential: username is required with provider "dockerhub"`,
+		},
+		{
+			name: "auth dockerhub expiration out of range",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host: "docker.io", Provider: RegistryProviderDockerHub,
+					DockerHub: &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{
+						Provider:   JWTProviderGitHub,
+						Username:   "org",
+						Expiration: &metav1.Duration{Duration: time.Minute},
+					},
+				}}},
+			errMsg: `credential: expiration must be between`,
+		},
+		{
+			name: "auth dockerhub rejects credential provider",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:       "docker.io",
+					Provider:   RegistryProviderDockerHub,
+					DockerHub:  &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{Provider: JWTProviderGCP, Username: "org"},
+				}}},
+			errMsg: `credential: provider "gcp" cannot be exchanged with provider "dockerhub"`,
+		},
+		{
+			name: "auth dockerhub rejects credential type",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:       "docker.io",
+					Provider:   RegistryProviderDockerHub,
+					DockerHub:  &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{Type: "x509", Provider: JWTProviderGitHub, Username: "org"},
+				}}},
+			errMsg: `credential: type "x509" must be "jwt"`,
+		},
+		{
+			name: "auth dockerhub rejects tls",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:       "docker.io",
+					Provider:   RegistryProviderDockerHub,
+					DockerHub:  &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{Provider: JWTProviderGitHub, Username: "org"},
+					TLS:        &TLS{Path: "/certs"},
+				}}},
+			errMsg: `tls cannot be set with provider "dockerhub"`,
+		},
+		{
+			name: "auth dockerhub rejects ecr config",
+			cfg: Config{TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: ConfigKind}, Artifacts: validArtifact(),
+				Hosts: []RegistryHost{{
+					Host:       "docker.io",
+					Provider:   RegistryProviderDockerHub,
+					DockerHub:  &DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+					Credential: &RegistryCredential{Provider: JWTProviderGitHub, Username: "org"},
+					ECR:        &ECRConfig{RoleARN: "arn:aws:iam::123:role/mirror"},
+				}}},
+			errMsg: `ecr config requires provider "ecr"`,
 		},
 		{
 			name: "auth cloud provider with credential is valid",

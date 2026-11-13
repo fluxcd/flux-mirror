@@ -12,8 +12,8 @@ require (
 	github.com/cyphar/filepath-securejoin v0.7.0
 	github.com/distribution/distribution/v3 v3.1.2
 	github.com/docker/cli v29.9.2+incompatible
-	github.com/fluxcd/pkg/apis/crypto v0.7.0
-	github.com/fluxcd/pkg/auth v0.70.0
+	github.com/fluxcd/pkg/apis/crypto v0.7.1-0.20261116120520-1e6be7b3ce5b
+	github.com/fluxcd/pkg/auth v0.70.1-0.20261116120520-1e6be7b3ce5b
 	github.com/fluxcd/pkg/cache v0.19.0
 	github.com/fluxcd/pkg/envsubst v1.9.0
 	github.com/fluxcd/pkg/helmtestserver v0.45.0
