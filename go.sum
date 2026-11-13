@@ -192,8 +192,8 @@ github.com/fluxcd/pkg/apis/crypto v0.7.0 h1:0mgFQRW4/+/NbPpzf3X6+r3j2TCL9T86mEaG
 github.com/fluxcd/pkg/apis/crypto v0.7.0/go.mod h1:bEwkDgBjLXMVJ2BwmVbbj32PkirmNSicabgl2Jvw7Dk=
 github.com/fluxcd/pkg/apis/meta v1.38.0 h1:7t6/DuGFAPx2LE4MsRh1jskjnVE6qELKfr/LrfG7KE8=
 github.com/fluxcd/pkg/apis/meta v1.38.0/go.mod h1:lmdugeiZyt6w+DRm8ypkB+nwrzm+saMbqSfZKGBbTOE=
-github.com/fluxcd/pkg/auth v0.70.0 h1:9VzD/vHnah3jAOuv6XPsAxvWcWfwGRTgtDbA4iQriiQ=
-github.com/fluxcd/pkg/auth v0.70.0/go.mod h1:rLUe+Hzn7Be5MtyUjRplDqpOMKxJP4vVju7RP9mR/9M=
+github.com/fluxcd/pkg/auth v0.70.1-0.20261113144102-df53f1dfdc29 h1:N6R3rD+EHCS2ppzHud6MLa7VvtQ2kQl+bi/w04laHQY=
+github.com/fluxcd/pkg/auth v0.70.1-0.20261113144102-df53f1dfdc29/go.mod h1:rLUe+Hzn7Be5MtyUjRplDqpOMKxJP4vVju7RP9mR/9M=
 github.com/fluxcd/pkg/cache v0.19.0 h1:gcpASwfXLkaHTq8dv9AkXD+IvD54IfskRwGv3SDwC+E=
 github.com/fluxcd/pkg/cache v0.19.0/go.mod h1:HYfYegfUsGBIttmTDZDFa0xmbeba4wPyND1YKitXm0w=
 github.com/fluxcd/pkg/envsubst v1.9.0 h1:QTagwV4WLmqF+JsD1rGkcKFmmj4HV64BnqNM1T311kc=

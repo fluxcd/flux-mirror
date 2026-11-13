@@ -63,15 +63,16 @@ for `provider` sources involves a network call to mint the token. The global
   existing labels and annotations are preserved.
 - With no `--host`, every host in `hosts` is included. A `--host` that is not
   present in the config is an error.
-- The Secret's `.dockerconfigjson` holds one `auths` entry per host. A cloud
-  [`provider`](config.md#cloud-registry-providers) host, and a
+- The Secret's `.dockerconfigjson` holds one `auths` entry per host. A
+  [`provider`](config.md#cloud-registry-providers) host (a cloud provider or
+  [`dockerhub`](config.md#docker-hub-oidc-provider)), and a
   [`credential`](config.md#per-host-credential) host with `credential.username`
   set, write `username`/`password`/`auth` (understood by `kubelet` and Flux). A
   `credential` host without `credential.username` writes the bearer `registrytoken` field
   (understood by go-containerregistry and Flux, **not** by `kubelet`). See
   [Bearer token vs. username/password](config.md#bearer-token-vs-usernamepassword).
-- A TLS-only host (only `tls`, no `credential` and no cloud `provider`) has
-  nothing to put in the Secret and is skipped with a `• skipping <host>` message.
+- A TLS-only host (only `tls`, no `credential` and no `provider`) has nothing
+  to put in the Secret and is skipped with a `• skipping <host>` message.
 - Credentials are short-lived (provider tokens, freshly signed JWTs). Re-run the
   command to refresh the Secret before they expire; by default it replaces the
   existing one in place.

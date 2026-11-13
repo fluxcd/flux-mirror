@@ -15,6 +15,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	securejoin "github.com/cyphar/filepath-securejoin"
 	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/uuid"
 
 	"sigs.k8s.io/yaml"
 
@@ -272,10 +273,21 @@ func validateHost(h apiv1.RegistryHost) error {
 	// credential, which supplies the identity exchanged for registry
 	// credentials.
 	cloud := h.IsCloudProvider()
+	dockerhub := h.IsDockerHubProvider()
 	if cloud && h.TLS != nil {
 		return fmt.Errorf("cloud provider and tls are mutually exclusive")
 	}
-	if h.Credential != nil {
+	if dockerhub {
+		if h.TLS != nil {
+			return fmt.Errorf("tls cannot be set with provider %q", apiv1.RegistryProviderDockerHub)
+		}
+		if h.Credential == nil {
+			return fmt.Errorf("credential is required with provider %q", apiv1.RegistryProviderDockerHub)
+		}
+		if err := validateDockerHubCredential(*h.Credential); err != nil {
+			return fmt.Errorf("credential: %w", err)
+		}
+	} else if h.Credential != nil {
 		if err := validateCredential(*h.Credential); err != nil {
 			return fmt.Errorf("credential: %w", err)
 		}
@@ -286,10 +298,10 @@ func validateHost(h apiv1.RegistryHost) error {
 		}
 	}
 	switch h.Provider {
-	case "", apiv1.RegistryProviderGeneric, apiv1.RegistryProviderECR, apiv1.RegistryProviderACR, apiv1.RegistryProviderGAR:
+	case "", apiv1.RegistryProviderGeneric, apiv1.RegistryProviderECR, apiv1.RegistryProviderACR, apiv1.RegistryProviderGAR, apiv1.RegistryProviderDockerHub:
 	default:
-		return fmt.Errorf("provider %q must be one of: %s, %s, %s, %s",
-			h.Provider, apiv1.RegistryProviderGeneric, apiv1.RegistryProviderECR, apiv1.RegistryProviderACR, apiv1.RegistryProviderGAR)
+		return fmt.Errorf("provider %q must be one of: %s, %s, %s, %s, %s",
+			h.Provider, apiv1.RegistryProviderGeneric, apiv1.RegistryProviderECR, apiv1.RegistryProviderACR, apiv1.RegistryProviderGAR, apiv1.RegistryProviderDockerHub)
 	}
 	if err := validateProviderConfig(h); err != nil {
 		return err
@@ -302,8 +314,8 @@ func validateHost(h apiv1.RegistryHost) error {
 	if h.MaxChunkSize < 0 {
 		return fmt.Errorf("maxChunkSize must be >= 0 (0 disables chunking)")
 	}
-	if h.Credential == nil && !cloud && h.TLS == nil && h.MaxChunkSize == 0 {
-		return fmt.Errorf("one of credential, a cloud provider, tls, or maxChunkSize is required")
+	if h.Credential == nil && !h.IsProvider() && h.TLS == nil && h.MaxChunkSize == 0 {
+		return fmt.Errorf("one of credential, a provider, tls, or maxChunkSize is required")
 	}
 	return nil
 }
@@ -344,8 +356,15 @@ func validateProviderConfig(h apiv1.RegistryHost) error {
 	if h.GAR != nil && h.Provider != apiv1.RegistryProviderGAR {
 		return fmt.Errorf("gar config requires provider %q", apiv1.RegistryProviderGAR)
 	}
+	if h.DockerHub != nil && h.Provider != apiv1.RegistryProviderDockerHub {
+		return fmt.Errorf("dockerhub config requires provider %q", apiv1.RegistryProviderDockerHub)
+	}
 
 	switch h.Provider {
+	case apiv1.RegistryProviderDockerHub:
+		if err := validateDockerHubConfig(h); err != nil {
+			return err
+		}
 	case apiv1.RegistryProviderECR:
 		if h.Credential != nil && h.ECR == nil {
 			return fmt.Errorf("ecr is required when provider is %q and credential is set", apiv1.RegistryProviderECR)
@@ -371,6 +390,66 @@ func validateProviderConfig(h apiv1.RegistryHost) error {
 		}
 		if h.GAR != nil && strings.TrimSpace(h.GAR.WorkloadIdentityProvider) == "" {
 			return fmt.Errorf("gar.workloadIdentityProvider is required")
+		}
+	}
+	return nil
+}
+
+// dockerHubHosts are the registry hosts a Docker Hub OIDC connection can
+// authenticate. index.docker.io is accepted because that is the canonical host
+// go-containerregistry uses for docker.io.
+var dockerHubHosts = map[string]bool{
+	"docker.io":                  true,
+	"dhi.io":                     true,
+	"index.docker.io":            true,
+	"registry-1.docker.io":       true,
+	"registry-1-stage.docker.io": true,
+}
+
+// validateDockerHubConfig checks the dockerhub provider block: it is required
+// and its connection ID is a UUID.
+func validateDockerHubConfig(h apiv1.RegistryHost) error {
+	if h.DockerHub == nil {
+		return fmt.Errorf("dockerhub is required when provider is %q", apiv1.RegistryProviderDockerHub)
+	}
+	if !dockerHubHosts[strings.TrimSpace(h.Host)] {
+		return fmt.Errorf("host %q is not supported by provider %q; must be one of: docker.io, index.docker.io, registry-1.docker.io, registry-1-stage.docker.io, dhi.io",
+			h.Host, apiv1.RegistryProviderDockerHub)
+	}
+	connectionID := strings.TrimSpace(h.DockerHub.ConnectionID)
+	if connectionID == "" {
+		return fmt.Errorf("dockerhub.connectionID is required")
+	}
+	if _, err := uuid.Parse(connectionID); err != nil {
+		return fmt.Errorf("dockerhub.connectionID must be a valid UUID: %w", err)
+	}
+	return nil
+}
+
+// validateDockerHubCredential checks the credential of a dockerhub provider
+// host. Docker Hub OIDC always uses the GitHub Actions identity, so username
+// (the Docker Hub account) and expiration (the requested token lifetime) are the
+// only accepted fields.
+func validateDockerHubCredential(c apiv1.RegistryCredential) error {
+	if strings.TrimSpace(c.Type) != "" ||
+		strings.TrimSpace(c.Provider) != "" ||
+		strings.TrimSpace(c.Value) != "" ||
+		strings.TrimSpace(c.FromPath) != "" ||
+		strings.TrimSpace(c.JWKPath) != "" ||
+		strings.TrimSpace(c.JWKValue) != "" ||
+		strings.TrimSpace(c.Issuer) != "" ||
+		strings.TrimSpace(c.Subject) != "" ||
+		len(c.Audiences) > 0 ||
+		strings.TrimSpace(c.Envelope) != "" {
+		return fmt.Errorf("only username and expiration may be set with provider %q", apiv1.RegistryProviderDockerHub)
+	}
+	if strings.TrimSpace(c.Username) == "" {
+		return fmt.Errorf("username is required with provider %q", apiv1.RegistryProviderDockerHub)
+	}
+	if exp := c.Expiration; exp != nil {
+		if exp.Duration < apiv1.MinDockerHubExpiration || exp.Duration > apiv1.MaxDockerHubExpiration {
+			return fmt.Errorf("expiration must be between %s and %s with provider %q",
+				apiv1.MinDockerHubExpiration, apiv1.MaxDockerHubExpiration, apiv1.RegistryProviderDockerHub)
 		}
 	}
 	return nil

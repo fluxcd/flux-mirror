@@ -45,6 +45,8 @@ FLUX_MIRROR_CONFIG=./flux-mirror.yaml flux mirror sync
      registry's native credentials from the cloud provider's workload identity.
      Combined with a `credential`, it exchanges the credential identity for
      those credentials instead.
+   - [`provider: dockerhub`](config.md#docker-hub-oidc-provider) exchanges the
+     GitHub Actions OIDC identity for a Docker Hub access token.
    - [`credential`](config.md#per-host-credential) resolves a per-host
      token from a cloud/CI identity, a JWK signature, or an environment variable
      or file. With no `credential.username` it is sent as an HTTP Bearer
@@ -63,10 +65,10 @@ certificate, or SPIFFE mutual TLS.
 With the default registry transport, `--insecure` skips TLS verification for OCI
 requests, including chart destinations and referrer lookups.
 
-Provider credentials obtained from a cloud registry provider or a `credential`
-token source are cached for the duration of the sync run. This avoids minting a
-new cloud/CI identity token and exchanging it for registry credentials on every
-request. Use `--token-cache-max-size` and `--token-cache-max-duration` to tune the
+Provider credentials obtained from a cloud registry provider, a Docker Hub OIDC
+connection, or a `credential` token source are cached for the duration of the
+sync run. This avoids minting a new cloud/CI identity token and exchanging it for
+registry credentials on every request. Use `--token-cache-max-size` and `--token-cache-max-duration` to tune the
 cache, or set the size to `0` to disable it.
 
 HTTP/S Helm repository authentication (for `charts` sources) is separate from OCI
@@ -439,6 +441,52 @@ jobs:
       #     service_account: flux-mirror@my-project.iam.gserviceaccount.com
       - run: flux-mirror sync ./flux-mirror.yaml --no-progress
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### Mirror into Docker Hub with an OIDC connection
+
+A [`provider: dockerhub`](config.md#docker-hub-oidc-provider) host exchanges the
+GitHub Actions OIDC identity for a Docker Hub access token. Configure the
+Docker Hub OIDC connection UUID and account, and grant the job `id-token:
+write`:
+
+```yaml
+# flux-mirror.yaml
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
+kind: Config
+artifacts:
+  - source: ghcr.io/fluxcd/source-controller
+    destination: docker.io/my-org/source-controller
+    selector: { semver: ">=1.0.0", limit: 5 }
+hosts:
+  - host: ghcr.io
+    credential:
+      username: my-org
+      value: ${GH_TOKEN}
+  - host: docker.io
+    provider: dockerhub
+    dockerhub:
+      connectionID: ${DOCKERHUB_OIDC_CONNECTIONID}
+    credential:
+      username: my-org
+```
+
+```yaml
+# .github/workflows/mirror-to-dockerhub.yaml
+permissions:
+  contents: read
+  packages: read
+  id-token: write          # required for the Docker Hub OIDC exchange
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fluxcd/flux-mirror/actions/setup@main
+      - run: flux-mirror sync ./flux-mirror.yaml --no-progress
+        env:
+          DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_OIDC_CONNECTIONID }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 ```
 

@@ -57,9 +57,10 @@ store address `https://index.docker.io/v1/`.
 
 What gets written depends on the host:
 
-- A cloud [`provider`](config.md#cloud-registry-providers) host, or a
-  [`credential`](config.md#per-host-credential) host with `credential.username`
-  set, writes `username`/`password`/`auth`.
+- A [`provider`](config.md#cloud-registry-providers) host — a cloud provider
+  (`ecr`, `acr`, `gar`) or [`dockerhub`](config.md#docker-hub-oidc-provider) —
+  or a [`credential`](config.md#per-host-credential) host with
+  `credential.username` set, writes `username`/`password`/`auth`.
 - A `credential` host without `credential.username` writes the bearer
   `registrytoken` field instead. Because credential helpers only store
   username/secret pairs, a
@@ -70,8 +71,8 @@ Pass `--plaintext` to force the base64 `config.json` entry and bypass any
 configured or auto-detected helper (this applies to the username/password case;
 `registrytoken` is always file-based).
 
-> **Note:** a TLS-only host (only `tls`, no `credential` and no cloud `provider`)
-> has nothing to store and is skipped with a `• skipping <host>` message.
+> **Note:** a TLS-only host (only `tls`, no `credential` and no `provider`) has
+> nothing to store and is skipped with a `• skipping <host>` message.
 
 ## Examples
 
@@ -215,6 +216,44 @@ jobs:
             --path=./manifests --source="$GITHUB_REPOSITORY" --revision="$GITHUB_SHA"
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+```
+
+### Log in to Docker Hub with an OIDC connection
+
+Instead of a long-lived access token, a
+[`provider: dockerhub`](config.md#docker-hub-oidc-provider) host exchanges the
+GitHub Actions OIDC identity for a short-lived Docker Hub access token:
+
+```yaml
+# hosts.yaml
+apiVersion: mirror.plugin.fluxcd.io/v1beta2
+kind: Config
+hosts:
+  - host: docker.io
+    provider: dockerhub
+    dockerhub:
+      connectionID: ${DOCKERHUB_OIDC_CONNECTIONID}
+    credential:
+      username: my-org
+```
+
+```yaml
+# .github/workflows/push.yaml
+permissions:
+  contents: read
+  id-token: write          # required for the Docker Hub OIDC exchange
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: fluxcd/flux-mirror/actions/setup@main
+      - run: flux-mirror login -f ./hosts.yaml
+        env:
+          DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_OIDC_CONNECTIONID }}
+      - run: |
+          flux push artifact oci://docker.io/my-org/manifests/app:v1.0.0 \
+            --path=./manifests --source="$GITHUB_REPOSITORY" --revision="$GITHUB_SHA"
 ```
 
 ### Common invocations

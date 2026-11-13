@@ -311,7 +311,7 @@ A host may appear more than once only when the entries are split by
 [`.direction`](#host-direction); overlapping entries are rejected. Beyond that,
 an entry configures a
 [`.credential`](#per-host-credential) and/or a [`.tls`](#transport-tls) block, or
-a cloud [`.provider`](#cloud-registry-providers). A cloud `provider` is mutually
+a [`.provider`](#cloud-registry-providers). A cloud `provider` is mutually
 exclusive with `tls`, because a cloud registry is managed and its transport is
 not customized; the default `generic` provider is an ordinary registry and
 composes with both. A cloud `provider` may also carry a `credential`: its
@@ -320,10 +320,15 @@ instead of using the ambient cloud identity. On a cloud `provider` host the
 credential must use `value`, `fromPath`, `jwkPath`, `jwkValue`, or
 `provider: github|forgejo|spiffe`; `username`, `envelope`, and
 `provider: gcp|azure|aws` are rejected — see
-[Cloud registry providers](#cloud-registry-providers).
+[Cloud registry providers](#cloud-registry-providers). The
+[`dockerhub`](#docker-hub-oidc-provider) provider exchanges the GitHub Actions
+OIDC identity for a Docker Hub access token instead; it rejects `tls`, `ecr`,
+`acr`, and `gar`, accepts only `credential.username` and `credential.expiration`
+under `credential`, and reads the connection ID from
+[`dockerhub`](#docker-hub-oidc-provider).
 [`.maxChunkSize`](#blob-upload-chunking) tunes
-blob uploads independently of auth. At least one of `credential`, a cloud
-`provider`, `tls`, or `maxChunkSize` must be set.
+blob uploads independently of auth. At least one of `credential`, a `provider`,
+`tls`, or `maxChunkSize` must be set.
 
 ```yaml
 hosts:
@@ -531,12 +536,14 @@ leave it unset when the registry validates a self-contained bearer token.
 
 `.hosts[].provider` selects how the host's registry credentials are obtained. It
 defaults to `generic`, an ordinary registry for which `credential` and/or `tls`
-configure the connection directly. The other values authenticate the host with a
+configure the connection directly. The cloud values authenticate the host with a
 cloud registry provider's workload identity — the same mechanism the
 `flux push artifact` family uses — and obtain the registry's native credentials
 directly. A cloud provider is mutually exclusive with `tls`; it composes with a
 `credential`, whose identity is exchanged for the cloud provider's registry
-credentials instead of using the ambient cloud identity.
+credentials instead of using the ambient cloud identity. The `dockerhub` value
+obtains credentials from a Docker Hub OIDC connection instead; see
+[Docker Hub OIDC provider](#docker-hub-oidc-provider).
 
 ##### Credential combinations
 
@@ -585,6 +592,9 @@ The supported `hosts[].provider` values are:
 - `gar`, for Google GAR. It uses Google Application Default Credentials. With a
   `credential`, the identity is exchanged through Google Workload Identity
   Federation.
+- `dockerhub`, for Docker Hub and Docker Hardened Images (`dhi.io`). It
+  exchanges the GitHub Actions OIDC identity for a Docker Hub access token; see
+  [Docker Hub OIDC provider](#docker-hub-oidc-provider).
 
 When a cloud `provider` carries a `credential`, the matching `.ecr`, `.acr`, or
 `.gar` block is required:
@@ -632,12 +642,57 @@ username/password pair through the standard registry auth challenge, and written
 as `username`/`password`/`auth` by [`login`](login.md) and
 [`secret`](secret.md).
 
+#### Docker Hub OIDC provider
+
+`provider: dockerhub` authenticates Docker Hub (`docker.io`,
+`index.docker.io`, `registry-1.docker.io`), Docker Hub staging
+(`registry-1-stage.docker.io`), and Docker Hardened Images (`dhi.io`) with a
+[Docker Hub OIDC connection](https://docs.docker.com/accounts/security/oidc/).
+It exchanges a GitHub Actions OIDC ID token for a short-lived Docker Hub access
+token, then presents that token as the password of the configured Docker Hub
+username through the standard registry auth challenge.
+
+Docker Hub OIDC connections accept only GitHub as the OIDC issuer, so the host
+implicitly uses the GitHub Actions identity: `ecr`, `acr`, `gar`, and `tls` are
+rejected. The only allowed `credential` fields are:
+
+- `.credential.username`, the Docker Hub account the token is issued for. It is
+  sent as the registry username. It is required.
+- `.credential.expiration`, the requested access token lifetime as a
+  [duration](https://pkg.go.dev/time#ParseDuration). It defaults to `1h` and
+  must be between `5m` and `6h`. Tokens are cached and refreshed when they
+  approach expiration.
+
+Every other `credential` field is rejected. The connection ID lives in
+`.dockerhub.connectionID`, the connection UUID from the Docker Hub organization
+settings. It is required.
+
+The audience is fixed by the registry host: `https://identity.docker.com`, or
+`https://identity-stage.docker.com` for `registry-1-stage.docker.io`. The job
+must grant the `id-token: write` permission.
+
+```yaml
+hosts:
+  - host: docker.io
+    provider: dockerhub
+    dockerhub:
+      connectionID: ${DOCKERHUB_OIDC_CONNECTIONID}
+    credential:
+      username: my-org
+      # expiration: 1h
+```
+
+When a Docker Hub OIDC connection is also selected as the source, set
+`direction: source` on one entry and `direction: destination` on another, as
+with any other host.
+
 #### Transport TLS
 
 `.hosts[].tls` configures transport-layer TLS for the host's registry requests,
 separately from the HTTP-layer `credential`. It is applied by `sync` (which
 connects to the registry); `login` and `secret` do not open registry connections
-and ignore it. It is not allowed on a cloud `provider` host. Exactly one of the
+and ignore it. It is not allowed on a cloud `provider` or `dockerhub` host.
+Exactly one of the
 following must be set:
 
 - `.path`, a directory laid out like a mounted Flux `certSecretRef` Secret:
