@@ -198,6 +198,26 @@ func TestProviderOptions(t *testing.T) {
 		g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderSPIFFE))
 		g.Expect(o.AWSRoleSessionSubdomain()).To(Equal(providerIdentity))
 	})
+
+	t.Run("dockerhub", func(t *testing.T) {
+		g := NewWithT(t)
+		opts := providerOptions(apiv1.RegistryHost{
+			Provider:  apiv1.RegistryProviderDockerHub,
+			DockerHub: &apiv1.DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+			Credential: &apiv1.RegistryCredential{
+				Username:   "my-org",
+				Expiration: &metav1.Duration{Duration: 2 * time.Hour},
+			},
+		})
+		var o auth.Options
+		o.Apply(opts...)
+		g.Expect(o.DockerHubOIDCConnectionID).To(Equal("00000000-0000-0000-0000-000000000000"))
+		g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderActionsOIDC))
+		g.Expect(o.CredentialUsername).To(Equal("my-org"))
+		g.Expect(o.CredentialExpiration).To(Equal(2 * time.Hour))
+		g.Expect(o.CredentialAudiences).To(BeEmpty())
+		g.Expect(o.GenericProviderIdentity()).To(Equal(providerIdentity))
+	})
 }
 
 func TestInputJWTCredentialProviderOptions(t *testing.T) {
@@ -366,9 +386,10 @@ func writeAuthorizedUserCreds(t *testing.T) string {
 func TestPkgAuthProviderName(t *testing.T) {
 	g := NewWithT(t)
 	cases := map[string]string{
-		apiv1.RegistryProviderECR: "aws",
-		apiv1.RegistryProviderACR: "azure",
-		apiv1.RegistryProviderGAR: "gcp",
+		apiv1.RegistryProviderECR:       "aws",
+		apiv1.RegistryProviderACR:       "azure",
+		apiv1.RegistryProviderGAR:       "gcp",
+		apiv1.RegistryProviderDockerHub: "dockerhub",
 	}
 	for in, want := range cases {
 		got, err := pkgAuthProviderName(in)
@@ -376,8 +397,15 @@ func TestPkgAuthProviderName(t *testing.T) {
 		g.Expect(got).To(Equal(want))
 	}
 
-	_, err := pkgAuthProviderName("dockerhub")
+	_, err := pkgAuthProviderName("unknown")
 	g.Expect(err).To(MatchError(ContainSubstring("unknown registry provider")))
+}
+
+func TestDockerHubKeychainHosts(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(dockerHubKeychainHosts("docker.io")).To(ConsistOf("docker.io", "index.docker.io"))
+	g.Expect(dockerHubKeychainHosts("index.docker.io")).To(ConsistOf("docker.io", "index.docker.io"))
+	g.Expect(dockerHubKeychainHosts("dhi.io")).To(Equal([]string{"dhi.io"}))
 }
 
 func TestHasCredentialAndTLSOnly(t *testing.T) {
@@ -391,15 +419,24 @@ func TestHasCredentialAndTLSOnly(t *testing.T) {
 	withGenericOnly := apiv1.RegistryHost{Host: "g.example", Provider: apiv1.RegistryProviderGeneric}
 	withGenericCred := apiv1.RegistryHost{Host: "gc.example", Provider: apiv1.RegistryProviderGeneric,
 		Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "X"}}
+	withDockerHub := apiv1.RegistryHost{Host: "docker.io", Provider: apiv1.RegistryProviderDockerHub,
+		DockerHub:  &apiv1.DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+		Credential: &apiv1.RegistryCredential{Username: "org"}}
 
 	g.Expect(HasCredential(tlsOnly)).To(BeFalse())
 	g.Expect(HasCredential(withCred)).To(BeTrue())
 	g.Expect(HasCredential(withProvider)).To(BeTrue())
+	g.Expect(HasCredential(withDockerHub)).To(BeTrue())
 	g.Expect(HasCredential(withGenericOnly)).To(BeFalse())
 	g.Expect(HasCredential(withGenericCred)).To(BeTrue())
+	g.Expect(NeedsCredentialTransport([]apiv1.RegistryHost{withDockerHub})).To(BeFalse())
+
+	kc, err := BuildKeychain(context.Background(), []apiv1.RegistryHost{withDockerHub}, nil)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(kc).ToNot(BeNil())
 
 	// A TLS-only host returns a clear error instead of panicking.
-	_, err := ResolveHostAuth(context.Background(), tlsOnly)
+	_, err = ResolveHostAuth(context.Background(), tlsOnly)
 	g.Expect(err).To(MatchError(ContainSubstring("no credential or provider configured")))
 }
 

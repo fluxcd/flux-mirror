@@ -184,7 +184,7 @@
       "description": "Hosts configures per-host authentication for OCI registry requests, both\nsource pulls and destination pushes.",
       "items": {
         "additionalProperties": false,
-        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential. A cloud Provider (ecr,\nacr, or gar) accepts a Credential whose identity is exchanged for the cloud\nprovider's access credential instead of using the ambient cloud identity. On a\ncloud provider host the credential source may be Provider (github, forgejo, or\nspiffe only), Value, FromPath, JWKPath, or JWKValue; Username and Envelope are\nrejected, as are the gcp, azure, and aws credential providers. TLS configures\nthe transport-layer TLS/mTLS settings: it composes with Credential and with the\ndefault (generic) Provider, but is mutually exclusive with a cloud Provider — a\ncloud registry provider is a managed registry whose transport flux-mirror does\nnot customize. At least one of Credential, a cloud Provider, TLS, or\nMaxChunkSize must be set.",
+        "description": "RegistryHost binds an authentication method to a registry host. Credential and\nProvider configure the HTTP-layer registry credential. A cloud Provider (ecr,\nacr, or gar) accepts a Credential whose identity is exchanged for the cloud\nprovider's access credential instead of using the ambient cloud identity. On a\ncloud provider host the credential source may be Provider (github, forgejo, or\nspiffe only), Value, FromPath, JWKPath, or JWKValue; Username and Envelope are\nrejected, as are the gcp, azure, and aws credential providers. The dockerhub\nProvider exchanges the ambient GitHub Actions OIDC identity for a Docker Hub\naccess token; it rejects ECR, ACR, GAR, and TLS, and only hosts a Credential\nwith Username and Expiration set. TLS configures the transport-layer TLS/mTLS\nsettings: it composes with Credential and with the default (generic) Provider,\nbut is mutually exclusive with a cloud Provider — a cloud registry provider is\na managed registry whose transport flux-mirror does not customize. At least\none of Credential, a Provider, TLS, or MaxChunkSize must be set.",
         "properties": {
           "acr": {
             "additionalProperties": false,
@@ -207,7 +207,7 @@
           },
           "credential": {
             "additionalProperties": false,
-            "description": "Credential configures the HTTP-layer registry credential for the host. A\ncloud Provider host accepts Value, FromPath, JWKPath, JWKValue, or a\ngithub, forgejo, or spiffe Provider; see RegistryCredential.",
+            "description": "Credential configures the HTTP-layer registry credential for the host. A\ncloud Provider host accepts Value, FromPath, JWKPath, JWKValue, or a\ngithub, forgejo, or spiffe Provider; a dockerhub Provider host accepts only\nUsername and Expiration. See RegistryCredential.",
             "properties": {
               "audiences": {
                 "description": "Audiences is the audience claim. Defaults to Host, or to the cloud\nprovider's federation audience on a cloud Provider host.",
@@ -221,7 +221,7 @@
                 "type": "string"
               },
               "expiration": {
-                "description": "Expiration is the jwkPath/jwkValue JWT lifetime. Defaults to 60s.",
+                "description": "Expiration is the jwkPath/jwkValue JWT lifetime, or the requested Docker\nHub OIDC access token lifetime on a dockerhub provider host. Defaults to\n60s for jwkPath/jwkValue and 1h for dockerhub.",
                 "type": "string"
               },
               "fromPath": {
@@ -264,7 +264,7 @@
                 "type": "string"
               },
               "username": {
-                "description": "Username presents the credential as the password of a username/password\npair. When unset, the credential is used as a bearer token. It is only\nvalid on a generic Provider host.",
+                "description": "Username presents the credential as the password of a username/password\npair. When unset, the credential is used as a bearer token. It is only\nvalid on a generic Provider host, or as the Docker Hub account on a\ndockerhub provider host.",
                 "type": "string"
               },
               "value": {
@@ -282,6 +282,20 @@
               "destination"
             ],
             "type": "string"
+          },
+          "dockerhub": {
+            "additionalProperties": false,
+            "description": "DockerHub configures the Docker Hub OIDC connection when this host uses\nthe dockerhub provider. The username and token lifetime are set on\nCredential.",
+            "properties": {
+              "connectionID": {
+                "description": "ConnectionID is the Docker Hub OIDC connection UUID from the Docker Hub\norganization settings. Environment substitution can fill it from an\nenvironment variable.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "connectionID"
+            ],
+            "type": "object"
           },
           "ecr": {
             "additionalProperties": false,
@@ -329,12 +343,13 @@
             "type": "integer"
           },
           "provider": {
-            "description": "Provider selects a cloud registry provider's workload-identity credentials\nfor the host: RegistryProviderECR, RegistryProviderACR, or\nRegistryProviderGAR. Omitted (or RegistryProviderGeneric) means an ordinary\nregistry, for which flux-mirror configures the credential and/or TLS\ndirectly. A cloud provider is mutually exclusive with TLS, but accepts a\nCredential to source the identity exchanged with the cloud provider. That\ncredential must come from Value, FromPath, JWKPath, JWKValue, or a github,\nforgejo, or spiffe Provider; see RegistryCredential.",
+            "description": "Provider selects how the host's registry credentials are obtained:\nRegistryProviderECR, RegistryProviderACR, RegistryProviderGAR, or\nRegistryProviderDockerHub. Omitted (or RegistryProviderGeneric) means an\nordinary registry, for which flux-mirror configures the credential and/or\nTLS directly. A cloud provider is mutually exclusive with TLS, but accepts a\nCredential to source the identity exchanged with the cloud provider. That\ncredential must come from Value, FromPath, JWKPath, JWKValue, or a github,\nforgejo, or spiffe Provider; see RegistryCredential. The dockerhub provider\nrejects TLS and accepts only Credential.Username and Credential.Expiration.",
             "enum": [
               "generic",
               "ecr",
               "acr",
-              "gar"
+              "gar",
+              "dockerhub"
             ],
             "type": "string"
           },
