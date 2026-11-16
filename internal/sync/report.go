@@ -9,7 +9,6 @@ import (
 	"io"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
 	apiv1 "github.com/fluxcd/flux-mirror/api/v1beta2"
@@ -25,11 +24,9 @@ func NewReport(reporter string, timestamp time.Time, r Result) apiv1.Report {
 		results = []apiv1.EntryResult{}
 	}
 	return apiv1.Report{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: apiv1.GroupVersion.String(),
-			Kind:       apiv1.ReportKind,
-		},
-		Schema: apiv1.ReportSchema,
+		APIVersion: apiv1.GroupVersion.String(),
+		Kind:       apiv1.ReportKind,
+		Schema:     apiv1.ReportSchema,
 		Report: apiv1.ReportSpec{
 			Reporter:   reporter,
 			Timestamp:  timestamp.UTC().Format(time.RFC3339),

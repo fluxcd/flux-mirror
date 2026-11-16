@@ -5,6 +5,7 @@ package oci
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"sync"
 	"testing"
@@ -80,9 +81,7 @@ func (t *countingTransport) counts() map[string]int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	out := make(map[string]int, len(t.seen))
-	for k, v := range t.seen {
-		out[k] = v
-	}
+	maps.Copy(out, t.seen)
 	return out
 }
 

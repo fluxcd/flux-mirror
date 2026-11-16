@@ -437,7 +437,7 @@ func TestValidate_RejectsDeprecatedV1Beta1(t *testing.T) {
 	g := NewWithT(t)
 
 	cfg := Config{
-		TypeMeta:  metav1.TypeMeta{APIVersion: DeprecatedV1Beta1APIVersion, Kind: ConfigKind},
+		APIVersion: DeprecatedV1Beta1APIVersion, Kind: ConfigKind,
 		Artifacts: validArtifact(),
 	}
 	g.Expect(Validate(&cfg)).To(MatchError(ContainSubstring(`apiVersion must be "mirror.plugin.fluxcd.io/v1beta2"`)))

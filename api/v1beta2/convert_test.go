@@ -17,10 +17,8 @@ func TestFromV1Beta1(t *testing.T) {
 	g := NewWithT(t)
 
 	in := &apiv1beta1.Config{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: apiv1beta1.GroupVersion.String(),
-			Kind:       apiv1beta1.ConfigKind,
-		},
+		APIVersion: apiv1beta1.GroupVersion.String(),
+		Kind:       apiv1beta1.ConfigKind,
 		Hosts: []apiv1beta1.RegistryHost{{
 			Host:     "registry.example.com",
 			Username: "robot",
@@ -242,10 +240,8 @@ func TestFromV1Beta1_RejectsUsernameWithoutCredential(t *testing.T) {
 func TestFromV1Beta1_PreservesKind(t *testing.T) {
 	g := NewWithT(t)
 	out, err := FromV1Beta1(&apiv1beta1.Config{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: apiv1beta1.GroupVersion.String(),
-			Kind:       "NotConfig",
-		},
+		APIVersion: apiv1beta1.GroupVersion.String(),
+		Kind:       "NotConfig",
 	})
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(out.Kind).To(Equal("NotConfig"))

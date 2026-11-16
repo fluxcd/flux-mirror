@@ -180,8 +180,7 @@ func (v *Verifier) Verify(ctx context.Context, ref string, cfg apiv1.ArtifactVer
 	// other minAge error (no Tlog timestamp) is a hard failure.
 	if cfg.MinAge != nil && cfg.MinAge.Duration > 0 {
 		if err := enforceMinAge(result, cfg.MinAge.Duration, time.Now()); err != nil {
-			var tooNew *SignatureTooNewError
-			if errors.As(err, &tooNew) {
+			if _, ok := errors.AsType[*SignatureTooNewError](err); ok {
 				return info, err
 			}
 			return nil, err
@@ -214,10 +213,7 @@ func enforceMinAge(result *verify.VerificationResult, minAge time.Duration, now 
 	if !ok {
 		return fmt.Errorf("cannot enforce minAge: no verified transparency log integrated timestamps found in signature bundle")
 	}
-	signatureAge := now.Sub(signatureTime)
-	if signatureAge < 0 {
-		signatureAge = 0
-	}
+	signatureAge := max(now.Sub(signatureTime), 0)
 	if signatureAge < minAge {
 		return &SignatureTooNewError{
 			IntegratedTime: signatureTime,

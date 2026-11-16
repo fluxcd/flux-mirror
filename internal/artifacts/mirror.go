@@ -134,8 +134,7 @@ func (m *mirror) Plan(ctx context.Context) (sync.Plan, error) {
 		}
 		info, err := m.opts.Verifier.Verify(ctx, job.src, *m.entry.Verify)
 		if err != nil {
-			var tooNew *oci.SignatureTooNewError
-			if errors.As(err, &tooNew) {
+			if tooNew, ok := errors.AsType[*oci.SignatureTooNewError](err); ok {
 				m.opts.Logger.Info("signature too new; skipping tag",
 					"src", job.src,
 					"integrated_time", tooNew.IntegratedTime.Format(time.RFC3339),

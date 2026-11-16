@@ -166,9 +166,9 @@ func buildDockerConfigSecret(name, namespace string, creds map[string]registryau
 		return nil, fmt.Errorf("marshal dockerconfigjson: %w", err)
 	}
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Type:       corev1.SecretTypeDockerConfigJson,
-		Data:       map[string][]byte{corev1.DockerConfigJsonKey: dockerCfg},
+		Name: name, Namespace: namespace,
+		Type: corev1.SecretTypeDockerConfigJson,
+		Data: map[string][]byte{corev1.DockerConfigJsonKey: dockerCfg},
 	}, nil
 }
 
