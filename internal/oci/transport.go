@@ -55,10 +55,7 @@ func (t *ChunkingTransport) chunkedUpload(req *http.Request, chunkSize int64) (*
 
 	for offset := int64(0); offset < total; {
 		remaining := total - offset
-		size := chunkSize
-		if remaining < size {
-			size = remaining
-		}
+		size := min(remaining, chunkSize)
 
 		// PATCH bodies need a known length and must be replayable for
 		// retries. The library hands us one reader for the original

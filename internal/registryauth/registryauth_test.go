@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -636,7 +637,7 @@ func TestMintAWSSTSToken_Audiences(t *testing.T) {
 			authz := claims.STS.Headers["Authorization"]
 			g.Expect(authz).To(HaveLen(1))
 			var signedHeaders []string
-			for _, part := range strings.Split(authz[0], ",") {
+			for part := range strings.SplitSeq(authz[0], ",") {
 				if v, ok := strings.CutPrefix(strings.TrimSpace(part), "SignedHeaders="); ok {
 					signedHeaders = strings.Split(v, ";")
 				}
@@ -649,9 +650,7 @@ func TestMintAWSSTSToken_Audiences(t *testing.T) {
 			// canonical request.
 			req, err := http.NewRequest(claims.STS.Method, claims.STS.URL, strings.NewReader(claims.STS.Body))
 			g.Expect(err).ToNot(HaveOccurred())
-			for k, vs := range claims.STS.Headers {
-				req.Header[k] = vs
-			}
+			maps.Copy(req.Header, claims.STS.Headers)
 			signedAt, err := time.Parse("20060102T150405Z", req.Header.Get("X-Amz-Date"))
 			g.Expect(err).ToNot(HaveOccurred())
 			sum := sha256.Sum256([]byte(claims.STS.Body))

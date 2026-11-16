@@ -27,6 +27,15 @@ all: test build ## Run test and build targets.
 
 ##@ Development
 
+.PHONY: fix
+fix: ## Run go fix against code until it makes no changes.
+	@while :; do \
+		before=$$(git diff --no-ext-diff --no-color HEAD -- '*.go' | cksum); \
+		go fix ./...; \
+		after=$$(git diff --no-ext-diff --no-color HEAD -- '*.go' | cksum); \
+		if [ "$$before" = "$$after" ]; then break; fi; \
+	done
+
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	go fmt ./...
@@ -40,7 +49,7 @@ tidy: ## Run go mod tidy.
 	go mod tidy
 
 .PHONY: test
-test: tidy fmt generate vet ## Run all unit tests.
+test: fix tidy fmt generate vet ## Run all unit tests.
 	go test ./... $(GO_TEST_ARGS) -coverprofile cover.out
 
 .PHONY: lint

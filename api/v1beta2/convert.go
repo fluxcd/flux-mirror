@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	apiv1beta1 "github.com/fluxcd/flux-mirror/api/v1beta1"
 )
 
@@ -29,7 +27,7 @@ func FromV1Beta1(in *apiv1beta1.Config) (*Config, error) {
 	out := &Config{
 		// Preserve the declared kind so Validate still rejects a mismatched one;
 		// Decode returns the source apiVersion separately for the warning.
-		TypeMeta: metav1.TypeMeta{APIVersion: GroupVersion.String(), Kind: in.Kind},
+		APIVersion: GroupVersion.String(), Kind: in.Kind,
 	}
 	for i, h := range in.Hosts {
 		converted, err := registryHostFromV1Beta1(h)

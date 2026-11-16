@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -465,12 +466,7 @@ func usesCredentialTransport(h apiv1.RegistryHost) bool {
 // directly). Credential hosts with a username and provider hosts go through the
 // keychain instead.
 func NeedsCredentialTransport(hosts []apiv1.RegistryHost) bool {
-	for _, h := range hosts {
-		if usesCredentialTransport(h) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(hosts, usesCredentialTransport)
 }
 
 // NewCredentialTransport wraps inner with a cijwt transport that stamps the
