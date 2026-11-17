@@ -44,6 +44,11 @@ type Runner struct {
 	// OnJobFinished — there are no jobs to report on — so this is the only
 	// path the cmd layer has to surface them in real time.
 	OnPlanError func(entry string, err error)
+
+	// OnEntryResult, if non-nil, is invoked from the main goroutine once per
+	// entry with its final result, right after the entry completes. Used by
+	// the cmd layer to stream results as they become available.
+	OnEntryResult func(res apiv1.EntryResult)
 }
 
 // Run executes all mirrors and returns a Result aggregating their outcomes.
@@ -93,6 +98,9 @@ func (r *Runner) Run(ctx context.Context, mirrors []EntryMirror) (res Result, er
 			}
 		}
 		res.Entries = append(res.Entries, entryRes)
+		if r.OnEntryResult != nil {
+			r.OnEntryResult(entryRes)
+		}
 		if r.OnEntryFinished != nil {
 			r.OnEntryFinished(entryRes.Source)
 		}

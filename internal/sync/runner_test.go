@@ -6,9 +6,11 @@ package sync
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -408,6 +410,27 @@ func TestReport_Render(t *testing.T) {
 	g.Expect(RenderReport(&yamlBuf, "yaml", report)).To(Succeed())
 	g.Expect(yamlBuf.String()).ToNot(ContainSubstring("$schema"))
 
+	// LogEntry/LogReportSummary: one record per entry followed by a summary record.
+	var jsonlBuf bytes.Buffer
+	jl := slog.New(slog.NewJSONHandler(&jsonlBuf, nil))
+	for _, e := range report.Report.Results {
+		LogEntry(jl, e)
+	}
+	LogReportSummary(jl, report)
+	lines := strings.Split(strings.TrimSpace(jsonlBuf.String()), "\n")
+	g.Expect(lines).To(HaveLen(len(report.Report.Results) + 1))
+	for i, line := range lines {
+		var doc map[string]any
+		g.Expect(json.Unmarshal([]byte(line), &doc)).To(Succeed())
+		if i < len(lines)-1 {
+			g.Expect(doc).To(HaveKeyWithValue("msg", "entry"))
+			g.Expect(doc).To(HaveKey("entry"))
+		} else {
+			g.Expect(doc).To(HaveKeyWithValue("msg", "summary"))
+			g.Expect(doc).To(HaveKey("summary"))
+		}
+	}
+
 	var buf bytes.Buffer
 	g.Expect(RenderReport(&buf, "text", report)).To(MatchError(ContainSubstring("unsupported")))
 	g.Expect(RenderReport(&buf, "xml", report)).To(MatchError(ContainSubstring("unsupported")))
@@ -421,6 +444,59 @@ func TestReport_EmptyResults(t *testing.T) {
 	var buf bytes.Buffer
 	g.Expect(RenderReport(&buf, "json", report)).To(Succeed())
 	g.Expect(buf.String()).To(ContainSubstring(`"results": []`))
+
+	// LogReportSummary still emits a single summary record when there are no entries.
+	var jsonlBuf bytes.Buffer
+	jl := slog.New(slog.NewJSONHandler(&jsonlBuf, nil))
+	for _, e := range report.Report.Results {
+		LogEntry(jl, e)
+	}
+	LogReportSummary(jl, report)
+	lines := strings.Split(strings.TrimSpace(jsonlBuf.String()), "\n")
+	g.Expect(lines).To(HaveLen(1))
+	g.Expect(lines[0]).To(ContainSubstring(`"summary"`))
+}
+
+func TestLogEntry_FailedTagIsErrorLevel(t *testing.T) {
+	g := NewWithT(t)
+	// The entry completed, but one tag job failed.
+	e := EntryResult{
+		Source: "src", Destination: "dst", Status: EntryCompleted,
+		Tags: []TagResult{
+			{Tag: "v1", Status: StatusCopied},
+			{Tag: "v2", Status: StatusFailed, Error: "boom"},
+		},
+	}
+	var buf bytes.Buffer
+	LogEntry(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError})), e)
+	g.Expect(buf.String()).To(ContainSubstring(`"level":"ERROR"`))
+	g.Expect(buf.String()).To(ContainSubstring("boom"))
+
+	buf.Reset()
+	ok := EntryResult{Source: "src", Status: EntryCompleted, Tags: []TagResult{{Tag: "v1", Status: StatusCopied}}}
+	LogEntry(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError})), ok)
+	g.Expect(buf.String()).To(BeEmpty())
+}
+
+func TestResult_LogSummary_FailuresAtErrorLevel(t *testing.T) {
+	g := NewWithT(t)
+	res := Result{Entries: []EntryResult{{
+		Source: "src", Status: EntryCompleted,
+		Tags: []TagResult{{Tag: "v2", Status: StatusFailed, Error: "boom"}},
+	}}}
+	var buf bytes.Buffer
+	res.LogSummary(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError})))
+	out := buf.String()
+	g.Expect(out).To(ContainSubstring(`msg="tag failed"`))
+	g.Expect(out).To(ContainSubstring("tag=v2"))
+	g.Expect(out).To(ContainSubstring("error=boom"))
+	g.Expect(out).To(ContainSubstring(`msg="sync complete"`))
+
+	// A clean result logs nothing at error level.
+	buf.Reset()
+	Result{Entries: []EntryResult{{Source: "src", Status: EntryCompleted}}}.
+		LogSummary(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError})))
+	g.Expect(buf.String()).To(BeEmpty())
 }
 
 func TestResult_LogSummary(t *testing.T) {

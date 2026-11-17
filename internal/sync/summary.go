@@ -4,6 +4,7 @@
 package sync
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -138,9 +139,27 @@ func (r Result) PrettyPrint(w io.Writer) error {
 // "sync complete" total, all through the supplied logger so they share
 // the same timestamp/format as the per-tag progress logs above them.
 func (r Result) LogSummary(logger *slog.Logger) {
+	ctx := context.Background()
 	totals := map[apiv1.Status]int{}
 	for _, e := range r.Entries {
-		logger.Info("entry summary", entryAttrs(e)...)
+		// Failed tags and entries are logged at error level with their
+		// message, so they stay visible under a high --log-level.
+		if e.Error != "" {
+			logger.LogAttrs(ctx, slog.LevelError, "entry failed",
+				slog.String("source", e.Source), slog.String("error", e.Error))
+		}
+		for _, t := range e.Tags {
+			if t.Status == apiv1.StatusFailed || t.Error != "" {
+				logger.LogAttrs(ctx, slog.LevelError, "tag failed",
+					slog.String("source", e.Source), slog.String("tag", t.Tag),
+					slog.String("error", t.Error))
+			}
+		}
+		level := slog.LevelInfo
+		if entryHasFailure(e) {
+			level = slog.LevelError
+		}
+		logger.Log(ctx, level, "entry summary", entryAttrs(e)...)
 		for st, n := range entryStatusCounts(e) {
 			if st == apiv1.StatusFailed {
 				continue
@@ -148,7 +167,27 @@ func (r Result) LogSummary(logger *slog.Logger) {
 			totals[st] += n
 		}
 	}
-	logger.Info("sync complete", totalAttrs(len(r.Entries), totals, r.TotalFailures(), r.Duration)...)
+	level := slog.LevelInfo
+	switch {
+	case r.TotalFailures() > 0:
+		level = slog.LevelError
+	case r.TotalDrifted() > 0:
+		level = slog.LevelWarn
+	}
+	logger.Log(ctx, level, "sync complete", totalAttrs(len(r.Entries), totals, r.TotalFailures(), r.Duration)...)
+}
+
+// entryHasFailure reports whether the entry itself or any of its tags failed.
+func entryHasFailure(e apiv1.EntryResult) bool {
+	if e.Status == apiv1.EntryFailed || e.Error != "" {
+		return true
+	}
+	for _, t := range e.Tags {
+		if t.Status == apiv1.StatusFailed || t.Error != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // statusCounts tallies non-failed tag rows by status across the whole result.

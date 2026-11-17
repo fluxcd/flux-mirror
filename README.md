@@ -45,7 +45,8 @@ on upstream chart repositories.
   SPIFFE JWT-SVID, env vars, files, or JWK-signed JWTs. Per-host TLS/mTLS (a
   certificate directory, inline PEMs, or SPIFFE X.509-SVID) is also supported.
   Helm HTTP/S credentials come from Helm's repositories config.
-- **Structured output** — `text` and `yaml`/`json` for downstream
+- **Structured output** — `text`, `yaml`, `json`, and `jsonl` (JSON log
+  records, one per entry plus a summary, for log scrapers) for downstream
   tooling, plus a verbose mode that streams every blob and manifest digest
   for diagnosing TLS, auth, or push failures.
 
@@ -209,7 +210,7 @@ destination registry credentials from a `Secret` created via
 | `flux mirror login`         | Store configured credentials in the Docker config (or OS keychain).                       |
 | `flux mirror secret <name>` | Create/replace (upsert) a `dockerconfigjson` Kubernetes Secret with per-host credentials. |
 | `flux mirror keygen`        | Generate a JWK pair for JWK-based registry auth.                                           |
-| `flux mirror version`       | Print the CLI version.                                                                    |
+| `flux mirror version`       | Print the CLI version (`-o jsonl` prints a compact one-line JSON object, not a log record). |
 | `flux mirror completion`    | Generate shell completion for bash, fish, powershell and zsh.                             |
 
 Run `flux mirror <command> --help` for the full flag list.

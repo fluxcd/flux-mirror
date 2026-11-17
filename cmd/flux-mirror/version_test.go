@@ -49,6 +49,14 @@ func TestVersionCmd(t *testing.T) {
 			},
 		},
 		{
+			name: "jsonl output",
+			args: []string{"version", "-o", "jsonl"},
+			expectedOutput: []string{
+				`"version":"` + VERSION + `"`,
+				`"goVersion":"` + runtime.Version() + `"`,
+			},
+		},
+		{
 			name:        "invalid output format",
 			args:        []string{"version", "-o", "xml"},
 			expectError: true,
