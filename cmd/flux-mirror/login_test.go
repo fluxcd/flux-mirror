@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/mldsa"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	dockercfg "github.com/docker/cli/cli/config"
+	jose "github.com/go-jose/go-jose/v4"
 	gojwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -516,4 +518,44 @@ func TestLogin_RootTimeoutCancelsCredentialResolution(t *testing.T) {
 		"--plaintext",
 	})
 	g.Expect(err).To(MatchError(ContainSubstring("context deadline exceeded")))
+}
+
+// TestLogin_MLDSAJWKPath proves login signs with an RFC 9964 AKP key, where the
+// JWK "alg" member is the only description of the ML-DSA parameter set.
+func TestLogin_MLDSAJWKPath(t *testing.T) {
+	g := NewWithT(t)
+
+	priv, err := mldsa.GenerateKey(mldsa.MLDSA44())
+	g.Expect(err).ToNot(HaveOccurred())
+	jwk, err := json.Marshal(jose.JSONWebKey{Key: priv, KeyID: "pq", Algorithm: "ML-DSA-44"})
+	g.Expect(err).ToNot(HaveOccurred())
+
+	dir := t.TempDir()
+	g.Expect(os.WriteFile(filepath.Join(dir, "jwk.json"), jwk, 0o600)).To(Succeed())
+	cfg := writeLoginConfigIn(t, dir,
+		"      jwkPath: jwk.json\n"+
+			"      issuer: https://issuer.example\n"+
+			"      subject: client-id\n")
+
+	cred, err := loginStore(t, cfg, "")
+	g.Expect(err).ToNot(HaveOccurred())
+
+	claims := parseClaimsUnverified(t, cred)
+	g.Expect(claims["iss"]).To(Equal("https://issuer.example"))
+	g.Expect(claims["sub"]).To(Equal("client-id"))
+	g.Expect(claims["aud"]).To(ContainElement("registry.example.com"))
+}
+
+// parseClaimsUnverified decodes a compact JWS payload without going through a
+// JWT parser, so it also works for algorithms the parser does not know.
+func parseClaimsUnverified(t *testing.T, token string) map[string]any {
+	t.Helper()
+	g := NewWithT(t)
+	parts := strings.Split(token, ".")
+	g.Expect(parts).To(HaveLen(3))
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	g.Expect(err).ToNot(HaveOccurred())
+	claims := map[string]any{}
+	g.Expect(json.Unmarshal(payload, &claims)).To(Succeed())
+	return claims
 }
