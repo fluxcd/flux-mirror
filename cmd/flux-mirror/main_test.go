@@ -67,6 +67,7 @@ func resetCmdArgs() {
 	}
 	loginArgs = loginFlags{}
 	secretArgs = secretFlags{}
+	keygenArgs = keygenFlags{outputDir: "."}
 
 	// pflag.Flag.Changed persists across Execute calls on the shared rootCmd,
 	// and some bool flag values (notably --help=true) also persist. Reset the
