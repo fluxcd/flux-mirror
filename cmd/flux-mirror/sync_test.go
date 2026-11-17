@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/mldsa"
 	"crypto/rand"
 	"encoding/json"
 	"encoding/pem"
@@ -128,6 +129,36 @@ func TestJWTTransportOptions(t *testing.T) {
 		g.Expect(err).ToNot(HaveOccurred())
 		_, err = cijwt.NewTransport(opts...)
 		g.Expect(err).ToNot(HaveOccurred())
+	})
+
+	t.Run("jwkPath signs with a post-quantum key", func(t *testing.T) {
+		g := NewWithT(t)
+		priv, err := mldsa.GenerateKey(mldsa.MLDSA44())
+		g.Expect(err).ToNot(HaveOccurred())
+		jwk, err := json.Marshal(jose.JSONWebKey{Key: priv, KeyID: "pq", Algorithm: "ML-DSA-44"})
+		g.Expect(err).ToNot(HaveOccurred())
+
+		hosts := []apiv1.RegistryHost{{
+			Host: "registry.example",
+			Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT,
+				JWKPath:   writeJWKFile(t, jwk),
+				Issuer:    "https://issuer.example",
+				Subject:   "client-id",
+				Audiences: []string{"registry.example"},
+			},
+		}}
+		rec := &authRecordingRT{}
+		opts, err := registryauth.JWTTransportOptions(rec, hosts)
+		g.Expect(err).ToNot(HaveOccurred())
+		tr, err := cijwt.NewTransport(opts...)
+		g.Expect(err).ToNot(HaveOccurred())
+
+		req, err := http.NewRequest(http.MethodGet, "https://registry.example/v2/", nil)
+		g.Expect(err).ToNot(HaveOccurred())
+		_, err = tr.RoundTrip(req)
+		g.Expect(err).ToNot(HaveOccurred())
+		g.Expect(rec.auths).To(HaveLen(1))
+		g.Expect(rec.auths[0]).To(HavePrefix("Bearer "))
 	})
 
 	t.Run("jwkPath with unreadable file errors", func(t *testing.T) {
@@ -732,4 +763,14 @@ func TestSync_BadOutputFormat(t *testing.T) {
 	cfgPath := writeConfig(t, "ghcr.io/a/b", "ghcr.io/c/d")
 	_, err := executeCommand([]string{"sync", cfgPath, "-o", "xml"})
 	g.Expect(err).To(HaveOccurred())
+}
+
+// authRecordingRT records Authorization headers without performing a request.
+type authRecordingRT struct {
+	auths []string
+}
+
+func (r *authRecordingRT) RoundTrip(req *http.Request) (*http.Response, error) {
+	r.auths = append(r.auths, req.Header.Get("Authorization"))
+	return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: http.Header{}}, nil
 }

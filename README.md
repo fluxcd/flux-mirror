@@ -208,7 +208,7 @@ destination registry credentials from a `Secret` created via
 | `flux mirror sync [CONFIG]` | Mirror Helm charts and OCI artifacts described by a YAML config.                          |
 | `flux mirror login`         | Store configured credentials in the Docker config (or OS keychain).                       |
 | `flux mirror secret <name>` | Create/replace (upsert) a `dockerconfigjson` Kubernetes Secret with per-host credentials. |
-| `flux mirror keygen`        | Generate an EdDSA JWK pair for JWK-based registry auth.                                   |
+| `flux mirror keygen`        | Generate a JWK pair for JWK-based registry auth.                                           |
 | `flux mirror version`       | Print the CLI version.                                                                    |
 | `flux mirror completion`    | Generate shell completion for bash, fish, powershell and zsh.                             |
 
@@ -223,7 +223,7 @@ Run `flux mirror <command> --help` for the full flag list.
   defaults, and the published [JSON Schema](docs/config-v1beta2.json).
 - [Sync report reference](docs/report.md) — report envelope and its
   published [JSON Schema](docs/report-v1beta2.json) for `-o json` / `-o yaml`.
-- [Keygen command reference](docs/keygen.md) — generate EdDSA JWK pairs for
+- [Keygen command reference](docs/keygen.md) — generate JWK pairs for
   JWK-based registry auth.
 - [Login command reference](docs/login.md) — store configured credentials in
   the Docker config or OS keychain.
