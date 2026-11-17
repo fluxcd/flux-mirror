@@ -131,7 +131,7 @@ func TestProviderOptions(t *testing.T) {
 			})
 			var o auth.Options
 			o.Apply(opts...)
-			g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderActionsOIDC))
+			g.Expect(o.CredentialProvider).To(Equal(provider))
 			g.Expect(o.CredentialAudiences).To(Equal([]string{"sts.amazonaws.com"}))
 			g.Expect(o.AWSRoleARN).To(Equal("arn:aws:iam::123:role/mirror"))
 			g.Expect(o.AWSSTSEndpoint).To(Equal("https://sts.example.com"))
@@ -158,7 +158,7 @@ func TestProviderOptions(t *testing.T) {
 		})
 		var o auth.Options
 		o.Apply(opts...)
-		g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderActionsOIDC))
+		g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderForgejo))
 		g.Expect(o.CredentialAudiences).To(BeEmpty())
 		g.Expect(o.AzureTenantID).To(Equal("tenant"))
 		g.Expect(o.AzureClientID).To(Equal("client"))
@@ -179,7 +179,7 @@ func TestProviderOptions(t *testing.T) {
 		})
 		var o auth.Options
 		o.Apply(opts...)
-		g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderActionsOIDC))
+		g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderGitHub))
 		g.Expect(o.GCPWorkloadIdentityProvider).To(Equal("projects/1/locations/global/workloadIdentityPools/p/providers/x"))
 		g.Expect(o.GCPServiceAccount).To(Equal("mirror@example.iam.gserviceaccount.com"))
 	})
@@ -198,6 +198,48 @@ func TestProviderOptions(t *testing.T) {
 		o.Apply(opts...)
 		g.Expect(o.CredentialProvider).To(Equal(cryptov1.CredentialProviderSPIFFE))
 		g.Expect(o.AWSRoleSessionSubdomain()).To(Equal(providerIdentity))
+	})
+
+	for _, provider := range []string{apiv1.JWTProviderGitHub, apiv1.JWTProviderForgejo, apiv1.JWTProviderSPIFFE} {
+		t.Run("dockerhub "+provider, func(t *testing.T) {
+			g := NewWithT(t)
+			opts := providerOptions(apiv1.RegistryHost{
+				Provider:  apiv1.RegistryProviderDockerHub,
+				DockerHub: &apiv1.DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+				Credential: &apiv1.RegistryCredential{
+					Provider:   provider,
+					Username:   "my-org",
+					Expiration: &metav1.Duration{Duration: 2 * time.Hour},
+				},
+			})
+			var o auth.Options
+			o.Apply(opts...)
+			g.Expect(o.DockerHubOIDCConnectionID).To(Equal("00000000-0000-0000-0000-000000000000"))
+			g.Expect(o.CredentialProvider).To(Equal(provider))
+			g.Expect(o.CredentialUsername).To(Equal("my-org"))
+			g.Expect(o.CredentialExpiration).To(Equal(2 * time.Hour))
+			g.Expect(o.CredentialAudiences).To(BeEmpty())
+			g.Expect(o.GenericProviderIdentity()).To(Equal(providerIdentity))
+		})
+	}
+
+	t.Run("dockerhub local JWT", func(t *testing.T) {
+		g := NewWithT(t)
+		opts := providerOptions(apiv1.RegistryHost{
+			Provider:  apiv1.RegistryProviderDockerHub,
+			DockerHub: &apiv1.DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+			Credential: &apiv1.RegistryCredential{
+				Value:    "TOKEN",
+				Username: "my-org",
+			},
+		})
+		var o auth.Options
+		o.Apply(opts...)
+		g.Expect(o.DockerHubOIDCConnectionID).To(Equal("00000000-0000-0000-0000-000000000000"))
+		g.Expect(o.CredentialProvider).To(BeEmpty())
+		g.Expect(o.JWTCredential).To(BeNil())
+		g.Expect(o.CredentialUsername).To(Equal("my-org"))
+		g.Expect(o.GenericProviderIdentity()).To(Equal(providerIdentity))
 	})
 }
 
@@ -219,7 +261,7 @@ func TestInputJWTCredentialProviderOptions(t *testing.T) {
 	g.Expect(o.AWSRoleARN).To(Equal("arn:aws:iam::123:role/mirror"))
 }
 
-func TestCloudAudiences(t *testing.T) {
+func TestExchangeAudiences(t *testing.T) {
 	garWIP := "projects/1/locations/global/workloadIdentityPools/p/providers/x"
 	for _, tt := range []struct {
 		name string
@@ -246,6 +288,24 @@ func TestCloudAudiences(t *testing.T) {
 			want: []string{cryptov1.GetDefaultAudienceGCP(garWIP)},
 		},
 		{
+			name: "dockerhub default",
+			host: apiv1.RegistryHost{
+				Host:       "docker.io",
+				Provider:   apiv1.RegistryProviderDockerHub,
+				Credential: &apiv1.RegistryCredential{},
+			},
+			want: []string{"https://identity.docker.com"},
+		},
+		{
+			name: "dockerhub staging",
+			host: apiv1.RegistryHost{
+				Host:       "registry-1-stage.docker.io",
+				Provider:   apiv1.RegistryProviderDockerHub,
+				Credential: &apiv1.RegistryCredential{},
+			},
+			want: []string{"https://identity-stage.docker.com"},
+		},
+		{
 			name: "explicit audiences win",
 			host: apiv1.RegistryHost{
 				Provider: apiv1.RegistryProviderECR,
@@ -258,7 +318,7 @@ func TestCloudAudiences(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			got, err := cloudAudiences(tt.host)
+			got, err := exchangeAudiences(tt.host)
 			g.Expect(err).ToNot(HaveOccurred())
 			g.Expect(got).To(Equal(tt.want))
 		})
@@ -367,9 +427,10 @@ func writeAuthorizedUserCreds(t *testing.T) string {
 func TestPkgAuthProviderName(t *testing.T) {
 	g := NewWithT(t)
 	cases := map[string]string{
-		apiv1.RegistryProviderECR: "aws",
-		apiv1.RegistryProviderACR: "azure",
-		apiv1.RegistryProviderGAR: "gcp",
+		apiv1.RegistryProviderECR:       "aws",
+		apiv1.RegistryProviderACR:       "azure",
+		apiv1.RegistryProviderGAR:       "gcp",
+		apiv1.RegistryProviderDockerHub: "dockerhub",
 	}
 	for in, want := range cases {
 		got, err := pkgAuthProviderName(in)
@@ -377,8 +438,38 @@ func TestPkgAuthProviderName(t *testing.T) {
 		g.Expect(got).To(Equal(want))
 	}
 
-	_, err := pkgAuthProviderName("dockerhub")
+	_, err := pkgAuthProviderName("unknown")
 	g.Expect(err).To(MatchError(ContainSubstring("unknown registry provider")))
+}
+
+func TestDockerHubProviderAuthenticator(t *testing.T) {
+	g := NewWithT(t)
+	host := apiv1.RegistryHost{
+		Host:       "docker.io",
+		Provider:   apiv1.RegistryProviderDockerHub,
+		DockerHub:  &apiv1.DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+		Credential: &apiv1.RegistryCredential{Value: "TOKEN", Username: "org"},
+	}
+
+	// A locally acquired credential is exchanged by the input JWT authenticator.
+	a, err := providerAuthenticator(context.Background(), host, nil)
+	g.Expect(err).ToNot(HaveOccurred())
+	_, ok := a.(*inputJWTAuthenticator)
+	g.Expect(ok).To(BeTrue())
+
+	// A credential provider is acquired and exchanged by pkg/auth.
+	host.Credential = &apiv1.RegistryCredential{Provider: apiv1.JWTProviderGitHub, Username: "org"}
+	a, err = providerAuthenticator(context.Background(), host, nil)
+	g.Expect(err).ToNot(HaveOccurred())
+	_, ok = a.(*inputJWTAuthenticator)
+	g.Expect(ok).To(BeFalse())
+}
+
+func TestDockerHubKeychainHosts(t *testing.T) {
+	g := NewWithT(t)
+	g.Expect(dockerHubKeychainHosts("docker.io")).To(ConsistOf("docker.io", "index.docker.io"))
+	g.Expect(dockerHubKeychainHosts("index.docker.io")).To(ConsistOf("docker.io", "index.docker.io"))
+	g.Expect(dockerHubKeychainHosts("dhi.io")).To(Equal([]string{"dhi.io"}))
 }
 
 func TestHasCredentialAndTLSOnly(t *testing.T) {
@@ -392,15 +483,24 @@ func TestHasCredentialAndTLSOnly(t *testing.T) {
 	withGenericOnly := apiv1.RegistryHost{Host: "g.example", Provider: apiv1.RegistryProviderGeneric}
 	withGenericCred := apiv1.RegistryHost{Host: "gc.example", Provider: apiv1.RegistryProviderGeneric,
 		Credential: &apiv1.RegistryCredential{Type: apiv1.CredentialTypeJWT, Value: "X"}}
+	withDockerHub := apiv1.RegistryHost{Host: "docker.io", Provider: apiv1.RegistryProviderDockerHub,
+		DockerHub:  &apiv1.DockerHubConfig{ConnectionID: "00000000-0000-0000-0000-000000000000"},
+		Credential: &apiv1.RegistryCredential{Username: "org"}}
 
 	g.Expect(HasCredential(tlsOnly)).To(BeFalse())
 	g.Expect(HasCredential(withCred)).To(BeTrue())
 	g.Expect(HasCredential(withProvider)).To(BeTrue())
+	g.Expect(HasCredential(withDockerHub)).To(BeTrue())
 	g.Expect(HasCredential(withGenericOnly)).To(BeFalse())
 	g.Expect(HasCredential(withGenericCred)).To(BeTrue())
+	g.Expect(NeedsCredentialTransport([]apiv1.RegistryHost{withDockerHub})).To(BeFalse())
+
+	kc, err := BuildKeychain(context.Background(), []apiv1.RegistryHost{withDockerHub}, nil)
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(kc).ToNot(BeNil())
 
 	// A TLS-only host returns a clear error instead of panicking.
-	_, err := ResolveHostAuth(context.Background(), tlsOnly)
+	_, err = ResolveHostAuth(context.Background(), tlsOnly)
 	g.Expect(err).To(MatchError(ContainSubstring("no credential or provider configured")))
 }
 
