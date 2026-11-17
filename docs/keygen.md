@@ -5,9 +5,10 @@ linkTitle: Keygen Command
 
 # Flux Mirror Keygen Command
 
-The `flux mirror keygen` command generates an EdDSA (Ed25519) JSON Web Key pair
-for [JWK-based registry auth](config.md#per-host-credential). The output
-files plug directly into the
+The `flux mirror keygen` command generates a JSON Web Key pair
+for [JWK-based registry auth](config.md#per-host-credential). EdDSA (Ed25519) is
+the default; `--alg` selects one of the FIPS 204 ML-DSA parameter sets instead.
+The output files plug directly into the
 [`hosts[].credential.jwkPath`](config.md#per-host-credential) config field,
 which [`sync`](sync.md) and [`login`](login.md) use to sign JWTs.
 
@@ -28,11 +29,31 @@ Both files use the standard JWK set shape `{"keys":[...]}`. The two keys share a
 UUIDv6 `kid` so a signature made with the private key can be matched against the
 public set.
 
+## Algorithms
+
+| `--alg`           | Key type               | Key member | Signature |
+|-------------------|------------------------|------------|-----------|
+| `EdDSA` (default) | `OKP`, `crv: Ed25519`  | `x`        | 64 B      |
+| `ML-DSA-44`       | `AKP`                  | `pub`      | 2420 B    |
+| `ML-DSA-65`       | `AKP`                  | `pub`      | 3309 B    |
+| `ML-DSA-87`       | `AKP`                  | `pub`      | 4627 B    |
+
+EdDSA keys are written as [RFC 8037](https://www.rfc-editor.org/rfc/rfc8037)
+`OKP` keys. ML-DSA keys are written as
+[RFC 9964](https://www.rfc-editor.org/rfc/rfc9964) `AKP` keys: their `alg` member
+identifies the parameter set and the private key is the 32-byte seed.
+
+The registry must support the selected algorithm to verify the tokens. ML-DSA
+signatures are much larger than EdDSA's, which makes the resulting JWTs much
+larger too — roughly 5 KB for `ML-DSA-65` before any credential envelope — so
+check HTTP header and proxy limits before choosing one.
+
 ## Flags
 
 | Flag               | Default | Description                                                                   |
 |--------------------|---------|-------------------------------------------------------------------------------|
-| `-o, --output-dir` | `.`     | Directory to write `pubkey.json` and `privkey.json` into. Created if missing. |
+| `-o, --output-dir` | `.`     | Directory to write `pubkey.json` and `privkey.json` into. Created if missing.  |
+| `--alg`            | `EdDSA` | Signing algorithm: `EdDSA`, `ML-DSA-44`, `ML-DSA-65` or `ML-DSA-87`.           |
 
 ## Behavior
 
@@ -48,6 +69,9 @@ flux mirror keygen
 
 # Write a key pair into ./keys/registry (created if missing).
 flux mirror keygen -o ./keys/registry
+
+# Write an ML-DSA-65 key pair into ./keys/registry (created if missing).
+flux mirror keygen -o ./keys/registry --alg ML-DSA-65
 ```
 
 Output:

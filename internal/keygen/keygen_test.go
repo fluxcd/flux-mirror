@@ -18,7 +18,7 @@ func TestSig(t *testing.T) {
 	t.Run("writes pubkey.json and privkey.json with matching kid", func(t *testing.T) {
 		dir := t.TempDir()
 
-		res, err := Sig(dir)
+		res, err := Sig(dir, jose.EdDSA)
 		if err != nil {
 			t.Fatalf("Sig: %v", err)
 		}
@@ -67,7 +67,7 @@ func TestSig(t *testing.T) {
 
 	t.Run("creates missing directories", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "a", "b", "c")
-		if _, err := Sig(dir); err != nil {
+		if _, err := Sig(dir, jose.EdDSA); err != nil {
 			t.Fatalf("Sig: %v", err)
 		}
 		if _, err := os.Stat(filepath.Join(dir, PubKeyFile)); err != nil {
@@ -80,7 +80,7 @@ func TestSig(t *testing.T) {
 			t.Skip("unix permission bits not meaningful on windows")
 		}
 		dir := t.TempDir()
-		res, err := Sig(dir)
+		res, err := Sig(dir, jose.EdDSA)
 		if err != nil {
 			t.Fatalf("Sig: %v", err)
 		}
@@ -105,7 +105,7 @@ func TestSig(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, PrivKeyFile), []byte("existing"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Sig(dir); err == nil {
+		if _, err := Sig(dir, jose.EdDSA); err == nil {
 			t.Fatalf("expected error, got nil")
 		}
 		// Public key must not have been written either.
@@ -127,7 +127,7 @@ func TestSig(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, PubKeyFile), []byte("existing"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Sig(dir); err == nil {
+		if _, err := Sig(dir, jose.EdDSA); err == nil {
 			t.Fatalf("expected error, got nil")
 		}
 		// Private key must not have been written.
@@ -137,17 +137,17 @@ func TestSig(t *testing.T) {
 	})
 
 	t.Run("empty dir errors", func(t *testing.T) {
-		if _, err := Sig(""); err == nil {
+		if _, err := Sig("", jose.EdDSA); err == nil {
 			t.Fatalf("expected error, got nil")
 		}
 	})
 
 	t.Run("generates a distinct kid on each call", func(t *testing.T) {
-		a, err := Sig(t.TempDir())
+		a, err := Sig(t.TempDir(), jose.EdDSA)
 		if err != nil {
 			t.Fatal(err)
 		}
-		b, err := Sig(t.TempDir())
+		b, err := Sig(t.TempDir(), jose.EdDSA)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -168,4 +168,77 @@ func readJWKS(t *testing.T, path string) jose.JSONWebKeySet {
 		t.Fatalf("unmarshal %s: %v", path, err)
 	}
 	return set
+}
+
+// TestSig_Algorithms proves every documented --alg value produces a usable key
+// pair whose JWKS carries the matching "alg", and that the private half signs
+// what the public half verifies.
+func TestSig_Algorithms(t *testing.T) {
+	for _, alg := range Algorithms {
+		t.Run(string(alg), func(t *testing.T) {
+			dir := t.TempDir()
+			res, err := Sig(dir, alg)
+			if err != nil {
+				t.Fatalf("Sig: %v", err)
+			}
+
+			pubSet := readJWKS(t, res.PubPath)
+			privSet := readJWKS(t, res.PrivPath)
+			if len(pubSet.Keys) != 1 || len(privSet.Keys) != 1 {
+				t.Fatalf("expected 1 key in each set, got pub=%d priv=%d", len(pubSet.Keys), len(privSet.Keys))
+			}
+			pub, priv := pubSet.Keys[0], privSet.Keys[0]
+			for _, jwk := range []jose.JSONWebKey{pub, priv} {
+				if jwk.Algorithm != string(alg) {
+					t.Errorf("alg = %q, want %q", jwk.Algorithm, alg)
+				}
+				if jwk.KeyID != res.KeyID {
+					t.Errorf("kid = %q, want %q", jwk.KeyID, res.KeyID)
+				}
+				if jwk.Use != useSig {
+					t.Errorf("use = %q, want %q", jwk.Use, useSig)
+				}
+			}
+
+			// The public half must verify what the private half signed.
+			signer, err := jose.NewSigner(jose.SigningKey{Algorithm: alg, Key: priv.Key}, nil)
+			if err != nil {
+				t.Fatalf("new signer: %v", err)
+			}
+			obj, err := signer.Sign([]byte("payload"))
+			if err != nil {
+				t.Fatalf("sign: %v", err)
+			}
+			signed, err := obj.CompactSerialize()
+			if err != nil {
+				t.Fatalf("serialize: %v", err)
+			}
+			parsed, err := jose.ParseSignedCompact(signed, []jose.SignatureAlgorithm{alg})
+			if err != nil {
+				t.Fatalf("parse signed: %v", err)
+			}
+			payload, err := parsed.Verify(pub.Key)
+			if err != nil {
+				t.Fatalf("verify: %v", err)
+			}
+			if string(payload) != "payload" {
+				t.Errorf("payload = %q, want %q", payload, "payload")
+			}
+		})
+	}
+}
+
+// TestSig_UnsupportedAlgorithm proves an unknown --alg is rejected before any
+// file is written.
+func TestSig_UnsupportedAlgorithm(t *testing.T) {
+	dir := t.TempDir()
+	_, err := Sig(dir, jose.RS256)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	for _, name := range []string{PubKeyFile, PrivKeyFile} {
+		if _, statErr := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(statErr) {
+			t.Errorf("%s was written despite the error: %v", name, statErr)
+		}
+	}
 }
