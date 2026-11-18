@@ -72,3 +72,28 @@ func writeAttr(b *strings.Builder, a slog.Attr) {
 		b.WriteString(v)
 	}
 }
+
+// slogWriter adapts an io.Writer-based logger (such as crane's package-global
+// loggers) onto a slog.Logger, emitting one record per written line.
+type slogWriter struct {
+	logger *slog.Logger
+	level  slog.Level
+}
+
+func (w slogWriter) Write(p []byte) (int, error) {
+	for line := range strings.SplitSeq(strings.TrimRight(string(p), "\n"), "\n") {
+		if line != "" {
+			w.logger.Log(context.Background(), w.level, line, "source", "crane")
+		}
+	}
+	return len(p), nil
+}
+
+// levelWriter returns w when lines logged at lineLevel pass the minimum
+// level, and io.Discard otherwise.
+func levelWriter(w io.Writer, min, lineLevel slog.Level) io.Writer {
+	if lineLevel < min {
+		return io.Discard
+	}
+	return w
+}

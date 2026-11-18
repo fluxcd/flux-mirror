@@ -64,6 +64,12 @@ func versionCmdRun(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		output = string(data) + "\n"
+	case "jsonl":
+		data, err := json.Marshal(info)
+		if err != nil {
+			return err
+		}
+		output = string(data) + "\n"
 	}
 
 	rootCmd.Print(output)

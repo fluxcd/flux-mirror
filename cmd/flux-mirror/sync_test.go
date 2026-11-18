@@ -12,6 +12,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -756,6 +758,125 @@ func TestSync_DryRun(t *testing.T) {
 	g.Expect(err).ToNot(HaveOccurred())
 	g.Expect(out).To(ContainSubstring("status: would-copy"))
 	g.Expect(out).To(ContainSubstring("tag: 1.0.0"))
+}
+
+func TestSync_JSONL(t *testing.T) {
+	g := NewWithT(t)
+	ensureRegistry(t)
+
+	src := dockerReg + "/jsonl-src-" + testregistry.RandSuffix()
+	dst := dockerReg + "/jsonl-dst-" + testregistry.RandSuffix()
+	testregistry.PushImage(t, src+":1.0.0")
+
+	cfgPath := writeConfig(t, src, dst)
+	t.Setenv("FLUX_MIRROR_CONFIG", "")
+
+	out, err := executeCommand([]string{"sync", cfgPath, "--insecure", "-o", "jsonl"})
+	g.Expect(err).ToNot(HaveOccurred())
+
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	g.Expect(lines).To(HaveLen(2)) // one entry + summary line
+
+	var rec struct {
+		Msg   string            `json:"msg"`
+		Entry apiv1.EntryResult `json:"entry"`
+	}
+	g.Expect(json.Unmarshal([]byte(lines[0]), &rec)).To(Succeed())
+	g.Expect(rec.Msg).To(Equal("entry"))
+	entry := rec.Entry
+	g.Expect(entry.Source).To(Equal(src))
+	g.Expect(entry.Destination).To(Equal(dst))
+	g.Expect(entry.Tags).To(HaveLen(1))
+	g.Expect(entry.Tags[0].Tag).To(Equal("1.0.0"))
+	g.Expect(entry.Tags[0].Status).To(Equal(apiv1.StatusCopied))
+
+	var summary map[string]any
+	g.Expect(json.Unmarshal([]byte(lines[1]), &summary)).To(Succeed())
+	g.Expect(summary).To(HaveKeyWithValue("msg", "summary"))
+	g.Expect(summary).To(HaveKey("summary"))
+}
+
+func TestSync_JSONLLogLevel(t *testing.T) {
+	g := NewWithT(t)
+	ensureRegistry(t)
+
+	src := dockerReg + "/jsonl-lvl-src-" + testregistry.RandSuffix()
+	dst := dockerReg + "/jsonl-lvl-dst-" + testregistry.RandSuffix()
+	testregistry.PushImage(t, src+":1.0.0")
+	cfgPath := writeConfig(t, src, dst)
+	t.Setenv("FLUX_MIRROR_CONFIG", "")
+
+	// A clean run only produces INFO records on stdout. Error level also
+	// silences crane's expected "HEAD failed, falling back on GET" warning
+	// on stderr, which executeCommand captures into the same buffer.
+	out, err := executeCommand([]string{"sync", cfgPath, "--insecure", "-o", "jsonl", "--log-level", "error"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(strings.TrimSpace(out)).To(BeEmpty())
+}
+
+func TestSync_BadLogLevel(t *testing.T) {
+	g := NewWithT(t)
+	cfgPath := writeConfig(t, "ghcr.io/a/b", "ghcr.io/c/d")
+	_, err := executeCommand([]string{"sync", cfgPath, "--log-level", "trace"})
+	g.Expect(err).To(MatchError(ContainSubstring("unsupported log level")))
+}
+
+func TestSync_LogLevel(t *testing.T) {
+	g := NewWithT(t)
+	ensureRegistry(t)
+
+	src := dockerReg + "/loglevel-src-" + testregistry.RandSuffix()
+	dst := dockerReg + "/loglevel-dst-" + testregistry.RandSuffix()
+	testregistry.PushImage(t, src+":1.0.0")
+	cfgPath := writeConfig(t, src, dst)
+	t.Setenv("FLUX_MIRROR_CONFIG", "")
+
+	// Info level logs our own records but not crane's debug progress lines.
+	out, err := executeCommand([]string{"sync", cfgPath, "--insecure", "--log-level", "info"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(out).To(ContainSubstring("sync started"))
+	g.Expect(out).ToNot(ContainSubstring("Copying from"))
+
+	// Error level logs nothing for a clean run.
+	out, err = executeCommand([]string{"sync", cfgPath, "--insecure", "--log-level", "error"})
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(out).ToNot(ContainSubstring("sync started"))
+}
+
+func TestLevelWriter(t *testing.T) {
+	g := NewWithT(t)
+	var buf strings.Builder
+	g.Expect(levelWriter(&buf, slog.LevelInfo, slog.LevelDebug)).To(Equal(io.Discard))
+	g.Expect(levelWriter(&buf, slog.LevelDebug, slog.LevelDebug)).To(BeIdenticalTo(&buf))
+	g.Expect(levelWriter(&buf, slog.LevelWarn, slog.LevelWarn)).To(BeIdenticalTo(&buf))
+}
+
+func TestSlogWriter(t *testing.T) {
+	g := NewWithT(t)
+	var buf strings.Builder
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// Multi-line writes with trailing newlines yield one record per
+	// non-empty line, tagged with the crane source.
+	w := slogWriter{logger, slog.LevelWarn}
+	n, err := w.Write([]byte("one\ntwo\n\n"))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(n).To(Equal(len("one\ntwo\n\n")))
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	g.Expect(lines).To(HaveLen(2))
+	for i, want := range []string{"one", "two"} {
+		var rec map[string]any
+		g.Expect(json.Unmarshal([]byte(lines[i]), &rec)).To(Succeed())
+		g.Expect(rec).To(HaveKeyWithValue("msg", want))
+		g.Expect(rec).To(HaveKeyWithValue("level", "WARN"))
+		g.Expect(rec).To(HaveKeyWithValue("source", "crane"))
+	}
+
+	// Records below the minimum level are dropped.
+	buf.Reset()
+	_, err = slogWriter{logger, slog.LevelDebug}.Write([]byte("hidden\n"))
+	g.Expect(err).ToNot(HaveOccurred())
+	g.Expect(buf.String()).To(BeEmpty())
 }
 
 func TestSync_BadOutputFormat(t *testing.T) {

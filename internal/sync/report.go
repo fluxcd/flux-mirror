@@ -4,9 +4,11 @@
 package sync
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"sigs.k8s.io/yaml"
@@ -70,4 +72,34 @@ func RenderReport(w io.Writer, format string, rep apiv1.Report) error {
 	default:
 		return fmt.Errorf("unsupported output format %q", format)
 	}
+}
+
+// LogEntry emits one "entry" record for the entry result (attribute "entry").
+// Entries that failed, or contain a failed tag, are logged at error level.
+// With a JSON handler this yields one line of the jsonl output format.
+func LogEntry(logger *slog.Logger, e apiv1.EntryResult) {
+	level := slog.LevelInfo
+	if entryHasFailure(e) {
+		level = slog.LevelError
+	}
+	logger.LogAttrs(context.Background(), level, "entry", slog.Any("entry", e))
+}
+
+// LogReportSummary emits the final "summary" record carrying the run
+// metadata and aggregate counts. It is error level when any job failed and
+// warn level on drift.
+func LogReportSummary(logger *slog.Logger, rep apiv1.Report) {
+	level := slog.LevelInfo
+	switch {
+	case rep.Report.Summary.Failed > 0:
+		level = slog.LevelError
+	case rep.Report.Summary.Drifted > 0:
+		level = slog.LevelWarn
+	}
+	logger.LogAttrs(context.Background(), level, "summary",
+		slog.String("reporter", rep.Report.Reporter),
+		slog.String("reportTimestamp", rep.Report.Timestamp),
+		slog.Int64("durationMs", rep.Report.DurationMs),
+		slog.Any("summary", rep.Report.Summary),
+	)
 }

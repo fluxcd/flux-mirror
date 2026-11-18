@@ -83,6 +83,7 @@ type syncFlags struct {
 	driftExitCode     int
 	dryRun            bool
 	verbose           bool
+	logLevel          flags.LogLevel
 	insecure          bool
 	noProgress        bool
 	tokenCacheOptions pkgcache.TokenFlags
@@ -115,7 +116,9 @@ func init() {
 	syncCmd.Flags().BoolVar(&syncArgs.dryRun, "dry-run", false,
 		"Run the plan and comparison pipeline without performing any writes.")
 	syncCmd.Flags().BoolVar(&syncArgs.verbose, "verbose", false,
-		"Log all operations and the involved digests as they are performed.")
+		"Log all operations and the involved digests as they are performed. Alias for --log-level debug.")
+	syncCmd.Flags().Var(&syncArgs.logLevel, "log-level",
+		syncArgs.logLevel.Description()+". Enables the log stream on stderr; --verbose implies debug.")
 	syncCmd.Flags().BoolVar(&syncArgs.insecure, "insecure", false,
 		"Allow plaintext HTTP and skip TLS verification (test/dev only).")
 	syncCmd.Flags().BoolVar(&syncArgs.noProgress, "no-progress", false,
@@ -155,20 +158,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Verbose enables our own structured logs (sync started, entry started,
-	// mirroring tag, tag done, entry summary, sync complete) AND wires
-	// crane's package-global Progress / Warn loggers to stderr in the same
-	// log.LstdFlags shape — that's where the per-blob digest lines, fallback
-	// tag updates, and registry rejections come from. Without verbose, both
-	// streams are silent and only the spinner + per-job lines show.
-	var logger *slog.Logger
-	if syncArgs.verbose {
-		logger = slog.New(newPlainHandler(cmd.ErrOrStderr(), slog.LevelDebug))
-		craneLogs.Progress = log.New(cmd.ErrOrStderr(), "", log.LstdFlags)
-		craneLogs.Warn = log.New(cmd.ErrOrStderr(), "", log.LstdFlags)
-	} else {
-		logger = slog.New(slog.DiscardHandler)
-	}
+	verbose, logger := newSyncLogger(cmd)
 
 	var clientOpts []oci.ClientOption
 	if syncArgs.insecure {
@@ -242,7 +232,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 		mirrors = append(mirrors, artifacts.New(client, e, artifacts.Options{
 			Overwrite:       syncArgs.overwrite,
 			DryRun:          syncArgs.dryRun,
-			Verbose:         syncArgs.verbose,
+			Verbose:         verbose,
 			CopyJobs:        syncArgs.concurrency,
 			PlanConcurrency: syncArgs.concurrency,
 			Logger:          logger,
@@ -252,7 +242,7 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 		m, err := charts.New(client, e, charts.Options{
 			Overwrite: syncArgs.overwrite,
 			DryRun:    syncArgs.dryRun,
-			Verbose:   syncArgs.verbose,
+			Verbose:   verbose,
 			Logger:    logger,
 		})
 		if err != nil {
@@ -268,7 +258,9 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 	// spinner entirely — the structured log stream already conveys progress,
 	// and a spinner would compete with it.
 	isText := syncArgs.output.String() == "text" || syncArgs.output.String() == ""
-	prettyPrint := isText && !syncArgs.verbose
+	prettyPrint := isText && !verbose
+
+	jsonlLogger := setupJSONL(cmd, runner)
 
 	var prog *progress
 	if prettyPrint {
@@ -297,6 +289,9 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 				return err
 			}
 		}
+	case "jsonl":
+		report := sync.NewReport("flux-mirror/"+VERSION, time.Now(), res)
+		sync.LogReportSummary(jsonlLogger, report)
 	default:
 		report := sync.NewReport("flux-mirror/"+VERSION, time.Now(), res)
 		if err := sync.RenderReport(cmd.OutOrStdout(), syncArgs.output.String(), report); err != nil {
@@ -304,6 +299,60 @@ func syncCmdRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return classifyExit(res, syncArgs.driftExitCode)
+}
+
+// newSyncLogger builds the log stream on stderr and wires crane's
+// package-global loggers to it. It reports whether logging is enabled.
+func newSyncLogger(cmd *cobra.Command) (bool, *slog.Logger) {
+	// Verbose enables our own structured logs (sync started, entry started,
+	// mirroring tag, tag done, entry summary, sync complete) AND wires
+	// crane's package-global Progress / Warn loggers to stderr in the same
+	// log.LstdFlags shape — that's where the per-blob digest lines, fallback
+	// tag updates, and registry rejections come from. Without verbose, both
+	// streams are silent and only the spinner + per-job lines show.
+	//
+	// --log-level enables the same stream at the given level; --verbose is
+	// an alias for --log-level debug (an explicit --log-level wins).
+	verbose := syncArgs.verbose || syncArgs.logLevel != ""
+	level := slog.LevelDebug
+	if syncArgs.logLevel != "" {
+		level = syncArgs.logLevel.Level()
+	}
+	var logger *slog.Logger
+	if verbose {
+		if syncArgs.output.String() == "jsonl" {
+			// Keep stderr machine-readable too: our logs as JSON, and
+			// crane's lines wrapped into JSON records.
+			logger = slog.New(slog.NewJSONHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{Level: level}))
+			craneLogs.Progress = log.New(slogWriter{logger, slog.LevelDebug}, "", 0)
+			craneLogs.Warn = log.New(slogWriter{logger, slog.LevelWarn}, "", 0)
+		} else {
+			logger = slog.New(newPlainHandler(cmd.ErrOrStderr(), level))
+			craneLogs.Progress = log.New(levelWriter(cmd.ErrOrStderr(), level, slog.LevelDebug), "", log.LstdFlags)
+			craneLogs.Warn = log.New(levelWriter(cmd.ErrOrStderr(), level, slog.LevelWarn), "", log.LstdFlags)
+		}
+	} else {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	return verbose, logger
+}
+
+// setupJSONL returns the stdout logger for -o jsonl (nil otherwise) and
+// registers the per-entry record callback on the runner. jsonl streams one
+// record per entry as it finishes; the summary record is written after the run.
+func setupJSONL(cmd *cobra.Command, runner *sync.Runner) *slog.Logger {
+	if syncArgs.output.String() != "jsonl" {
+		return nil
+	}
+	// Records are INFO unless escalated, so the default minimum is INFO;
+	// an explicit --log-level filters them like any other log record.
+	level := slog.LevelInfo
+	if syncArgs.logLevel != "" {
+		level = syncArgs.logLevel.Level()
+	}
+	l := slog.New(slog.NewJSONHandler(cmd.OutOrStdout(), &slog.HandlerOptions{Level: level}))
+	runner.OnEntryResult = func(e apiv1.EntryResult) { sync.LogEntry(l, e) }
+	return l
 }
 
 func validateSyncArgs(timeout time.Duration) error {

@@ -5,7 +5,8 @@ weight: 60
 # Flux Mirror Report
 
 The `flux mirror sync` command can emit a structured report of the mirror
-results by setting `--output` to `json` or `yaml`. The envelope shape is
+results by setting `--output` to `json` or `yaml`. (`--output jsonl` emits
+log records instead; see [sync](sync.md#output).) The envelope shape is
 versioned and documented by the JSON Schema in
 [`report-v1beta2.json`](report-v1beta2.json); the deprecated
 [`report-v1beta1.json`](report-v1beta1.json) remains published for existing

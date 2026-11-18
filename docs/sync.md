@@ -83,20 +83,21 @@ repository credentials automatically.
 
 ## Flags
 
-| Flag                            | Default | Description                                                                                                                          |
-|---------------------------------|---------|------------------------------------------------------------------------------------------------------------------------------------|
-| `-o, --output text\|yaml\|json` | `text`  | Output format. `text` is human-friendly; `yaml` and `json` print the structured [sync report](report.md) to stdout.       |
-| `--concurrency N`               | `4`     | Maximum number of copy and tag-planning operations to run in parallel. Must be greater than `0`.                                   |
-| `--retries N`                   | `3`     | Maximum number of retry attempts per job, within the `--timeout` budget. Must be greater than or equal to `0`.                     |
-| `--timeout DURATION`            | `5m`    | Per-job total budget covering all retry attempts. Must be greater than `0`.                                                         |
-| `--overwrite`                   | `false` | Force `overwrite: true` on every entry, regardless of per-entry config. See [Overwrite and drift behavior](config.md#overwrite-and-drift-behavior). |
-| `--drift-exit-code N`           | `2`     | Exit code to use when drift is detected without failures (0–255). Set to `0` for immutable destinations that should not fail CI on drift. Drift on entries with `ignoreDriftForExitCode: true` does not trigger it. |
-| `--dry-run`                     | `false` | Run the plan and comparison pipeline without performing any writes. Reported as `would-copy` / `would-overwrite`.                   |
-| `--verbose`                     | `false` | Log every operation and the involved digests on stderr. Suppresses the spinner.                                                     |
-| `--no-progress`                 | `false` | Disable the live progress spinner. Per-job lines and the summary still print.                                                       |
-| `--insecure`                    | `false` | Allow plaintext HTTP and skip TLS verification. Test/dev only.                                                                      |
-| `--token-cache-max-size N`      | `100`   | Maximum number of provider credentials cached. Set to `0` to disable the cache.                                                     |
-| `--token-cache-max-duration DURATION` | `1h` | Maximum duration a cached provider token is reused before it is refreshed.                                                         |
+| Flag                                   | Default | Description                                                                                                                  |
+|----------------------------------------|---------|------------------------------------------------------------------------------------------------------------------------------|
+| `-o, --output text\|yaml\|json\|jsonl` | `text`  | Output format. `text` is human-friendly; `yaml` and `json` print the structured [sync report](report.md) to stdout; `jsonl` prints one JSON log record per entry followed by a final summary record. |
+| `--concurrency N`                      | `4`     | Maximum number of copy and tag-planning operations to run in parallel. Must be greater than `0`.                             |
+| `--retries N`                          | `3`     | Maximum number of retry attempts per job, within the `--timeout` budget. Must be greater than or equal to `0`.               |
+| `--timeout DURATION`                   | `5m`    | Per-job total budget covering all retry attempts. Must be greater than `0`.                                                  |
+| `--overwrite`                          | `false` | Force `overwrite: true` on every entry, regardless of per-entry config. See [Overwrite and drift behavior](config.md#overwrite-and-drift-behavior). |
+| `--drift-exit-code N`                  | `2`     | Exit code to use when drift is detected without failures (0–255). Set to `0` for immutable destinations that should not fail CI on drift. Drift on entries with `ignoreDriftForExitCode: true` does not trigger it. |
+| `--dry-run`                            | `false` | Run the plan and comparison pipeline without performing any writes. Reported as `would-copy` / `would-overwrite`.            |
+| `--verbose`                            | `false` | Alias for `--log-level debug`. Logs every operation and the involved digests on stderr. Suppresses the spinner.              |
+| `--log-level debug\|info\|warn\|error` | unset   | Enable the log stream on stderr at the given minimum level. Suppresses the spinner. An explicit level wins over `--verbose`. |
+| `--no-progress`                        | `false` | Disable the live progress spinner. Per-job lines and the summary still print.                                                |
+| `--insecure`                           | `false` | Allow plaintext HTTP and skip TLS verification. Test/dev only.                                                               |
+| `--token-cache-max-size N`             | `100`   | Maximum number of provider credentials cached. Set to `0` to disable the cache.                                              |
+| `--token-cache-max-duration DURATION`  | `1h`    | Maximum duration a cached provider token is reused before it is refreshed.                                                   |
 
 Global flags: `--timeout` sets the default operation timeout, and `--no-envsubst` disables config environment substitution.
 
@@ -113,12 +114,12 @@ Global flags: `--timeout` sets the default operation timeout, and `--no-envsubst
 Summary: 1 copied, 1 skipped, 1 failed in 4.2s.
 ```
 
-### Verbose mode
+### Verbose mode and log level
 
-`--verbose` replaces the pretty output with a full diagnostic log stream on
-stderr — every layer push, blob check, manifest digest, referrer fallback-tag
-update, and registry-side warning. Reach for it when diagnosing TLS, auth,
-missing-blob, or push-rejection issues.
+`--verbose` (an alias for `--log-level debug`) replaces the pretty output with
+a full diagnostic log stream on stderr — every layer push, blob check, manifest
+digest, referrer fallback-tag update, and registry-side warning. Reach for it
+when diagnosing TLS, auth, missing-blob, or push-rejection issues.
 
 ```
 2026/05/13 09:00:00 sync started entries=3 concurrency=4 retries=3 timeout=5m0s
@@ -129,6 +130,38 @@ missing-blob, or push-rejection issues.
 …
 2026/05/13 09:00:04 sync complete entries=3 copied=1 overwritten=0 skipped=1 drifted=0 failed=1 duration=4.213s
 ```
+
+With `-o jsonl`, the verbose stream on stderr is also JSON. Our own logs
+combined with the crane library logs are emitted as slog JSON records (crane
+lines carry `"source":"crane"`), so stdout and stderr both stay parseable.
+
+```
+{"time":"2026-05-13T09:00:00.000000000Z","level":"INFO","msg":"sync started","entries":3,"concurrency":4,"retries":3,"timeout":300000000000}
+{"time":"2026-05-13T09:00:00.000000000Z","level":"INFO","msg":"mirroring tag","src":"ghcr.io/foo/bar:1.0","dst":"localhost:5050/bar:1.0"}
+{"time":"2026-05-13T09:00:00.000000000Z","level":"DEBUG","msg":"Copying from ghcr.io/foo/bar:1.0 to localhost:5050/bar:1.0","source":"crane"}
+{"time":"2026-05-13T09:00:00.000000000Z","level":"DEBUG","msg":"pushed blob: sha256:fdf53ef8e04176eedbd42713efb2d002f1741c310627b38f444c6f6d92a598f7","source":"crane"}
+{"time":"2026-05-13T09:00:01.000000000Z","level":"INFO","msg":"tag done","src":"ghcr.io/foo/bar:1.0","status":"copied","elapsed":812000000}
+…
+{"time":"2026-05-13T09:00:04.213000000Z","level":"ERROR","msg":"summary","reporter":"flux-mirror/v1.0.0","reportTimestamp":"2026-05-13T09:00:04Z","durationMs":4213,"summary":{"entries":3,"copied":1,"overwritten":0,"skipped":1,"drifted":0,"wouldCopy":0,"wouldOverwrite":0,"failed":1,"exitCode":1}}
+```
+
+The final line is the `summary` record, which goes to stdout. In `jsonl` mode
+there is no `sync complete` line; the run totals are this record. Its level is
+`ERROR` because a job failed in the example; it is `INFO` on a clean run.
+Durations such as `timeout` and `elapsed` are in nanoseconds.
+Registry-library progress lines (blob copies, digests) are logged at `DEBUG`
+and its warnings at `WARN`; the verbose stream starts at `DEBUG`, while the
+stdout records start at `INFO` unless `--log-level` is set.
+
+`--log-level` sets the minimum level of the log stream on stderr, for example
+`--log-level warn` shows only warnings and errors. With `-o jsonl` it applies
+the same minimum level to the entry and summary records on stdout, so
+`--log-level error` drops `INFO` and `WARN` records (including the drift-only
+summary). For example, `-o jsonl --log-level warn` prints only failed entries
+and the summary for a failed or drifted run; a clean run prints nothing.
+In text mode, failed tags and entries are logged at `ERROR` (`tag failed`,
+`entry failed`), and the final `sync complete` line is `ERROR` on failures and
+`WARN` on drift, so `--log-level error` still reports failures.
 
 ### Structured output
 
@@ -141,6 +174,16 @@ source `digest`; skipped rows carry a `reason`; verified rows carry a
 `verification` block; and, with `includeReferrers: true`, a `referrers[]` array.
 The envelope is documented by the [sync report schema](report.md).
 
+`-o jsonl` writes JSON log records (Go `slog` JSON format) to stdout, one per
+line, intended for log scrapers. Each entry result is a record with
+`"msg":"entry"` and the [entry result](report.md) under `entry`; a final record
+with `"msg":"summary"` carries `reporter`, `reportTimestamp`, `durationMs`, and
+`summary`. Only stdout is guaranteed to be JSONL: config deprecation
+warnings and fatal errors (for example a run that aborts before the summary)
+are printed to stderr as plain text. Entries that failed or contain a failed tag
+are logged at `ERROR`; the summary is `ERROR` when any job failed and `WARN` on
+drift. The records are not covered by the report JSON Schema.
+
 ```bash
 # Status of every tag, per entry
 flux mirror sync config.yaml -o json | jq '.report.results[].tags[] | {tag, status}'
@@ -150,6 +193,10 @@ flux mirror sync config.yaml -o json | jq '.report.results[].tags[] | select(.st
 
 # Aggregate counts
 flux mirror sync config.yaml -o json | jq '.report.summary'
+
+# JSONL: one JSON object per line, then the summary
+flux mirror sync config.yaml -o jsonl | jq -c 'select(.msg == "entry") | .entry | {source, destination, status}'
+flux mirror sync config.yaml -o jsonl | jq -c 'select(.msg == "summary") | .summary'
 ```
 
 ## Status

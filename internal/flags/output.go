@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var supportedOutputs = []string{"text", "yaml", "json"}
+var supportedOutputs = []string{"text", "yaml", "json", "jsonl"}
 
 type Output string
 

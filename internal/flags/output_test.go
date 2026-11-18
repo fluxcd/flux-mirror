@@ -19,6 +19,7 @@ func TestOutput_Set(t *testing.T) {
 		{"text", "text", "text", false},
 		{"yaml", "yaml", "yaml", false},
 		{"json", "json", "json", false},
+		{"jsonl", "jsonl", "jsonl", false},
 		{"unsupported", "xml", "", true},
 		{"empty", "", "", true},
 	}
