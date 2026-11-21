@@ -298,7 +298,7 @@ func (m *mirror) runTag(ctx context.Context, j tagJob) (sync.JobResult, error) {
 
 	var refResults []apiv1.ReferrerResult
 	if len(j.refs) > 0 {
-		refResults, err = m.mirrorReferrers(ctx, j.refs, j.overwrite)
+		refResults, err = m.mirrorReferrers(ctx, cmp.SrcDigest, j.refs, j.overwrite)
 		if err != nil {
 			// A referrer failure fails the parent tag; carry the digest and the
 			// partial referrer list (including the failed one) on the row.
@@ -371,8 +371,11 @@ func (m *mirror) applyOutcome(ctx context.Context, src, dst string, cmp oci.Comp
 // src-side fetch per referrer. On the first referrer error it appends a failed
 // row for that referrer and returns the rows collected so far alongside the
 // error (a referrer failure fails the parent tag).
-func (m *mirror) mirrorReferrers(ctx context.Context, refs []oci.Referrer, overwrite bool) ([]apiv1.ReferrerResult, error) {
+func (m *mirror) mirrorReferrers(ctx context.Context, subjectDigest string, refs []oci.Referrer, overwrite bool) ([]apiv1.ReferrerResult, error) {
 	results := make([]apiv1.ReferrerResult, 0, len(refs))
+	// The destination's referrers list for the subject, fetched on the first
+	// referrer whose manifest is already stored there.
+	var listed map[string]struct{}
 	for _, r := range refs {
 		dstRef := m.entry.Destination + "@" + r.Digest
 		cmp, err := m.client.CompareWithKnownSrc(ctx, r.Digest, dstRef)
@@ -381,6 +384,36 @@ func (m *mirror) mirrorReferrers(ctx context.Context, refs []oci.Referrer, overw
 				Digest: r.Digest, ArtifactType: r.ArtifactType, Status: apiv1.StatusFailed,
 			})
 			return results, fmt.Errorf("compare referrer %s: %w", r.Digest, err)
+		}
+		if cmp.State == oci.StateEqual {
+			if listed == nil {
+				listed, err = m.client.DestinationReferrers(ctx, m.entry.Destination, subjectDigest)
+				if err != nil {
+					results = append(results, apiv1.ReferrerResult{
+						Digest: r.Digest, ArtifactType: r.ArtifactType, Status: apiv1.StatusFailed,
+					})
+					return results, err
+				}
+			}
+			if _, ok := listed[r.Digest]; !ok {
+				// The manifest is stored but the destination does not list it
+				// for the subject (e.g. after a failed write of the referrers
+				// fallback tag). Commit it again so the list gains the entry.
+				st := apiv1.StatusWouldCopy
+				if !m.opts.DryRun {
+					if err := m.client.RelinkReferrer(ctx, m.entry.Source, m.entry.Destination, r.Digest); err != nil {
+						results = append(results, apiv1.ReferrerResult{
+							Digest: r.Digest, ArtifactType: r.ArtifactType, Status: apiv1.StatusFailed,
+						})
+						return results, err
+					}
+					st = apiv1.StatusCopied
+				}
+				results = append(results, apiv1.ReferrerResult{
+					Digest: r.Digest, ArtifactType: r.ArtifactType, Status: st,
+				})
+				continue
+			}
 		}
 		st, reason, err := m.applyReferrerOutcome(ctx, r, cmp, overwrite)
 		if err != nil {
