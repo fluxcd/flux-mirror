@@ -820,8 +820,11 @@ expected to diverge, without muting drift for the rest of the config.
 With `includeReferrers: true`, the same rule applies to referrers. Referrers
 missing at the destination are always mirrored (there is nothing to overwrite) —
 the common case when an upstream signature is published after the artifact was
-first mirrored. Referrers that exist with a different digest are skipped
-(default) or replaced (`overwrite: true`).
+first mirrored. A referrer whose manifest is stored at the destination but
+that the destination does not list for the artifact also counts as missing —
+for example after an interrupted copy to a registry without the OCI referrers
+API — and is linked again. Referrers that exist with a different digest are
+skipped (default) or replaced (`overwrite: true`).
 
 ### Defaults
 
